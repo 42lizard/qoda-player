@@ -1,0 +1,7 @@
+quickshell 0.3.2.r7.g2b4501a-1
+qt6-base 6.12.0-3
+mpv 1:0.41.0-6
+systemd 262.1-1
+hyprland 0.56.2-4
+rust 1:1.99.1-1
+sqlite 3.54.0-1

@@ -1,0 +1,12 @@
+{
+  "activatable": "as 1 \"org.freedesktop.DBus\"",
+  "activationDenied": {
+    "org.freedesktop.portal.Desktop": true,
+    "org.freedesktop.impl.portal.desktop.hyprland": true,
+    "org.freedesktop.portal.Documents": true,
+    "org.freedesktop.secrets": true
+  },
+  "hostPortalProcessesUnchanged": true,
+  "hostServicesRunning": true,
+  "status": "pass"
+}

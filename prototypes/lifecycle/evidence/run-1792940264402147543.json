@@ -1,0 +1,62 @@
+{
+  "checks": [
+    {
+      "name": "status and absent hide do not start services",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "desktop entry/actions and matching icon generated",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "keyring missing on private bus is explicit",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "eight concurrent launches reuse one ready backend and UI",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "stock Quickshell AppId pragma reaches compositor product identity",
+      "pass": true,
+      "detail": {
+        "shellId": "qoda-player-lifecycle-study",
+        "appId": "qoda-player",
+        "ownClients": [
+          {
+            "class": "qoda-player",
+            "initialClass": "qoda-player",
+            "pid": 871379
+          }
+        ]
+      }
+    },
+    {
+      "name": "installed entrypoint runs from prefix without source launcher",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "fresh launch is paused with version match",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "runtime owner-only and socket 0600",
+      "pass": true,
+      "detail": null
+    }
+  ],
+  "error": {
+    "type": "Interrupted",
+    "message": "Stopped to investigate portal side effects; acceptance incomplete"
+  },
+  "retainedOwnedFiles": [],
+  "privateRun": "<study>",
+  "binarySha256": "3cd5130c0d85a483db0997449cbfa728df3912c8d0c9b0df0f386eb6ed027739",
+  "status": "interrupted"
+}
