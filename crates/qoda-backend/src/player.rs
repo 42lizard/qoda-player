@@ -675,9 +675,9 @@ mod tests {
 #[cfg(test)]
 mod gapless_tests {
     use super::*;
-    fn pattern_file(seed: i16) -> (std::path::PathBuf, Vec<u8>) {
+    fn pattern_file(seed: i16, seconds: usize) -> (std::path::PathBuf, Vec<u8>) {
         let path = std::env::temp_dir().join(format!("qoda-gapless-{}.wav", uuid::Uuid::new_v4()));
-        let pcm = (0..48_000)
+        let pcm = (0..48_000 * seconds)
             .flat_map(|i| (((i % 997) as i16 - 498) * 20 + seed).to_le_bytes())
             .collect::<Vec<_>>();
         let mut wav = Vec::new();
@@ -698,7 +698,7 @@ mod gapless_tests {
         (path, pcm)
     }
     fn wait(player: &Player, predicate: impl Fn(&Status) -> bool) -> Status {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
         loop {
             let status = player.status();
             if predicate(&status) {
@@ -715,8 +715,12 @@ mod gapless_tests {
     async fn compatible_native_chain_emits_exact_concatenated_pcm_without_inserted_or_lost_samples()
     {
         for flac in [false, true] {
-            let (a, mut expected) = pattern_file(123);
-            let (b, second) = pattern_file(567);
+            // ao=pcm advertises a 65536-sample buffer. A one-second file can
+            // reach EOF while still paused, before the test resumes it. Keep
+            // each fixture longer than that buffer so staging cannot consume A.
+            let (a, mut expected) = pattern_file(123, 4);
+            let (b, second) = pattern_file(567, 4);
+            let join_offset = expected.len();
             let originals = [a.clone(), b.clone()];
             let (a, b) = if flac {
                 let first = a.with_extension("flac");
@@ -757,6 +761,12 @@ mod gapless_tests {
             wait(&player, |s| {
                 s.generation == 1 && !s.idle && s.paused && s.entry_ready
             });
+            // Give the untimed sink time to fill while paused, as on a busy CI
+            // runner. It must still own A when staging and resuming begin.
+            std::thread::sleep(Duration::from_secs(2));
+            let paused = player.status();
+            assert_eq!(paused.generation, 1);
+            assert!(paused.paused && !paused.idle && !paused.natural_eof);
             assert_eq!(
                 player
                     .stage(1, 2, b.to_str().unwrap().into())
@@ -776,7 +786,7 @@ mod gapless_tests {
                     actual.len(),
                     actual.get(..16),
                     expected.get(..16),
-                    expected.get(96000..96016),
+                    expected.get(join_offset..join_offset + 16),
                     std::fs::read_to_string(&diagnostic).unwrap_or_default()
                 );
             }
@@ -802,8 +812,8 @@ mod gapless_tests {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn removing_an_untouched_native_future_keeps_the_current_file_and_pause_intent() {
-        let (a, _) = pattern_file(123);
-        let (b, _) = pattern_file(567);
+        let (a, _) = pattern_file(123, 1);
+        let (b, _) = pattern_file(567, 1);
         let player = Player::with_output("null").unwrap();
         player.send(Command::Load(10, a.to_str().unwrap().into(), 0.0));
         wait(&player, |s| {
@@ -835,8 +845,8 @@ mod gapless_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancellation_after_decoder_handoff_returns_a_reset_barrier_instead_of_false_future_ack()
      {
-        let (a, _) = pattern_file(123);
-        let (b, _) = pattern_file(567);
+        let (a, _) = pattern_file(123, 1);
+        let (b, _) = pattern_file(567, 1);
         let player = Player::with_output("null").unwrap();
         player.send(Command::Load(20, a.to_str().unwrap().into(), 0.0));
         wait(&player, |s| {
