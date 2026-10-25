@@ -1,6 +1,7 @@
 mod player;
 mod proxy;
 mod queue;
+mod storage;
 mod vault;
 use player::{Command, Player};
 use qoda_core::{OccurrenceId, SourceId, TrackRef};
@@ -22,6 +23,8 @@ use zeroize::Zeroizing;
 enum Event {
     Request(Value),
     Advance(u64),
+    Stored(storage::Reply),
+    Checkpoint,
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
@@ -180,6 +183,34 @@ fn check_queue(queue: &queue::Queue, request: &Value) -> Result<(), queue::Error
         .map_err(|_| queue::Error::Conflict)?;
     queue.check(session, revision)
 }
+fn storage_result(state: &mut Value, result: Result<Option<storage::Error>, storage::Error>) {
+    match result {
+        Ok(warning) => {
+            state["storage"]["state"] = json!("saved");
+            state["storage"]["cleanup_pending"] = json!(false);
+            state["storage"]["message"] = json!(
+                warning
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "Session saved locally.".into())
+            );
+        }
+        Err(error) => {
+            state["storage"]["state"] = json!(if matches!(
+                error,
+                storage::Error::Corrupt | storage::Error::Newer | storage::Error::Unsafe
+            ) {
+                "blocked"
+            } else {
+                "unsaved"
+            });
+            state["storage"]["message"] = json!(if state["storage"]["cleanup_pending"] == true {
+                format!("Saved session cleanup is incomplete. {error}")
+            } else {
+                error.to_string()
+            });
+        }
+    }
+}
 fn keyring_request(
     vault: &mpsc::Sender<vault::Request>,
     state: &mut Value,
@@ -227,6 +258,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("Qoda backend is already running".into());
     }
+    if std::env::args().any(|s| s == "--restore-backup") {
+        storage::restore_latest(&storage::path().map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        println!(
+            "Session backup restored. The original database was preserved. Next launch stays paused."
+        );
+        return Ok(());
+    }
     let path = dir.join("backend.sock");
     if path.exists() {
         std::fs::remove_file(&path)?
@@ -237,12 +276,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = proxy::Proxy::start().await?;
     let instance = uuid::Uuid::new_v4().to_string();
     let mut revision = 0_u64;
-    let mut queue = queue::Queue::default();
+
     let mut handled_end = None;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
-    state["queue"] = json!(queue.snapshot());
-    let (updates, rx) = watch::channel(state.clone());
     let (tx, mut events) = mpsc::channel(64);
+    let (mut durable, restored) = storage::Controller::start(storage::path(), tx.clone()).await;
+    let (mut queue, start_error) = match restored {
+        Ok(queue) => (queue, None),
+        Err(error) => (queue::Queue::default(), Some(error)),
+    };
+    let mut purge_epoch = 0_u64;
+    let mut last_requested = (queue.durable_stamp(), purge_epoch);
+    state["storage"] = json!({"state":"saved","message":"Session storage ready.","serial":"0","cleanup_pending":false});
+    if let Some(error) = start_error {
+        storage_result(&mut state, Err(error));
+    }
+    state["queue"] = json!(queue.snapshot());
+    if queue.snapshot().membership_count > 0 {
+        state["status"] = json!("Session restored paused. Restore Plex sign-in to resume.");
+    }
+    state["selection"] = queue
+        .selected()
+        .and_then(|id| queue.visible_track(id).ok())
+        .map(|track| json!(track))
+        .unwrap_or(Value::Null);
+    let (updates, rx) = watch::channel(state.clone());
     let vault = vault::start(tx.clone());
     let mut vault_generation = 0_u64;
     let mut current_credential: Option<Credential> = None;
@@ -273,6 +331,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut last_audio = player.status();
     let mut last_stream_failed = false;
+    let mut checkpoint_tick = tokio::time::interval(std::time::Duration::from_secs(5));
+    checkpoint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     if let Some(c) = credential {
         auth_generation = auth_generation
             .checked_add(1)
@@ -289,6 +349,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let stream_failed=proxy.failed().await;
                 if (audio != last_audio || stream_failed!=last_stream_failed) && audio.generation == play_generation {
                     last_stream_failed=stream_failed;
+                    if let Some(position)=audio.position_seconds{let _=queue.set_position(position);}
                     last_audio = audio.clone();
                     state["audio"] = json!(audio);
                     if let Some(error) = audio.error.or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
@@ -306,10 +367,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Event::Advance(play_generation)
                 } else {continue}
             },
+            _ = checkpoint_tick.tick()=>Event::Checkpoint,
             _ = tokio::signal::ctrl_c() => break,
         };
         let mut to_prepare = None;
+        let mut force_save = false;
         match event {
+            Event::Stored(reply) => {
+                if reply.serial == durable.serial() {
+                    storage_result(&mut state, reply.result);
+                    state["storage"]["serial"] = json!(reply.serial.to_string());
+                    revision = revision.checked_add(1).ok_or("Revision exhausted")?;
+                    state["revision"] = json!(revision.to_string());
+                    updates.send_replace(state.clone());
+                }
+                continue;
+            }
+            Event::Checkpoint => {}
             Event::Advance(g) if g == play_generation => match queue.advance() {
                 Ok(Some(track)) => to_prepare = Some(track),
                 Ok(None) => {
@@ -330,6 +404,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 state["error"] = Value::Null;
                 match v["op"].as_str().unwrap_or("") {
                     "quit" => break,
+                    "retry_save" => force_save = true,
                     "restore_signin" => {
                         if provider.is_some() || !state["sign_in"]["keyring_action"].is_null() {
                             state["error"] = json!(
@@ -553,6 +628,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "pause" => {
+                        let audio = player.status();
+                        if audio.generation == play_generation
+                            && let Some(position) = audio.position_seconds
+                        {
+                            let _ = queue.set_position(position);
+                        }
+                        force_save = true;
                         desired_playing = false;
                         player.send(Command::Pause(true));
                         state["intent"] = json!("paused");
@@ -578,10 +660,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "seek" => {
-                        if let Some(pos) =
-                            v["seconds"].as_f64().filter(|p| p.is_finite() && *p >= 0.0)
-                        {
-                            player.send(Command::Seek(pos));
+                        if let Some(position) = v["seconds"].as_f64() {
+                            match queue.seek_to(position) {
+                                Ok(()) => {
+                                    force_save = true;
+                                    if provider.is_some() {
+                                        to_prepare = queue
+                                            .selected()
+                                            .and_then(|id| queue.visible_track(id).ok());
+                                    }
+                                }
+                                Err(error) => state["error"] = json!(error.to_string()),
+                            }
                         }
                     }
                     "disconnect" | "forget_signin" => {
@@ -603,6 +693,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .ok_or("Generation exhausted")?;
                         provider = None;
                         queue = queue::Queue::default();
+                        purge_epoch = purge_epoch
+                            .checked_add(1)
+                            .ok_or("Cleanup generation exhausted")?;
+                        state["storage"]["cleanup_pending"] = json!(true);
                         current_credential = None;
                         state["sign_in"]["connected"] = json!(false);
                         state["sign_in"]["can_save"] = json!(false);
@@ -750,14 +844,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             Event::Media(g, r) if g == play_generation => match r {
                 Ok(media) => {
-                    if let Err(error) = queue.update_selected(media.track.clone()) {
+                    if let Err(error) = queue.update_selected(media.track.clone(), &media.version) {
                         state["error"] = json!(error.to_string());
                         desired_playing = false;
                         state["intent"] = json!("paused");
                     } else {
                         state["selection"] = json!(media.track);
                         let url = proxy.grant(media.stream).await;
-                        player.send(Command::Load(g, url));
+                        player.send(Command::Load(g, url, queue.position()));
                         player.send(Command::Pause(!desired_playing));
                         state["status"] = json!("Track selected; playback requested");
                     }
@@ -790,13 +884,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state["status"] = json!("Preparing selected queue entry");
         }
         state["queue"] = json!(queue.snapshot());
+        let stamp = (queue.durable_stamp(), purge_epoch);
+        if force_save || stamp != last_requested {
+            last_requested = stamp;
+            match durable.submit(queue.clone(), purge_epoch) {
+                Ok(()) => {
+                    state["storage"]["state"] = json!("saving");
+                    state["storage"]["message"] = json!("Saving session…");
+                }
+                Err(error) => storage_result(&mut state, Err(error)),
+            }
+        }
         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
         state["revision"] = json!(revision.to_string());
         updates.send_replace(state.clone());
     }
-    proxy.revoke().await;
+    let audio = player.status();
+    if audio.generation == play_generation
+        && let Some(position) = audio.position_seconds
+    {
+        let _ = queue.set_position(position);
+    }
+    player.send(Command::Pause(true));
     player.send(Command::Stop);
+    proxy.revoke().await;
     server.abort();
+    match durable.flush(queue.clone(), purge_epoch).await {
+        Err(error) => eprintln!("Qoda: final checkpoint failed: {error}"),
+        Ok(Some(warning)) => eprintln!("Qoda: {warning}"),
+        Ok(None) => {}
+    }
     drop(player);
     std::fs::remove_file(path)?;
     drop(lock);

@@ -2,7 +2,7 @@
 //! are retained as membership, not claimed as listening history.
 use qoda_core::{Counter, MembershipError, OccurrenceId, QueueMembership, SessionId};
 use qoda_provider::Track;
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use std::collections::{HashMap, HashSet};
 const LIMIT: usize = 500;
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,11 +12,12 @@ pub enum Error {
     Pinned,
     Limit,
     Counter,
+    Version,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self{
-  Self::Conflict=>"The queue changed. Review its current order and retry.",Self::Missing=>"That occurrence is no longer in the current or upcoming queue.",Self::Pinned=>"The selected entry stays pinned; move upcoming entries instead.",Self::Limit=>"This development session supports at most 500 occurrences. Start a new session or remove entries.",Self::Counter=>"The queue revision cannot advance. Start a new session.",})
+  Self::Conflict=>"The queue changed. Review its current order and retry.",Self::Missing=>"That occurrence is no longer in the current or upcoming queue.",Self::Pinned=>"The selected entry stays pinned; move upcoming entries instead.",Self::Limit=>"This development session supports at most 500 occurrences. Start a new session or remove entries.",Self::Counter=>"The queue revision cannot advance. Start a new session.",Self::Version=>"The selected media version changed. Play it as new content to choose the new version.",})
     }
 }
 impl From<MembershipError> for Error {
@@ -42,7 +43,9 @@ pub struct Snapshot {
     pub ended: bool,
     pub entries: Vec<Row>,
     pub membership_count: usize,
+    pub position_seconds: f64,
 }
+#[derive(Clone, Serialize)]
 pub struct Queue {
     membership: QueueMembership,
     revision: Counter,
@@ -51,6 +54,8 @@ pub struct Queue {
     traversed: HashSet<OccurrenceId>,
     priority: Vec<OccurrenceId>,
     ended: bool,
+    position_seconds: f64,
+    versions: HashMap<OccurrenceId, String>,
 }
 impl Default for Queue {
     fn default() -> Self {
@@ -62,10 +67,42 @@ impl Default for Queue {
             traversed: HashSet::new(),
             priority: Vec::new(),
             ended: false,
+            position_seconds: 0.0,
+            versions: HashMap::new(),
         }
     }
 }
 impl Queue {
+    pub fn durable_stamp(&self) -> (SessionId, Counter, u64) {
+        (
+            self.membership.session_id(),
+            self.revision,
+            self.position_seconds.to_bits(),
+        )
+    }
+    pub fn position(&self) -> f64 {
+        self.position_seconds
+    }
+    pub fn seek_to(&mut self, seconds: f64) -> Result<(), Error> {
+        let revision = if self.ended {
+            Some(self.revision.checked_next().map_err(|_| Error::Counter)?)
+        } else {
+            None
+        };
+        self.set_position(seconds)?;
+        if let Some(revision) = revision {
+            self.ended = false;
+            self.revision = revision;
+        }
+        Ok(())
+    }
+    pub fn set_position(&mut self, seconds: f64) -> Result<(), Error> {
+        if self.selected.is_none() || !seconds.is_finite() || !(0.0..=1.0e9).contains(&seconds) {
+            return Err(Error::Missing);
+        }
+        self.position_seconds = seconds;
+        Ok(())
+    }
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             session: self.membership.session_id(),
@@ -84,6 +121,7 @@ impl Queue {
                 })
                 .collect(),
             membership_count: self.membership.entries().len(),
+            position_seconds: self.position_seconds,
         }
     }
     pub fn check(&self, session: SessionId, revision: Counter) -> Result<(), Error> {
@@ -159,6 +197,7 @@ impl Queue {
         }
         self.revision = revision;
         self.selected = Some(id);
+        self.position_seconds = 0.0;
         self.ended = false;
         let pending = self.pending();
         self.priority.retain(|id| pending.contains(id));
@@ -221,10 +260,14 @@ impl Queue {
             .commit_remove(self.membership.revision(), id)?;
         self.revision = revision;
         self.metadata.remove(&id);
+        self.versions.remove(&id);
         self.priority.retain(|p| *p != id);
         if selected {
             self.selected = successor;
+            self.position_seconds = 0.0;
             self.ended = successor.is_none();
+            self.priority
+                .retain(|p| Some(*p) != self.selected && !self.traversed.contains(p));
         }
         Ok(selected)
     }
@@ -238,20 +281,108 @@ impl Queue {
             .commit_remove_many(self.membership.revision(), &ids)?;
         for id in ids {
             self.metadata.remove(&id);
+            self.versions.remove(&id);
         }
         self.priority.clear();
         self.revision = revision;
         Ok(())
     }
-    pub fn update_selected(&mut self, track: Track) -> Result<(), Error> {
+    pub fn update_selected(&mut self, track: Track, version: &str) -> Result<(), Error> {
         let id = self.selected.ok_or(Error::Missing)?;
         if self.metadata[&id].reference != track.reference {
             return Err(Error::Missing);
         }
+        if self.versions.get(&id).is_some_and(|saved| saved != version) {
+            return Err(Error::Version);
+        }
+        if version.is_empty() || version.len() > 512 {
+            return Err(Error::Version);
+        }
         let revision = self.revision.checked_next().map_err(|_| Error::Counter)?;
+        self.versions.insert(id, version.to_owned());
         self.metadata.insert(id, track);
         self.revision = revision;
         Ok(())
+    }
+}
+impl<'de> Deserialize<'de> for Queue {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            membership: QueueMembership,
+            revision: Counter,
+            metadata: HashMap<OccurrenceId, Track>,
+            selected: Option<OccurrenceId>,
+            traversed: HashSet<OccurrenceId>,
+            priority: Vec<OccurrenceId>,
+            ended: bool,
+            position_seconds: f64,
+            versions: HashMap<OccurrenceId, String>,
+        }
+        let w = Wire::deserialize(d)?;
+        let entries = w.membership.entries();
+        let ids: HashSet<_> = entries.iter().map(|e| e.id).collect();
+        let invalid = || D::Error::custom("invalid saved session invariants");
+        if entries.len() > LIMIT
+            || w.metadata.len() != ids.len()
+            || w.metadata.keys().any(|id| !ids.contains(id))
+            || w.traversed.iter().any(|id| !ids.contains(id))
+            || w.selected
+                .is_some_and(|id| !ids.contains(&id) || w.traversed.contains(&id))
+        {
+            return Err(invalid());
+        }
+        for entry in entries {
+            let track = w.metadata.get(&entry.id).ok_or_else(invalid)?;
+            if track.reference != entry.track
+                || [&track.title, &track.artist, &track.album]
+                    .iter()
+                    .any(|s| s.len() > 1024)
+                || String::from(track.reference.key.clone()).len() > 512
+            {
+                return Err(invalid());
+            }
+        }
+        let prefix: HashSet<_> = entries
+            .iter()
+            .take_while(|entry| Some(entry.id) != w.selected)
+            .map(|e| e.id)
+            .collect();
+        if w.selected.is_some() && prefix != w.traversed {
+            return Err(invalid());
+        }
+        if w.selected.is_none() && !w.traversed.is_empty() && w.traversed != ids {
+            return Err(invalid());
+        }
+        let priority: HashSet<_> = w.priority.iter().copied().collect();
+        if priority.len() != w.priority.len()
+            || priority
+                .iter()
+                .any(|id| !ids.contains(id) || Some(*id) == w.selected || w.traversed.contains(id))
+        {
+            return Err(invalid());
+        }
+        if !w.position_seconds.is_finite()
+            || !(0.0..=1.0e9).contains(&w.position_seconds)
+            || w.selected.is_none() && w.position_seconds != 0.0
+            || w.versions
+                .iter()
+                .any(|(id, v)| !ids.contains(id) || v.is_empty() || v.len() > 512)
+        {
+            return Err(invalid());
+        }
+        Ok(Self {
+            membership: w.membership,
+            revision: w.revision,
+            metadata: w.metadata,
+            selected: w.selected,
+            traversed: w.traversed,
+            priority: w.priority,
+            ended: w.ended,
+            position_seconds: w.position_seconds,
+            versions: w.versions,
+        })
     }
 }
 #[cfg(test)]
@@ -275,6 +406,48 @@ mod tests {
             .iter()
             .map(|r| r.track.title.clone())
             .collect()
+    }
+    #[test]
+    fn checkpoint_restores_identity_order_priority_versions_and_position() {
+        let mut q = Queue::default();
+        let x = q.replace(track("X")).unwrap();
+        q.enqueue(track("Y"), false).unwrap();
+        let a = q.enqueue(track("A"), true).unwrap();
+        q.update_selected(q.visible_track(x).unwrap(), "media:part")
+            .unwrap();
+        q.set_position(42.5).unwrap();
+        let mut restored: Queue =
+            serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
+        assert_eq!(restored.selected(), Some(x));
+        assert_eq!(restored.position(), 42.5);
+        assert_eq!(
+            restored.update_selected(restored.visible_track(x).unwrap(), "different:part"),
+            Err(Error::Version)
+        );
+        restored.enqueue(track("B"), true).unwrap();
+        assert_eq!(titles(&restored), ["X", "A", "B", "Y"]);
+        restored.remove(x).unwrap();
+        assert_eq!(restored.selected(), Some(a));
+        assert_eq!(restored.position(), 0.0);
+        let again: Queue =
+            serde_json::from_str(&serde_json::to_string(&restored).unwrap()).unwrap();
+        assert_eq!(titles(&again), ["A", "B", "Y"]);
+    }
+    #[test]
+    fn invalid_saved_references_and_positions_are_rejected() {
+        let mut q = Queue::default();
+        q.replace(track("X")).unwrap();
+        let valid = serde_json::to_value(q).unwrap();
+        for (field, value) in [
+            ("selected", serde_json::json!(OccurrenceId::new())),
+            ("position_seconds", serde_json::json!(-1)),
+            ("position_seconds", serde_json::json!(1.0e20)),
+            ("metadata", serde_json::json!({})),
+        ] {
+            let mut bad = valid.clone();
+            bad[field] = value;
+            assert!(serde_json::from_value::<Queue>(bad).is_err());
+        }
     }
     #[test]
     fn duplicates_fifo_and_no_implicit_selection() {

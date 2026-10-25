@@ -27,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--use-validation-login', action='store_true', help='Explicitly reuse the existing local validation keyring sign-in, session only')
     parser.add_argument('--quit', action='store_true')
+    parser.add_argument('--restore-backup', action='store_true', help='With Qoda stopped, restore the latest session backup while preserving the original database')
     parser.add_argument('--backend-only', action='store_true')
     args = parser.parse_args()
     if args.quit:
@@ -34,6 +35,9 @@ def main():
         except OSError: pass
         return
     subprocess.run(['cargo', 'build', '--locked', '-p', 'qoda-backend'], cwd=ROOT, check=True)
+    if args.restore_backup:
+        subprocess.run([str(ROOT / 'target/debug/qoda-backend'), '--restore-backup'], check=True)
+        return
     backend = None
     ui = None
     try:

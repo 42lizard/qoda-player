@@ -4,7 +4,7 @@ This is development software, tracked in [issue 21](https://github.com/42lizard/
 
 ## Requirements
 
-Rust/Cargo 1.99 or newer, libmpv development/runtime libraries (tested with mpv 0.41), Quickshell (tested with 0.3.2), Qt Quick Controls, a running PipeWire desktop session, and Brave for the sign-in button. TLS certificate verification stays enabled. The launcher requires Python 3. Saved sign-in requires `/usr/bin/secret-tool` (libsecret) and a desktop Secret Service. The optional local validation-login import also requires its specific existing keyring item.
+Rust/Cargo 1.99 or newer, libmpv development/runtime libraries (tested with mpv 0.41), Quickshell (tested with 0.3.2), Qt Quick Controls, SQLite development libraries and pkg-config, a running PipeWire desktop session, and Brave for the sign-in button. TLS certificate verification stays enabled. The launcher requires Python 3. Saved sign-in requires `/usr/bin/secret-tool` (libsecret) and a desktop Secret Service. The optional local validation-login import also requires its specific existing keyring item.
 
 ## Start and stop
 
@@ -26,7 +26,31 @@ A matched native EOF plus an idle engine advances to the next entry. Engine erro
 
 Edits carry the session ID and queue revision. A stale edit is rejected with the latest state; the UI never silently applies an outdated row index. Navigation also advances this revision. Queue rows identify engine selection, not a physical presentation clock. No upcoming track is preloaded in this increment, so transitions can have gaps. Very long display fields are bounded to 1024 UTF-8 bytes; identities are validated rather than truncated.
 
-The current bound is 500 occurrences in retained session membership. Traversed entries remain in the replay set, but are not presented as listening history. The queue survives hide, reload and UI process restart while the backend stays alive. It is not yet stored across backend restarts. Disconnect/sign-out discards it. Durable storage, Previous/history navigation, shuffle/repeat and per-entry unavailable-track skipping are later increments; playback/preparation failures currently stop visibly instead of consuming the queue.
+The current bound is 500 occurrences in retained session membership. Traversed entries remain in the replay set, but are not presented as listening history. The queue survives hide, reload, UI process restart and backend restart through SQLite checkpoints. Restoration stays paused and does not unlock the keyring. Disconnect/sign-out discards the saved session and its backups. Previous/history navigation, shuffle/repeat and per-entry unavailable-track skipping are later increments; playback/preparation failures currently stop visibly instead of consuming the queue.
+
+### Durable sessions and recovery
+
+Session data lives in `$XDG_STATE_HOME/qoda/session.sqlite3` (default `~/.local/state/qoda/session.sqlite3`). The directory is owner-only (0700); database and backup files use 0600. The backend is the only application writer. SQLite uses transactions with FULL synchronous mode on a separate worker thread, so checkpoint I/O does not block playback controls. Initial schema creation is transactional; newer schema or payload versions are refused without modification.
+
+The checkpoint includes full retained occurrence membership, order, duplicate identities, selected occurrence, pending Play next priority, prepared Plex media/part version IDs, nominal local position and completion state. Runtime playing intent, tokens, key material, media URLs and HTTP grants are excluded. The already implemented session state is restored; future Previous/history, shuffle/repeat and unavailable-entry states are not invented. Display labels in queue records are retained session metadata, not a complete offline catalog.
+
+Queue changes are scheduled promptly; position checkpoints target five seconds, with writes also requested on pause, seek, track change and orderly exit. The storage message distinguishes Saving, Saved, Unsaved and blocked recovery. In-memory acceptance is not a durability acknowledgment. Failed writes retain the previous valid checkpoint and leave controls usable. **Retry save** retries the current coherent in-memory session. There is no maximum-loss promise while writes are failing or delayed.
+
+Startup restores metadata and position while remaining paused. It does not restore signed stream access or contact Plex. Restore sign-in explicitly, then choose Resume to prepare fresh access for the retained source-scoped track and version. The saved local position is applied using a per-file libmpv start option before unpause. Seeking rebuilds the selected stream at the target and preserves paused intent; this can introduce a gap. A changed prepared media/part version stops with a visible error instead of silently substituting it. These provider IDs are not a content hash or a hardware timing guarantee.
+
+A consistent SQLite backup is made at most daily when a nonempty session is saved, keeping the latest three under `backups/`. A backup failure is reported separately from a successful current checkpoint. Original databases preserved during explicit recovery remain available until account cleanup; they are not silently pruned as daily backups. There is no byte-copy backup of an open database.
+
+Damaged durable data is preserved and blocks automatic replacement with an empty session. To recover, stop Qoda and run:
+
+```sh
+./tools/dev.py --restore-backup
+```
+
+This validates the latest backup, restores a consistent copy and preserves the original as `session-preserved-<uuid>.sqlite3`. Recovery requires exclusive backend ownership and also refuses newer unsupported data. An interrupted recovery is detected and is not treated as a new empty installation. Start Qoda normally afterward; playback remains paused. If the latest backup is unusable or storage permissions prevent recovery, the command leaves the original available for manual recovery; it does not silently try older data.
+
+Disconnect/sign-out schedules removal of the saved session, daily backups and preserved/partial recovery copies. A failed cleanup is explicitly incomplete and can be retried; it is not reported as successful merely because keyring removal succeeded. This removes app-owned files and logical SQLite content, not a forensic-erasure guarantee. Credentials remain governed by the separate Save/Restore/Forget controls.
+
+The implementation uses the [rusqlite backup API](https://docs.rs/rusqlite/0.41.0/rusqlite/backup/index.html) and [SQLite transaction durability controls](https://www.sqlite.org/pragma.html#pragma_synchronous). No metadata cache or artwork database is introduced in this increment.
 
 ### Saved sign-in
 
@@ -66,13 +90,13 @@ The backend can run separately with `./tools/dev.py --backend-only`; start a rep
 - Catalog and media preparation run outside the coordinator. Superseded browse/preparation requests are cancelled; generation checks reject stale completions. Disconnect cancels active work and revokes media access.
 - libmpv receives a revocable, unguessable loopback media grant. The backend authenticates HTTPS requests to Plex, refuses HTTP redirects and streams validated single byte ranges. Tokens remain in the HTTP layer. The proxy supports GET/HEAD and only exposes necessary media headers.
 - Playback defaults to Desktop/PipeWire with ReplayGain off. The displayed position is a nominal libmpv audio clock, not a hardware presentation or listening-history guarantee. The displayed selected track is not used as a claim that its samples have reached the output.
-- Only nonsecret source identity mappings are persisted in `$XDG_CONFIG_HOME/qoda/source-identities.json` (default `~/.config/qoda/`), using an atomic replacement with mode 0600. Playback selection remains session-only. Sign-in is saved only when requested, in Secret Service rather than application files. Startup stays paused and does not load music.
+- Only nonsecret source identity mappings are persisted in `$XDG_CONFIG_HOME/qoda/source-identities.json` (default `~/.config/qoda/`), using an atomic replacement with mode 0600. The queue and nominal position are checkpointed separately in the session database. Sign-in is saved only when requested, in Secret Service rather than application files. Startup stays paused and does not load music.
 
 ## Still to implement or qualify
 
-Durable session restoration, Previous/history navigation, shuffle/repeat, unavailable-entry skipping, playlists and Plex writes, artwork/cache storage, compact surface, MPRIS, desktop installation, gapless transitions, ReplayGain and native fidelity output remain outstanding. The browser PIN flow is implemented; the current live checks reuse the previously authorized compatible credential and do not qualify a fresh browser round trip or JWT support. Accessible HTTPS sources are shown; this does not assert that offline/inaccessible servers are absent from the account.
+Previous/history navigation, shuffle/repeat, unavailable-entry skipping, playlists and Plex writes, artwork/cache storage, compact surface, MPRIS, desktop installation, gapless transitions, ReplayGain and native fidelity output remain outstanding. The browser PIN flow is implemented; the current live checks reuse the previously authorized compatible credential and do not qualify a fresh browser round trip or JWT support. Accessible HTTPS sources are shown; this does not assert that offline/inaccessible servers are absent from the account.
 
-The current window is a track browser with an in-memory queue; the complete album-browser and durable-session design remains unfinished. Issue 21 remains open while real media playback and remaining acceptance are qualified. Real library music is never started by automated checks.
+The current window is a track browser with a checkpointed queue; the complete album-browser and durable-session design remains unfinished. Issue 21 remains open while real media playback and remaining acceptance are qualified. Real library music is never started by automated checks.
 
 ## Validation
 
@@ -82,10 +106,12 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-The 31 tests cover existing core state/fences, bounded private IPC (including a partial frame interrupted by an update), provider endpoint/metadata/secret handling, media range/host/grant revocation and cancellation, and native loading, pause and failure with generated silence through `ao=null`. Native tests never open a real audio output. Keyring tests use a private helper fixture to cover save/restore, idempotent forget, pending-save ordering, missing or malformed credentials, locked leftovers, sanitized diagnostics and timeout cleanup; they do not write test credentials into the real keyring.
+The 42 tests cover existing core state/fences, bounded private IPC (including a partial frame interrupted by an update), provider endpoint/metadata/secret handling, media range/host/grant revocation and cancellation, and native loading, pause and failure with generated silence through `ao=null`. Native tests never open a real audio output. Keyring tests use a private helper fixture to cover save/restore, idempotent forget, pending-save ordering, missing or malformed credentials, locked leftovers, sanitized diagnostics and timeout cleanup; they do not write test credentials into the real keyring.
 
 On the development machine, a separate read-only check connected to five real Plex music libraries, loaded a 100-track page and obtained search results. The actual native QML window connected, displayed the catalog, hid/reappeared, and reconnected after a UI process restart with the same backend instance and catalog. Startup remained paused, no QML runtime errors were recorded, and scoped processes were stopped. This is not a real-music playback, gapless or fidelity acceptance result.
 
 A subsequent real keyring check saved the authorized Plex sign-in in Qoda's own namespace, restarted without credential input, explicitly restored access to five libraries, and confirmed paused startup, disconnect/reconnect, QML controls, credential-free snapshots and configuration files. The saved sign-in was retained for normal use; scoped backend/UI processes were stopped. Fresh browser authorization and real music playback retain their separate acceptance checks.
 
 Queue validation added atomic identity-based membership edits, FIFO priority, duplicate occurrence isolation, selected-entry pinning, end/replay membership, native EOF versus Stop/replacement generations and per-grant upstream failure isolation. A live read-only run edited real catalog entries without starting media, rejected a stale revision, and retained the same queue session/order/occurrence IDs through a native QML restart. Clear/Stop & clear passed with no QML runtime errors; scoped processes were stopped. Real-library playback and transition fidelity remain unqualified.
+
+Durable-storage validation covers coherent session/position/version round trips, corruption and unsupported-version refusal, failed-transaction rollback, bounded consistent backups, interrupted recovery and cleanup ordering. A native libmpv null-output test confirms that a saved start position is applied before unpause. An isolated real-provider process check preserved a queue through SIGKILL/restart, reconnected QML, restored an offline selected-position fixture, surfaced a forced checkpoint failure while Pause remained usable, recovered a backup without replacing the preserved damaged input, and purged session/backup copies on disconnect. No library music was started; real music playback and hardware qualification remain separate acceptance work.

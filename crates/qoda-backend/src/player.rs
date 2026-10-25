@@ -41,9 +41,8 @@ unsafe extern "C" {
     fn mpv_terminate_destroy(h: *mut c_void);
 }
 pub enum Command {
-    Load(u64, String),
+    Load(u64, String, f64),
     Pause(bool),
-    Seek(f64),
     Stop,
     Quit,
 }
@@ -143,13 +142,19 @@ impl Player {
                     Ok(command) => {
                         let loading = matches!(command, Command::Load(..));
                         let args: Vec<String> = match command {
-                            Command::Load(g, url) => {
+                            Command::Load(g, url, position) => {
                                 current.generation = g;
                                 current.error = None;
                                 current.natural_eof = false;
                                 current.position_seconds = None;
                                 entry = None;
-                                vec!["loadfile".into(), url, "replace".into()]
+                                vec![
+                                    "loadfile".into(),
+                                    url,
+                                    "replace".into(),
+                                    "-1".into(),
+                                    format!("start={position}"),
+                                ]
                             }
                             Command::Pause(p) => vec![
                                 "set".into(),
@@ -161,9 +166,6 @@ impl Player {
                                 }
                                 .into(),
                             ],
-                            Command::Seek(pos) => {
-                                vec!["seek".into(), pos.to_string(), "absolute+exact".into()]
-                            }
                             Command::Stop => {
                                 entry = None;
                                 current.natural_eof = false;
@@ -283,22 +285,40 @@ mod tests {
         }
     }
     #[test]
+    fn restored_position_is_applied_before_unpause() {
+        let player = Player::with_output("null").unwrap();
+        let file = silent_file(4);
+        player.send(Command::Load(20, file.to_str().unwrap().into(), 2.0));
+        wait_for(&player, |s| s.generation == 20 && !s.idle && s.paused);
+        assert!(player.status().paused);
+        player.send(Command::Pause(false));
+        let status = wait_for(&player, |s| {
+            s.generation == 20 && s.position_seconds.is_some()
+        });
+        assert!(
+            status.position_seconds.unwrap() >= 1.8,
+            "Resume loaded from zero: {status:?}"
+        );
+        drop(player);
+        std::fs::remove_file(file).unwrap();
+    }
+    #[test]
     fn natural_end_is_generation_scoped_and_stop_is_not_completion() {
         let player = Player::with_output("null").unwrap();
         let file = silent_file(1);
-        player.send(Command::Load(10, file.to_str().unwrap().into()));
+        player.send(Command::Load(10, file.to_str().unwrap().into(), 0.0));
         player.send(Command::Pause(false));
         wait_for(&player, |s| s.generation == 10 && s.idle && s.natural_eof);
         assert!(player.status().error.is_none());
         player.send(Command::Pause(true));
-        player.send(Command::Load(11, file.to_str().unwrap().into()));
+        player.send(Command::Load(11, file.to_str().unwrap().into(), 0.0));
         wait_for(&player, |s| s.generation == 11 && !s.idle && s.paused);
         assert!(!player.status().natural_eof);
         player.send(Command::Stop);
         wait_for(&player, |s| s.idle);
         assert!(!player.status().natural_eof);
         // A second native visit can complete; a stale previous EOF is not reused.
-        player.send(Command::Load(12, file.to_str().unwrap().into()));
+        player.send(Command::Load(12, file.to_str().unwrap().into(), 0.0));
         player.send(Command::Pause(false));
         wait_for(&player, |s| s.generation == 12 && s.idle && s.natural_eof);
         drop(player);
@@ -326,7 +346,7 @@ mod tests {
         wav.extend((samples * 2).to_le_bytes());
         wav.resize(44 + samples as usize * 2, 0);
         std::fs::write(&path, wav).unwrap();
-        player.send(Command::Load(7, path.to_str().unwrap().into()));
+        player.send(Command::Load(7, path.to_str().unwrap().into(), 0.0));
         player.send(Command::Pause(false));
         let until = std::time::Instant::now() + Duration::from_secs(5);
         loop {
@@ -340,7 +360,7 @@ mod tests {
         player.send(Command::Pause(true));
         std::thread::sleep(Duration::from_millis(150));
         assert!(player.status().paused);
-        player.send(Command::Load(8, "/qoda-does-not-exist.wav".into()));
+        player.send(Command::Load(8, "/qoda-does-not-exist.wav".into(), 0.0));
         let until = std::time::Instant::now() + Duration::from_secs(3);
         loop {
             let s = player.status();

@@ -108,15 +108,19 @@ ShellRoot {
                 Label { text: "Qoda"; color: "#f2e9db"; font.pixelSize: 28; font.bold: true }
                 Label { text: "Plex music"; color: "#acb8c8"; Layout.fillWidth: true }
                 Button { text: "Connect Plex (this session)"; enabled: socket.connected; onClicked: root.send("auth_start") }
-                Button { text: "Disconnect"; onClicked: root.send("disconnect") }
+                Button { text: "Disconnect"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes the saved queue and session backups. Keeps saved sign-in."; onClicked: root.send("disconnect") }
                 Button { text: "Hide"; onClicked: window.visible = false }
                 Button { text: "Quit"; onClicked: { root.send("quit"); Qt.quit(); } }
             }
             RowLayout {
                 Button { text: "Restore saved sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
                 Button { text: "Save sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
-                Button { text: "Sign out & forget"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
+                Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, saved queue and session backups. Keeps general preferences."; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
                 Label { text: root.snapshot.sign_in ? root.snapshot.sign_in.message || "" : ""; color: "#acb8c8"; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+            }
+            RowLayout {
+                Label { text: root.snapshot.storage ? root.snapshot.storage.message : "Opening session storage…"; color: root.snapshot.storage && (root.snapshot.storage.state === "unsaved" || root.snapshot.storage.state === "blocked") ? "#f2a89b" : "#acb8c8"; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+                Button { text: "Retry save"; enabled: socket.connected; onClicked: root.send("retry_save") }
             }
             Label { text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: "#acb8c8"; textFormat: Text.PlainText }
             Label { visible: !!root.snapshot.error; text: root.snapshot.error || ""; color: "#f2a89b"; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
@@ -218,7 +222,7 @@ ShellRoot {
                         Button { text: "Clear upcoming"; onClicked: root.editQueue("clear_upcoming") }
                         Button { text: "Stop & clear"; onClicked: root.editQueue("stop_clear") }
                     }
-                    Label { text: "Queue lives in the backend during this run."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: "Queue checkpoints restore paused after backend restart."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: "#394355" }
@@ -228,10 +232,10 @@ ShellRoot {
                 Button { text: "Next track"; enabled: root.queueModel.length > 0; onClicked: root.editQueue("next") }
                 Button { text: "Replay"; enabled: !!root.snapshot.queue && root.snapshot.queue.membership_count > 0; onClicked: root.editQueue("replay") }
                 Label { text: "Seek (seconds)"; color: "#acb8c8" }
-                TextField { id: seek; placeholderText: "0"; Layout.preferredWidth: 90; validator: DoubleValidator { bottom: 0 } onAccepted: root.send("seek", {seconds: Number(text)}) }
-                Button { text: "Seek"; enabled: !!root.snapshot.selection && seek.acceptableInput; onClicked: root.send("seek", {seconds: Number(seek.text)}) }
+                TextField { id: seek; placeholderText: "0"; Layout.preferredWidth: 90; validator: DoubleValidator { bottom: 0; top: 1000000000; locale: "C" } onAccepted: root.send("seek", {seconds: Number(text)}) }
+                Button { text: "Seek"; enabled: !!root.snapshot.queue && !!root.snapshot.queue.selected && seek.acceptableInput; onClicked: root.send("seek", {seconds: Number(seek.text)}) }
                 Item { Layout.fillWidth: true }
-                Label { text: (root.snapshot.audio && root.snapshot.audio.position_seconds !== null ? root.snapshot.audio.position_seconds.toFixed(1) + " s · " : "") + "Desktop / PipeWire · ReplayGain off"; color: "#acb8c8" }
+                Label { text: (root.snapshot.audio && root.snapshot.audio.position_seconds !== null ? root.snapshot.audio.position_seconds.toFixed(1) + " s · " : root.snapshot.queue && root.snapshot.queue.selected ? root.snapshot.queue.position_seconds.toFixed(1) + " s local · " : "") + "Desktop / PipeWire · ReplayGain off"; color: "#acb8c8" }
             }
         }
     }
@@ -239,7 +243,7 @@ ShellRoot {
         target: "control"
         function show(): void { window.visible = true;  }
         function hide(): void { window.visible = false; }
-        function status(): string { return JSON.stringify({connected: socket.connected, instance: root.instance, queue: root.snapshot.queue ? {session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
+        function status(): string { return JSON.stringify({connected: socket.connected, instance: root.instance, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }
