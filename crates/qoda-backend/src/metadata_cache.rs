@@ -2,7 +2,8 @@
 use crate::cache_files::{Directory, private_file};
 use qoda_core::{Counter, SourceId};
 use qoda_provider::{
-    AlbumPage, ArtistPage, ArtistRef, CatalogPage, MusicProvider, ProviderError, Track,
+    AlbumPage, AlbumRef, AlbumSnapshot, ArtistPage, ArtistRef, CatalogPage, MusicProvider,
+    ProviderError, Track,
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,9 @@ fn now() -> i64 {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Query {
+    AlbumDetail {
+        reference: AlbumRef,
+    },
     Tracks {
         source: SourceId,
         offset: u64,
@@ -64,6 +68,7 @@ pub enum Query {
 impl Query {
     pub fn source(&self) -> SourceId {
         match self {
+            Self::AlbumDetail { reference } => reference.source,
             Self::Tracks { source, .. }
             | Self::Albums { source, .. }
             | Self::Artists { source, .. } => *source,
@@ -71,6 +76,7 @@ impl Query {
     }
     fn offset(&self) -> u64 {
         match self {
+            Self::AlbumDetail { .. } => 0,
             Self::Tracks { offset, .. }
             | Self::Albums { offset, .. }
             | Self::Artists { offset, .. } => *offset,
@@ -78,6 +84,7 @@ impl Query {
     }
     fn text(&self) -> &str {
         match self {
+            Self::AlbumDetail { .. } => "",
             Self::Tracks { query, .. }
             | Self::Albums { query, .. }
             | Self::Artists { query, .. } => query,
@@ -94,6 +101,10 @@ impl Query {
         provider: &dyn MusicProvider,
     ) -> std::result::Result<Page, ProviderError> {
         match self {
+            Self::AlbumDetail { reference } => provider
+                .album(reference.clone())
+                .await
+                .map(Page::AlbumDetail),
             Self::Tracks {
                 source,
                 offset,
@@ -131,11 +142,21 @@ impl Query {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "page", rename_all = "snake_case")]
 pub enum Page {
+    AlbumDetail(AlbumSnapshot),
     Tracks(CatalogPage),
     Albums(AlbumPage),
     Artists(ArtistPage),
 }
 impl Page {
+    /// Covers have their own cache and budget; snapshots persist only catalog metadata.
+    fn metadata_only(&self) -> Self {
+        let mut page = self.clone();
+        if let Self::AlbumDetail(snapshot) = &mut page {
+            snapshot.artwork = None;
+            snapshot.artwork_unavailable = true;
+        }
+        page
+    }
     fn valid(&self, request: &Query) -> bool {
         let source = request.source();
         let offset = request.offset();
@@ -150,6 +171,40 @@ impl Page {
                 && bounded(&t.album)
         };
         let shape = match (self, request) {
+            (
+                Self::AlbumDetail(snapshot),
+                Query::AlbumDetail {
+                    reference: requested,
+                },
+            ) => {
+                let album = &snapshot.album;
+                album.reference == *requested
+                    && reference(&album.reference.key)
+                    && bounded(&album.title)
+                    && bounded(&album.artist)
+                    && album
+                        .artist_ref
+                        .as_ref()
+                        .is_none_or(|a| a.source == source && reference(&a.key))
+                    && album
+                        .track_count
+                        .is_some_and(|count| count.get() == snapshot.tracks.len() as u64)
+                    && reference(&snapshot.revision)
+                    && snapshot.artwork.is_none()
+                    && snapshot.artwork_unavailable
+                    && snapshot.tracks.len() <= 500
+                    && snapshot.tracks.iter().all(|t| track(&t.track))
+                    && snapshot.tracks.windows(2).all(|pair| {
+                        (pair[0].disc, pair[0].number) <= (pair[1].disc, pair[1].number)
+                    })
+                    && snapshot
+                        .tracks
+                        .iter()
+                        .map(|t| String::from(t.track.reference.key.clone()))
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        == snapshot.tracks.len()
+            }
             (Self::Tracks(page), Query::Tracks { .. }) => {
                 page.source == source
                     && page.offset.get() == offset
@@ -237,6 +292,19 @@ impl Default for Info {
     }
 }
 impl Info {
+    fn album_detail(stale: bool, refreshing: bool) -> Self {
+        Self {
+            origin: "cached",
+            stale,
+            incomplete: false,
+            refreshing,
+            message: if refreshing {
+                "Cached album details · checking current library · queue actions wait for refresh."
+            } else {
+                "Cached album details · refresh unavailable · reopen or refresh before queueing."
+            },
+        }
+    }
     fn cached(stale: bool, refreshing: bool) -> Self {
         Self {
             origin: "cached",
@@ -369,6 +437,14 @@ struct Store {
 struct Hit {
     page: Page,
     fetched: i64,
+}
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Close SQLite before releasing ownership. A parallel fork can briefly retain
+        // this open file description despite CLOEXEC; close alone then keeps its lock.
+        drop(self.conn.take());
+        let _ = self._lock.unlock();
+    }
 }
 impl Store {
     fn open(paths: &Paths, clear: bool) -> Result<Self> {
@@ -672,11 +748,12 @@ impl Store {
         if self.prefs.budget_mib == 0 || self.prefs.purge_pending {
             return Ok(());
         }
+        let page = page.metadata_only();
         if !page.valid(query) {
             return Err("Invalid catalog page was not cached.");
         }
         let _ = self.connection()?;
-        let payload = serde_json::to_vec(page).map_err(|_| "Metadata encoding failed.")?;
+        let payload = serde_json::to_vec(&page).map_err(|_| "Metadata encoding failed.")?;
         let source = source_key(query.source());
         let time = now();
         let stamp = self.tick()?;
@@ -687,7 +764,7 @@ impl Store {
             .transaction()
             .map_err(|_| "Metadata cache transaction failed.")?;
         tx.execute("INSERT INTO pages VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,fetched=excluded.fetched,accessed=excluded.accessed,bytes=excluded.bytes",params![query.key(),source,payload,time,stamp,(payload.len()+128) as i64]).map_err(|_|"Metadata page could not be saved.")?;
-        if let Page::Tracks(page) = page {
+        if let Page::Tracks(page) = &page {
             for track in &page.tracks {
                 let payload = serde_json::to_vec(track).map_err(|_| "Track encoding failed.")?;
                 let key = String::from(track.reference.key.clone());
@@ -823,7 +900,7 @@ impl Store {
 
 enum Op {
     Get(Query),
-    Put(Query, Page),
+    Put(Query, Box<Page>),
     Search(Query),
     Purge(SourceId),
     Clear,
@@ -1014,7 +1091,7 @@ impl Cache {
     }
     async fn put(&self, epoch: u64, query: &Query, page: &Page) {
         let _ = self
-            .request(epoch, Op::Put(query.clone(), page.clone()))
+            .request(epoch, Op::Put(query.clone(), Box::new(page.clone())))
             .await;
     }
     async fn search(&self, epoch: u64, query: &Query) -> Option<Page> {
@@ -1041,6 +1118,14 @@ impl Cache {
             emit(Err(ProviderError::UnknownSource), Info::default()).await;
             return;
         }
+        let detail = matches!(&query, Query::AlbumDetail { .. });
+        let provenance = |stale, refreshing| {
+            if detail {
+                Info::album_detail(stale, refreshing)
+            } else {
+                Info::cached(stale, refreshing)
+            }
+        };
         let epoch = self.epoch();
         let cached = self.get(epoch, &query).await;
         let cached_search = if cached.is_none() {
@@ -1051,18 +1136,19 @@ impl Cache {
         if let Some(hit) = &cached {
             let age = now().checked_sub(hit.fetched);
             let fresh = hit.fetched > 0 && age.is_some_and(|age| (0..900).contains(&age));
-            emit(Ok(hit.page.clone()), Info::cached(!fresh, !fresh)).await;
-            if fresh {
+            emit(Ok(hit.page.clone()), provenance(!fresh, !fresh || detail)).await;
+            if fresh && !detail {
                 return;
             }
         } else if let Some(page) = &cached_search {
             emit(Ok(page.clone()), Info::search(true)).await;
         }
-        let result = tokio::time::timeout(Duration::from_secs(30), query.fetch(provider.as_ref()))
+        let timeout = Duration::from_secs(if detail { 45 } else { 30 });
+        let result = tokio::time::timeout(timeout, query.fetch(provider.as_ref()))
             .await
             .unwrap_or(Err(ProviderError::Network));
         match result {
-            Ok(page) if page.valid(&query) => {
+            Ok(page) if page.metadata_only().valid(&query) => {
                 emit(Ok(page.clone()), Info::default()).await;
                 self.put(epoch, &query, &page).await;
             }
@@ -1072,7 +1158,7 @@ impl Cache {
             }
             error => {
                 if let Some(hit) = cached {
-                    emit(Ok(hit.page), Info::cached(true, false)).await;
+                    emit(Ok(hit.page), provenance(true, false)).await;
                 } else if let Some(page) = cached_search {
                     emit(Ok(page), Info::search(false)).await;
                 } else if matches!(
@@ -1449,6 +1535,23 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), before);
     }
     #[test]
+    fn cache_owner_drop_releases_lock_even_when_a_child_retains_the_file_description() {
+        let fixture = Fixture::new();
+        let store = Store::open(&fixture.paths, false).unwrap();
+        // dup shares the open file description, as a child does between fork and exec.
+        // Pin that otherwise tiny subprocess-creation window without forking a test process.
+        let inherited = store._lock.try_clone().unwrap();
+        assert!(Store::open(&fixture.paths, false).is_err());
+        drop(store);
+        let reopened = Store::open(&fixture.paths, false);
+        assert!(
+            reopened.is_ok(),
+            "A departed owner must explicitly unlock: {:?}",
+            reopened.err()
+        );
+        drop(inherited);
+    }
+    #[test]
     fn unsafe_database_links_and_interrupted_purge_cannot_touch_the_saved_session() {
         let fixture = Fixture::new();
         let mut store = Store::open(&fixture.paths, false).unwrap();
@@ -1494,6 +1597,210 @@ mod tests {
         assert!(store.put(&request, &page(&other, &["A"])).is_err());
         assert_eq!(store.stats.pages, 0);
     }
+    fn detail(reference: AlbumRef, title: &str) -> AlbumSnapshot {
+        use qoda_provider::{Album, AlbumTrack};
+        let source = reference.source;
+        AlbumSnapshot {
+            album: Album {
+                reference,
+                artist_ref: None,
+                title: title.into(),
+                artist: "Fixture".into(),
+                year: None,
+                track_count: Some(Counter::new(2)),
+            },
+            revision: title.into(),
+            tracks: ["1", "2"]
+                .into_iter()
+                .map(|key| AlbumTrack {
+                    track: Track {
+                        reference: TrackRef {
+                            source,
+                            key: key.to_owned().try_into().unwrap(),
+                        },
+                        title: key.into(),
+                        artist: "Fixture".into(),
+                        album: title.into(),
+                        duration_ms: None,
+                    },
+                    disc: 1,
+                    number: key.parse().unwrap(),
+                })
+                .collect(),
+            artwork: Some("data:image/jpeg;base64,not-persisted".into()),
+            artwork_unavailable: false,
+        }
+    }
+    #[test]
+    fn album_details_persist_without_cover_bytes_and_share_budget_clear_and_source_isolation() {
+        let fixture = Fixture::new();
+        let reference = AlbumRef {
+            source: SourceId::new(),
+            key: "album".into(),
+        };
+        let request = Query::AlbumDetail {
+            reference: reference.clone(),
+        };
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        store
+            .put(
+                &request,
+                &Page::AlbumDetail(detail(reference, "Cached album")),
+            )
+            .unwrap();
+        assert_eq!(store.stats.pages, 1);
+        assert_eq!(store.stats.tracks, 0); // Detail snapshots do not expand cached-search coverage.
+        drop(store);
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        let Page::AlbumDetail(snapshot) = store.get(&request).unwrap().unwrap().page else {
+            panic!("Expected album details")
+        };
+        assert_eq!(snapshot.tracks.len(), 2);
+        assert_eq!(snapshot.revision, "Cached album");
+        assert!(snapshot.artwork.is_none() && snapshot.artwork_unavailable);
+        assert!(
+            !std::fs::read(&store.db_path)
+                .unwrap()
+                .windows(b"not-persisted".len())
+                .any(|window| window == b"not-persisted")
+        );
+        let other = Query::AlbumDetail {
+            reference: AlbumRef {
+                source: SourceId::new(),
+                key: "album".into(),
+            },
+        };
+        assert!(store.get(&other).unwrap().is_none());
+        let other_key = Query::AlbumDetail {
+            reference: AlbumRef {
+                source: request.source(),
+                key: "other".into(),
+            },
+        };
+        assert!(store.get(&other_key).unwrap().is_none());
+        store.budget(0).unwrap();
+        assert_eq!(store.stats.pages, 0);
+        store.budget(1).unwrap();
+        store.put(&request, &Page::AlbumDetail(snapshot)).unwrap();
+        store.clear().unwrap();
+        assert_eq!(store.stats.pages, 0);
+        assert_eq!(store.prefs.budget_mib, 1);
+    }
+    #[test]
+    fn cached_album_details_reject_partial_duplicate_wrong_source_unordered_and_cover_payloads() {
+        let fixture = Fixture::new();
+        let reference = AlbumRef {
+            source: SourceId::new(),
+            key: "album".into(),
+        };
+        let request = Query::AlbumDetail {
+            reference: reference.clone(),
+        };
+        let value = Page::AlbumDetail(detail(reference, "Cached")).metadata_only();
+        let Page::AlbumDetail(snapshot) = value.clone() else {
+            unreachable!()
+        };
+        assert!(value.valid(&request));
+        let mut variants = Vec::new();
+        let mut changed = snapshot.clone();
+        changed.tracks.pop();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.tracks[1].track.reference = changed.tracks[0].track.reference.clone();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.tracks[0].track.reference.source = SourceId::new();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.tracks.reverse();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.album.artist_ref = Some(ArtistRef {
+            source: SourceId::new(),
+            key: "1".into(),
+        });
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.revision.clear();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.album.reference.key = "other".into();
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.tracks[0].track.title = "x".repeat(1025);
+        variants.push(changed);
+        let mut changed = snapshot.clone();
+        changed.artwork = Some("https://not-a-cache-image".into());
+        variants.push(changed);
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        for changed in variants {
+            let invalid = Page::AlbumDetail(changed);
+            assert!(!invalid.valid(&request));
+            store.put(&request, &value).unwrap();
+            store
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE pages SET payload=?1",
+                    [serde_json::to_vec(&invalid).unwrap()],
+                )
+                .unwrap();
+            assert!(store.get(&request).unwrap().is_none());
+        }
+        assert!(!value.valid(&query(request.source(), 0, "")));
+    }
+    #[tokio::test]
+    async fn cached_album_details_always_refresh_and_denial_never_retains_a_cached_snapshot() {
+        let fixture = Fixture::new();
+        let reference = AlbumRef {
+            source: SourceId::new(),
+            key: "album".into(),
+        };
+        let source = reference.source;
+        let request = Query::AlbumDetail {
+            reference: reference.clone(),
+        };
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        store
+            .put(&request, &Page::AlbumDetail(detail(reference, "Cached")))
+            .unwrap();
+        drop(store);
+        let cache = Cache::start(Ok(fixture.paths.clone())).await;
+        for mode in [1, 0, 2] {
+            let provider = Arc::new(Provider {
+                source,
+                calls: AtomicUsize::new(0),
+                mode,
+            });
+            let values = observe(&cache, provider.clone(), request.clone()).await;
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(values.len(), 2);
+            assert_eq!(values[0].1.origin, "cached");
+            assert!(values[0].1.refreshing && !values[0].1.incomplete);
+            let Page::AlbumDetail(first) = values[0].0.as_ref().unwrap() else {
+                panic!("Expected cached album")
+            };
+            assert!(first.artwork.is_none());
+            if mode == 0 {
+                assert_eq!(values[1].1.origin, "live");
+                let Page::AlbumDetail(live) = values[1].0.as_ref().unwrap() else {
+                    panic!("Expected live album")
+                };
+                assert_eq!(live.album.title, "Live");
+                assert!(live.artwork.is_some());
+            } else if mode == 1 {
+                assert_eq!(values[1].1.origin, "cached");
+                assert!(values[1].1.stale && !values[1].1.refreshing);
+            } else {
+                assert_eq!(
+                    values[1].0.as_ref().unwrap_err(),
+                    &ProviderError::AccessDenied
+                );
+                assert_eq!(cache.view().pages, 0);
+            }
+        }
+        cache.shutdown().await;
+    }
     struct Provider {
         source: SourceId,
         calls: AtomicUsize,
@@ -1509,6 +1816,17 @@ mod tests {
         }
         fn prepare(&self, _: SourceId, _: ProviderTrackKey) -> ProviderFuture<'_, PreparedMedia> {
             Box::pin(async { Err(ProviderError::Unsupported) })
+        }
+        fn album(&self, reference: AlbumRef) -> ProviderFuture<'_, AlbumSnapshot> {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                match self.mode {
+                    1 => Err(ProviderError::Network),
+                    2 => Err(ProviderError::AccessDenied),
+                    3 => std::future::pending().await,
+                    _ => Ok(detail(reference, "Live")),
+                }
+            })
         }
         fn tracks(
             &self,

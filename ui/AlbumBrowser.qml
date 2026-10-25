@@ -12,6 +12,7 @@ ColumnLayout {
     property var page: snapshot ? snapshot.page : null
     property var selected: snapshot ? snapshot.selected : null
     property bool busy: !!snapshot && snapshot.busy
+    readonly property bool canQueue: connected && !busy && !!selected && (!snapshot.cache || snapshot.cache.origin === "live")
     property var albumModel: []
     property var trackModel: []
     property string pageJson: "[]"
@@ -37,18 +38,18 @@ ColumnLayout {
         rows = nextSelected ? nextSelected.tracks : [];
         encoded = JSON.stringify(rows);
         if (encoded !== tracksJson) { tracksJson = encoded; trackModel = rows; }
-        let key = nextSelected ? JSON.stringify([nextSelected.album.reference, nextSelected.revision]) : "";
+        let key = nextSelected ? JSON.stringify(nextSelected.album.reference) : "";
         if (key !== selectedKey) { selectedKey = key; showDetails = !!nextSelected; }
     }
     function queue(op, key) {
-        if (!selected) return;
+        if (!canQueue) return;
         let fields = {reference: selected.album.reference, expected_revision: selected.revision};
         if (key) fields.track_key = key;
         queueAlbum(op, fields);
     }
     Label {
         Layout.fillWidth: true
-        visible: !albums.showDetails || albums.busy || !!albums.selected && albums.selected.artwork_unavailable
+        visible: !albums.showDetails || albums.busy || !!albums.selected && (albums.selected.artwork_unavailable || !!snapshot.cache && snapshot.cache.origin !== "live")
         text: snapshot ? snapshot.message : "Choose a music library."
         color: "#acb8c8"
         wrapMode: Text.Wrap
@@ -88,10 +89,15 @@ ColumnLayout {
                 onClicked: albums.openArtist(albums.selected.album.artist_ref)
             }
             Label { text: albums.trackModel.length + " tracks · disc and track order"; color: "#acb8c8" }
-            RowLayout {
+            Flow {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.preferredHeight: childrenRect.height
+                spacing: 6
                 Button { text: "Back to albums"; onClicked: albums.showDetails = false }
-                Button { text: "Play album"; enabled: albums.connected && !albums.busy && albums.trackModel.length > 0; onClicked: albums.queue("album_play", null) }
-                Button { text: "+ Queue"; enabled: albums.connected && !albums.busy && albums.trackModel.length > 0; onClicked: albums.queue("album_enqueue", null) }
+                Button { objectName: "refreshAlbum"; text: "Refresh album"; enabled: !albums.busy; onClicked: albums.openAlbum(albums.selected.album.reference) }
+                Button { objectName: "playAlbum"; text: "Play album"; enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_play", null) }
+                Button { objectName: "queueAlbum"; text: "+ Queue"; enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_enqueue", null) }
             }
         }
     }
@@ -167,9 +173,9 @@ ColumnLayout {
                     Label { text: modelData.track.title; font.bold: true; color: "#f2e9db"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: modelData.track.artist; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
-                Button { text: "Play from here"; enabled: albums.connected && !albums.busy; onClicked: albums.queue("album_play", modelData.track.reference.key) }
-                Button { text: "+ Queue"; enabled: albums.connected && !albums.busy; onClicked: albums.trackAction("enqueue", modelData.track) }
-                Button { text: "Next"; enabled: albums.connected && !albums.busy; onClicked: albums.trackAction("play_next", modelData.track) }
+                Button { objectName: "playAlbumFromHere"; text: "Play from here"; enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
+                Button { objectName: "enqueueAlbumTrack"; text: "+ Queue"; enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }
+                Button { objectName: "nextAlbumTrack"; text: "Next"; enabled: albums.canQueue; onClicked: albums.trackAction("play_next", modelData.track) }
             }
         }
     }

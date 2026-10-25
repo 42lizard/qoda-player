@@ -139,6 +139,7 @@ impl Controller {
             Action::Open(reference) => reference.source,
         });
         self.view.selected = None;
+        self.view.cache = Info::default();
         self.view.busy = true;
         self.view.message = if matches!(action, Action::Artists(..)) {
             "Loading artists…"
@@ -155,58 +156,41 @@ impl Controller {
         }
         let cache = self.cache.clone();
         self.task = Some(tokio::spawn(async move {
-            let query = match &action {
-                Action::Page(source, offset, query, artist) => Some(Query::Albums {
-                    source: *source,
-                    offset: *offset,
-                    query: query.clone(),
-                    artist: artist.clone(),
-                }),
-                Action::Artists(source, offset, query) => Some(Query::Artists {
-                    source: *source,
-                    offset: *offset,
-                    query: query.clone(),
-                }),
-                Action::Open(_) => None,
+            let query = match action {
+                Action::Page(source, offset, query, artist) => Query::Albums {
+                    source,
+                    offset,
+                    query,
+                    artist,
+                },
+                Action::Artists(source, offset, query) => Query::Artists {
+                    source,
+                    offset,
+                    query,
+                },
+                Action::Open(reference) => Query::AlbumDetail { reference },
             };
-            if let Some(query) = query {
-                cache
-                    .read(provider, query, move |result, info| {
-                        let events = events.clone();
-                        async move {
-                            let result = result.and_then(|page| match page {
-                                Page::Albums(page) => Ok(Update::Page(page)),
-                                Page::Artists(page) => Ok(Update::Artists(page)),
-                                _ => Err(ProviderError::InvalidReply),
-                            });
-                            let _ = events
-                                .send(crate::Event::Albums(Reply {
-                                    auth,
-                                    generation,
-                                    result,
-                                    info,
-                                }))
-                                .await;
-                        }
-                    })
-                    .await;
-            } else if let Action::Open(reference) = action {
-                let result = tokio::time::timeout(
-                    std::time::Duration::from_secs(45),
-                    provider.album(reference),
-                )
-                .await
-                .unwrap_or(Err(ProviderError::Network))
-                .map(Update::Open);
-                let _ = events
-                    .send(crate::Event::Albums(Reply {
-                        auth,
-                        generation,
-                        result,
-                        info: Info::default(),
-                    }))
-                    .await;
-            }
+            cache
+                .read(provider, query, move |result, info| {
+                    let events = events.clone();
+                    async move {
+                        let result = result.and_then(|page| match page {
+                            Page::Albums(page) => Ok(Update::Page(page)),
+                            Page::Artists(page) => Ok(Update::Artists(page)),
+                            Page::AlbumDetail(snapshot) => Ok(Update::Open(snapshot)),
+                            _ => Err(ProviderError::InvalidReply),
+                        });
+                        let _ = events
+                            .send(crate::Event::Albums(Reply {
+                                auth,
+                                generation,
+                                result,
+                                info,
+                            }))
+                            .await;
+                    }
+                })
+                .await;
         }));
         Ok(())
     }
@@ -296,6 +280,9 @@ impl Controller {
                     && Some(s.revision.as_str()) == request["expected_revision"].as_str()
             })
             .ok_or("This album view changed. Open the album again.")?;
+        if self.view.cache.origin != "live" {
+            return Err("Refresh this cached album before queueing tracks.".into());
+        }
         if self.view.busy {
             return Err("Wait for the album to finish loading.".into());
         }
@@ -314,7 +301,7 @@ impl Controller {
             .collect())
     }
     pub fn track(&self, reference: &qoda_core::TrackRef) -> Option<Track> {
-        if self.view.busy {
+        if self.view.busy || self.view.cache.origin != "live" {
             return None;
         }
         self.view
@@ -388,6 +375,75 @@ mod tests {
         assert!(c.tracks(&request).is_err());
         c.invalidate();
         assert!(c.tracks(&request).is_err());
+    }
+    #[test]
+    fn cached_album_cannot_queue_until_live_refresh_and_old_revisions_remain_rejected() {
+        let snapshot = snapshot();
+        let reference = snapshot.tracks[0].track.reference.clone();
+        let request =
+            json!({"reference":snapshot.album.reference,"expected_revision":snapshot.revision});
+        let mut c = Controller::default();
+        let cached = Info {
+            origin: "cached",
+            stale: false,
+            incomplete: false,
+            refreshing: true,
+            message: "Cached",
+        };
+        c.apply(
+            Reply {
+                auth: 1,
+                generation: 0,
+                result: Ok(Update::Open(snapshot.clone())),
+                info: cached.clone(),
+            },
+            1,
+        );
+        assert!(c.view.selected.is_some() && !c.view.busy);
+        assert!(c.tracks(&request).is_err());
+        assert!(c.track(&reference).is_none());
+        c.apply(
+            Reply {
+                auth: 1,
+                generation: 0,
+                result: Ok(Update::Open(snapshot.clone())),
+                info: Info {
+                    refreshing: false,
+                    stale: true,
+                    ..cached
+                },
+            },
+            1,
+        );
+        assert!(c.tracks(&request).is_err());
+        let mut live = snapshot;
+        live.revision = "snapshot-b".into();
+        c.apply(
+            Reply {
+                auth: 1,
+                generation: 0,
+                result: Ok(Update::Open(live)),
+                info: Info::default(),
+            },
+            1,
+        );
+        assert!(c.tracks(&request).is_err());
+        let mut current = request;
+        current["expected_revision"] = json!("snapshot-b");
+        assert_eq!(c.tracks(&current).unwrap().len(), 2);
+        assert!(c.track(&reference).is_some());
+        c.apply(
+            Reply {
+                auth: 1,
+                generation: 0,
+                result: Err(ProviderError::AccessDenied),
+                info: Info::default(),
+            },
+            1,
+        );
+        assert!(c.view.selected.is_none());
+        assert!(c.tracks(&current).is_err());
+        assert!(c.track(&reference).is_none());
     }
     fn artist_page(source: SourceId) -> ArtistPage {
         ArtistPage {
