@@ -14,13 +14,25 @@ From the repository:
 ./tools/dev.py
 ```
 
-Select **Connect Plex (this session)**, open the browser sign-in, authorize Qoda, then choose a library. Search applies to that library. Browse pages contain at most 100 tracks; search returns up to 100 matches. **Play** explicitly selects and starts one track. Pause, resume and seek in seconds act on the backend. Resume after the engine has stopped starts the selected track again.
+Select **Connect Plex (this session)**, open the browser sign-in, authorize Qoda, then choose a library. Search applies to that library. Browse pages contain at most 100 tracks; search returns up to 100 matches. **Play now** replaces the listening session with the selected track and starts it. Pause, resume and seek in seconds act on the backend. Resume retries a stopped selected track, starts pending content after completion, or offers Replay when the retained queue is exhausted.
+
+### Queue controls
+
+**+ Queue** appends without starting or resuming audio. **Next** on a catalog row schedules the track after earlier pending Play next additions; with no selection it schedules at the front without autoplay. Duplicate tracks remain distinct occurrences. The side panel shows the selected occurrence and upcoming entries. **Play** on a queue row explicitly starts that occurrence and continues through the remaining queue.
+
+Use the arrow buttons to reorder upcoming entries; the selected entry is pinned. Removing an upcoming occurrence leaves playback alone. Removing the selected occurrence selects/prepares its successor while preserving playing versus paused intent, or stops if none remains. **Next track** also preserves paused intent. **Clear upcoming** retains the selected entry and traversed membership; **Stop & clear** cancels preparation, stops audio and discards the session.
+
+A matched native EOF plus an idle engine advances to the next entry. Engine errors and observed upstream failures stop for explicit retry; the app does not infer successful completion from arbitrary idle/Stop events. Natural EOF is a nominal engine result, not physical-output proof or a guarantee that a damaged source was complete. No Plex listening reports are sent. At exhaustion, the session remains available for explicit **Replay**, which starts from the retained session's beginning. Adding content afterward remains stopped until Play/Resume is chosen.
+
+Edits carry the session ID and queue revision. A stale edit is rejected with the latest state; the UI never silently applies an outdated row index. Navigation also advances this revision. Queue rows identify engine selection, not a physical presentation clock. No upcoming track is preloaded in this increment, so transitions can have gaps. Very long display fields are bounded to 1024 UTF-8 bytes; identities are validated rather than truncated.
+
+The current bound is 500 occurrences in retained session membership. Traversed entries remain in the replay set, but are not presented as listening history. The queue survives hide, reload and UI process restart while the backend stays alive. It is not yet stored across backend restarts. Disconnect/sign-out discards it. Durable storage, Previous/history navigation, shuffle/repeat and per-entry unavailable-track skipping are later increments; playback/preparation failures currently stop visibly instead of consuming the queue.
 
 ### Saved sign-in
 
 After connecting, choose **Save sign-in**. Qoda stores a versioned credential in the desktop keyring and reads it back to verify the write. On a later launch, choose **Restore saved sign-in**. Startup does not inspect or unlock the keyring automatically, load a track or play music. Explicit keyring actions may show the desktop unlock prompt.
 
-**Disconnect** stops playback and clears the active account from memory while keeping the saved sign-in. **Sign out & forget** also removes Qoda's saved sign-in. Only items matching `application=qoda-player`, `credential=plex`, `schema=1` are touched. Saving replaces Qoda's previous saved account. Forget does not revoke the Plex token remotely or remove credentials belonging to other apps or the validation helper.
+**Disconnect** stops playback and clears the active account and queue from memory while keeping the saved sign-in. **Sign out & forget** also removes Qoda's saved sign-in. Only items matching `application=qoda-player`, `credential=plex`, `schema=1` are touched. Saving replaces Qoda's previous saved account. Forget does not revoke the Plex token remotely or remove credentials belonging to other apps or the validation helper.
 
 A single worker serializes keyring side effects: a pending Save completes before a later Forget. Restore results are fenced by the current authentication generation so disconnecting or beginning another login cannot resurrect an old restore. Forget checks for matching items afterward and reports incomplete removal if locked items remain. Helpers have bounded input/output and a 30-second limit per invocation; failure or timeout leaves saved state explicitly unknown until retried. Credentials use private pipes and zeroizing buffers, with controlled error messages.
 
@@ -58,9 +70,9 @@ The backend can run separately with `./tools/dev.py --backend-only`; start a rep
 
 ## Still to implement or qualify
 
-Durable session restoration, queue management, playlists and Plex writes, artwork/cache storage, compact surface, MPRIS, desktop installation, gapless transitions, ReplayGain and native fidelity output remain outstanding. The browser PIN flow is implemented; the current live checks reuse the previously authorized compatible credential and do not qualify a fresh browser round trip or JWT support. Accessible HTTPS sources are shown; this does not assert that offline/inaccessible servers are absent from the account.
+Durable session restoration, Previous/history navigation, shuffle/repeat, unavailable-entry skipping, playlists and Plex writes, artwork/cache storage, compact surface, MPRIS, desktop installation, gapless transitions, ReplayGain and native fidelity output remain outstanding. The browser PIN flow is implemented; the current live checks reuse the previously authorized compatible credential and do not qualify a fresh browser round trip or JWT support. Accessible HTTPS sources are shown; this does not assert that offline/inaccessible servers are absent from the account.
 
-The first window is a track-browser slice; it is not the complete album-browser and persistent-queue design. Issue 21 remains open while real media playback and remaining acceptance are qualified. Real library music is never started by automated checks.
+The current window is a track browser with an in-memory queue; the complete album-browser and durable-session design remains unfinished. Issue 21 remains open while real media playback and remaining acceptance are qualified. Real library music is never started by automated checks.
 
 ## Validation
 
@@ -70,8 +82,10 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-The 22 tests cover existing core state/fences, bounded private IPC (including a partial frame interrupted by an update), provider endpoint/metadata/secret handling, media range/host/grant revocation and cancellation, and native loading, pause and failure with generated silence through `ao=null`. Native tests never open a real audio output. Keyring tests use a private helper fixture to cover save/restore, idempotent forget, pending-save ordering, missing or malformed credentials, locked leftovers, sanitized diagnostics and timeout cleanup; they do not write test credentials into the real keyring.
+The 31 tests cover existing core state/fences, bounded private IPC (including a partial frame interrupted by an update), provider endpoint/metadata/secret handling, media range/host/grant revocation and cancellation, and native loading, pause and failure with generated silence through `ao=null`. Native tests never open a real audio output. Keyring tests use a private helper fixture to cover save/restore, idempotent forget, pending-save ordering, missing or malformed credentials, locked leftovers, sanitized diagnostics and timeout cleanup; they do not write test credentials into the real keyring.
 
 On the development machine, a separate read-only check connected to five real Plex music libraries, loaded a 100-track page and obtained search results. The actual native QML window connected, displayed the catalog, hid/reappeared, and reconnected after a UI process restart with the same backend instance and catalog. Startup remained paused, no QML runtime errors were recorded, and scoped processes were stopped. This is not a real-music playback, gapless or fidelity acceptance result.
 
 A subsequent real keyring check saved the authorized Plex sign-in in Qoda's own namespace, restarted without credential input, explicitly restored access to five libraries, and confirmed paused startup, disconnect/reconnect, QML controls, credential-free snapshots and configuration files. The saved sign-in was retained for normal use; scoped backend/UI processes were stopped. Fresh browser authorization and real music playback retain their separate acceptance checks.
+
+Queue validation added atomic identity-based membership edits, FIFO priority, duplicate occurrence isolation, selected-entry pinning, end/replay membership, native EOF versus Stop/replacement generations and per-grant upstream failure isolation. A live read-only run edited real catalog entries without starting media, rejected a stale revision, and retained the same queue session/order/occurrence IDs through a native QML restart. Clear/Stop & clear passed with no QML runtime errors; scoped processes were stopped. Real-library playback and transition fidelity remain unqualified.

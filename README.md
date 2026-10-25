@@ -4,11 +4,11 @@ A standalone music player in development for Omarchy, built with Quickshell/QML 
 
 ## Status
 
-The first working development slice has a Rust backend, Plex library browsing/search, a standalone Quickshell/QML window, and embedded libmpv playback controls. Live read-only checks reached five music libraries and verified catalog display, search, hide/show and UI restart. Native playback checks use synthetic audio with null output; real-music playback and the full release remain under development in [issue 21](https://github.com/42lizard/qoda-player/issues/21).
+The first working development slice has a Rust backend, Plex library browsing/search, a standalone Quickshell/QML window, embedded libmpv playback controls, and a backend-owned queue with a persistent side panel. Live read-only checks reached five music libraries and verified catalog display, search, hide/show and UI restart. Native playback checks use synthetic audio with null output; real-music playback and the full release remain under development in [issue 21](https://github.com/42lizard/qoda-player/issues/21).
 
 Run `./tools/dev.py` to build and open it. Use **Save sign-in** after connecting, then **Restore saved sign-in** on later launches. On the original validation machine, `./tools/dev.py --use-validation-login` can still explicitly reuse the validation sign-in. Nothing autoplays. See [development instructions](docs/development.md) for dependencies, sign-in, controls, process ownership and current limitations.
 
-The application currently provides single-track playback through Desktop/PipeWire with ReplayGain off. Queue/playlist management, durable session restoration, gapless playback and fidelity output are still to come. Run `cargo test --workspace --locked` for the 22 automated checks.
+The queue supports Add, FIFO Play next, independent duplicates, reorder/remove, Next, Replay, Clear upcoming and Stop & clear. Playback uses Desktop/PipeWire with ReplayGain off. Queue contents survive UI restarts during the same backend run. Durable session restoration, Previous/shuffle/repeat, playlist editing, gapless playback and fidelity output are still to come. Run `cargo test --workspace --locked` for the 31 automated checks.
 
 ## Agreed first-release scope
 

@@ -80,29 +80,84 @@ impl QueueMembership {
         &self.entries
     }
     pub fn append(&mut self, track: TrackRef) -> Result<OccurrenceId, MembershipError> {
+        self.commit_insert(self.revision, track, None)
+    }
+    pub fn commit_insert(
+        &mut self,
+        expected: Counter,
+        track: TrackRef,
+        before: Option<OccurrenceId>,
+    ) -> Result<OccurrenceId, MembershipError> {
+        self.check_revision(expected)?;
+        let index = match before {
+            Some(id) => self.index(id)?,
+            None => self.entries.len(),
+        };
         let revision = self.revision.checked_next()?;
         let id = OccurrenceId::new();
-        self.entries.push(QueueEntry { id, track });
+        self.entries.insert(index, QueueEntry { id, track });
         self.revision = revision;
         Ok(id)
+    }
+    pub fn commit_move(
+        &mut self,
+        expected: Counter,
+        id: OccurrenceId,
+        before: Option<OccurrenceId>,
+    ) -> Result<(), MembershipError> {
+        self.check_revision(expected)?;
+        let index = self.index(id)?;
+        let target = match before {
+            Some(id) => self.index(id)?,
+            None => self.entries.len(),
+        };
+        if target == index || target == index + 1 {
+            return Ok(());
+        }
+        let revision = self.revision.checked_next()?;
+        let entry = self.entries.remove(index);
+        self.entries
+            .insert(if target > index { target - 1 } else { target }, entry);
+        self.revision = revision;
+        Ok(())
+    }
+    pub fn commit_remove_many(
+        &mut self,
+        expected: Counter,
+        ids: &[OccurrenceId],
+    ) -> Result<(), MembershipError> {
+        self.check_revision(expected)?;
+        for id in ids {
+            self.index(*id)?;
+        }
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let revision = self.revision.checked_next()?;
+        let ids: HashSet<_> = ids.iter().collect();
+        self.entries.retain(|entry| !ids.contains(&entry.id));
+        self.revision = revision;
+        Ok(())
+    }
+    fn check_revision(&self, expected: Counter) -> Result<(), MembershipError> {
+        if expected != self.revision {
+            Err(MembershipError::RevisionConflict)
+        } else {
+            Ok(())
+        }
+    }
+    fn index(&self, id: OccurrenceId) -> Result<usize, MembershipError> {
+        self.entries
+            .iter()
+            .position(|e| e.id == id)
+            .ok_or(MembershipError::MissingOccurrence)
     }
     pub fn commit_remove(
         &mut self,
         expected: Counter,
         id: OccurrenceId,
     ) -> Result<(), MembershipError> {
-        if expected != self.revision {
-            return Err(MembershipError::RevisionConflict);
-        }
-        let index = self
-            .entries
-            .iter()
-            .position(|e| e.id == id)
-            .ok_or(MembershipError::MissingOccurrence)?;
-        let revision = self.revision.checked_next()?;
-        self.entries.remove(index);
-        self.revision = revision;
-        Ok(())
+        self.commit_remove_many(expected, &[id])
     }
 }
 impl<'de> Deserialize<'de> for QueueMembership {
@@ -133,6 +188,29 @@ mod tests {
             source: SourceId::new(),
             key: "fixture:track:1".to_owned().try_into().unwrap(),
         }
+    }
+    #[test]
+    fn edits_are_atomic_and_anchored_by_identity() {
+        let mut q = QueueMembership::new();
+        let a = q.append(track()).unwrap();
+        let b = q.append(track()).unwrap();
+        let c = q.commit_insert(q.revision(), track(), Some(b)).unwrap();
+        assert_eq!(
+            q.entries().iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![a, c, b]
+        );
+        q.commit_move(q.revision(), b, Some(a)).unwrap();
+        assert_eq!(q.entries()[0].id, b);
+        let before = q.clone();
+        assert!(
+            q.commit_remove_many(q.revision(), &[a, OccurrenceId::new()])
+                .is_err()
+        );
+        assert_eq!(q, before);
+        assert!(q.commit_move(Counter::ZERO, a, None).is_err());
+        assert_eq!(q, before);
+        q.commit_remove_many(q.revision(), &[a, c]).unwrap();
+        assert_eq!(q.entries().len(), 1);
     }
     #[test]
     fn duplicate_tracks_keep_independent_occurrences_across_restore() {

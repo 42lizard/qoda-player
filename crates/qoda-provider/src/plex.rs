@@ -380,15 +380,28 @@ impl PlexProvider {
         Ok((Self { http, sources }, identities))
     }
 }
+// Bound display metadata retained by the session, preserving UTF-8 boundaries.
+fn display_attr(node: Node<'_, '_>, key: &str) -> String {
+    let value = node.attribute(key).unwrap_or_default();
+    let mut end = value.len().min(1024);
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_owned()
+}
 fn parse_track(node: Node<'_, '_>, source: SourceId) -> Result<Track, ProviderError> {
-    let key = attr(node, "ratingKey")
+    let key_value = attr(node, "ratingKey");
+    if key_value.len() > 512 {
+        return Err(ProviderError::InvalidReply);
+    }
+    let key = key_value
         .try_into()
         .map_err(|_| ProviderError::InvalidReply)?;
     Ok(Track {
         reference: TrackRef { source, key },
-        title: attr(node, "title"),
-        artist: attr(node, "grandparentTitle"),
-        album: attr(node, "parentTitle"),
+        title: display_attr(node, "title"),
+        artist: display_attr(node, "grandparentTitle"),
+        album: display_attr(node, "parentTitle"),
         duration_ms: node
             .attribute("duration")
             .and_then(|s| s.parse().ok())
@@ -592,6 +605,24 @@ impl MediaSource for PlexStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retained_display_fields_are_bounded_without_truncating_identity() {
+        let title = "♫".repeat(1000);
+        let xml = format!("<Track ratingKey='42' title='{title}'/>");
+        let doc = Document::parse(&xml).unwrap();
+        let track = parse_track(doc.root_element(), SourceId::new()).unwrap();
+        assert!(track.title.len() <= 1024);
+        assert!(track.title.chars().all(|c| c == '♫'));
+        assert_eq!(String::from(track.reference.key), "42");
+        let xml = format!("<Track ratingKey='{}'/>", "k".repeat(513));
+        assert!(
+            parse_track(
+                Document::parse(&xml).unwrap().root_element(),
+                SourceId::new()
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn unsafe_endpoint_and_cross_origin_part_paths_are_rejected() {
         for u in [

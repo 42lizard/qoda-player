@@ -8,12 +8,19 @@ use axum::{
 };
 use futures_util::StreamExt;
 use qoda_provider::{ByteRange, MediaSource};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 use tokio::sync::{RwLock, watch};
 #[derive(Clone)]
 struct Grant {
     source: Arc<dyn MediaSource>,
     cancel: watch::Sender<bool>,
+    failed: Arc<AtomicBool>,
 }
 #[derive(Clone)]
 pub struct Proxy {
@@ -35,6 +42,13 @@ impl Proxy {
         });
         Ok(this)
     }
+    pub async fn failed(&self) -> bool {
+        self.grants
+            .read()
+            .await
+            .values()
+            .any(|grant| grant.failed.load(Ordering::Acquire))
+    }
     pub async fn revoke(&self) {
         let mut g = self.grants.write().await;
         for grant in g.values() {
@@ -50,6 +64,7 @@ impl Proxy {
             id.clone(),
             Grant {
                 source: Arc::from(source),
+                failed: Arc::new(AtomicBool::new(false)),
                 cancel,
             },
         );
@@ -86,7 +101,7 @@ async fn media(
                 .and_then(|s| ByteRange::try_from(s).map_err(|_| StatusCode::RANGE_NOT_SATISFIABLE))
         })
         .transpose()?;
-    let response = tokio::select! {r=grant.source.open(range,method==axum::http::Method::HEAD)=>r.map_err(|_|StatusCode::BAD_GATEWAY)?,_=cancel.changed()=>return Err(StatusCode::NOT_FOUND)};
+    let response = tokio::select! {r=grant.source.open(range,method==axum::http::Method::HEAD)=>r.map_err(|_|{grant.failed.store(true,Ordering::Release);StatusCode::BAD_GATEWAY})?,_=cancel.changed()=>return Err(StatusCode::NOT_FOUND)};
     let mut builder = Response::builder().status(response.status);
     for (k, v) in [
         ("content-type", response.content_type),
@@ -101,7 +116,15 @@ async fn media(
             builder = builder.header(k, v);
         }
     }
-    let upstream = response.body;
+    let failed = grant.failed.clone();
+    let upstream = response
+        .body
+        .inspect(move |chunk| {
+            if chunk.is_err() {
+                failed.store(true, Ordering::Release);
+            }
+        })
+        .boxed();
     let stream = futures_util::stream::unfold(
         (upstream, cancel),
         |(mut upstream, mut cancel)| async move {
@@ -151,6 +174,29 @@ mod tests {
                 std::future::pending().await
             })
         }
+    }
+    struct Broken;
+    impl MediaSource for Broken {
+        fn open(&self, _: Option<ByteRange>, _: bool) -> ProviderFuture<'_, MediaResponse> {
+            Box::pin(async { Err(qoda_provider::ProviderError::Network) })
+        }
+    }
+    #[tokio::test]
+    async fn upstream_failure_is_visible_only_for_its_own_grant() {
+        let proxy = Proxy::start().await.unwrap();
+        let url = proxy.grant(Box::new(Broken)).await;
+        assert_eq!(
+            reqwest::Client::new()
+                .get(url)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            502
+        );
+        assert!(proxy.failed().await);
+        proxy.grant(Box::new(Fixture)).await;
+        assert!(!proxy.failed().await);
     }
     #[tokio::test]
     async fn revocation_cancels_an_in_flight_upstream_open() {

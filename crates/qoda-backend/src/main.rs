@@ -1,8 +1,9 @@
 mod player;
 mod proxy;
+mod queue;
 mod vault;
 use player::{Command, Player};
-use qoda_core::{ProviderTrackKey, SourceId};
+use qoda_core::{OccurrenceId, SourceId, TrackRef};
 use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider, PreparedMedia};
 use serde_json::{Value, json};
 use std::{
@@ -20,6 +21,7 @@ use zeroize::Zeroizing;
 
 enum Event {
     Request(Value),
+    Advance(u64),
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
@@ -135,6 +137,49 @@ fn connect(
         let _ = tx.send(Event::Connected(generation, r, credential)).await;
     })
 }
+async fn prepare_track(
+    player: &Player,
+    proxy: &proxy::Proxy,
+    pending: &mut Option<tokio::task::JoinHandle<()>>,
+    generation: &mut u64,
+    provider: Arc<dyn MusicProvider>,
+    reference: TrackRef,
+    tx: mpsc::Sender<Event>,
+) -> Result<(), &'static str> {
+    let next = generation.checked_add(1).ok_or("Generation exhausted")?;
+    if let Some(task) = pending.take() {
+        task.abort();
+    }
+    *generation = next;
+    player.send(Command::Pause(true));
+    player.send(Command::Stop);
+    proxy.revoke().await;
+    *pending = Some(tokio::spawn(async move {
+        let result = provider.prepare(reference.source, reference.key).await;
+        let _ = tx.send(Event::Media(next, result)).await;
+    }));
+    Ok(())
+}
+fn catalog_track(state: &Value, request: &Value) -> Result<qoda_provider::Track, &'static str> {
+    let reference = serde_json::from_value::<TrackRef>(
+        json!({"source":request["source"],"key":request["key"]}),
+    )
+    .map_err(|_| "Choose a track from the current catalog page.")?;
+    state["page"]["tracks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| serde_json::from_value::<qoda_provider::Track>(v.clone()).ok())
+        .find(|t| t.reference == reference)
+        .ok_or("That track is no longer on the displayed page. Browse again.")
+}
+fn check_queue(queue: &queue::Queue, request: &Value) -> Result<(), queue::Error> {
+    let session = serde_json::from_value(request["queue_session"].clone())
+        .map_err(|_| queue::Error::Conflict)?;
+    let revision = serde_json::from_value(request["queue_revision"].clone())
+        .map_err(|_| queue::Error::Conflict)?;
+    queue.check(session, revision)
+}
 fn keyring_request(
     vault: &mpsc::Sender<vault::Request>,
     state: &mut Value,
@@ -192,7 +237,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = proxy::Proxy::start().await?;
     let instance = uuid::Uuid::new_v4().to_string();
     let mut revision = 0_u64;
+    let mut queue = queue::Queue::default();
+    let mut handled_end = None;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
+    state["queue"] = json!(queue.snapshot());
     let (updates, rx) = watch::channel(state.clone());
     let (tx, mut events) = mpsc::channel(64);
     let vault = vault::start(tx.clone());
@@ -216,7 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
     });
-    let mut provider: Option<Arc<PlexProvider>> = None;
+    let mut provider: Option<Arc<dyn MusicProvider>> = None;
     let mut browse_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut prepare_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut auth_task: Option<tokio::task::JoinHandle<()>> = None;
@@ -224,6 +272,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut desired_playing = false;
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut last_audio = player.status();
+    let mut last_stream_failed = false;
     if let Some(c) = credential {
         auth_generation = auth_generation
             .checked_add(1)
@@ -237,15 +286,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             event = events.recv() => match event { Some(event) => event, None => break },
             _ = audio_tick.tick() => {
                 let audio = player.status();
-                if audio != last_audio && audio.generation == play_generation {
-                    if audio.idle && !last_audio.idle && audio.generation == last_audio.generation {
-                        desired_playing = false;
-                        state["intent"] = json!("paused");
-                        state["status"] = json!("Playback stopped");
-                    }
+                let stream_failed=proxy.failed().await;
+                if (audio != last_audio || stream_failed!=last_stream_failed) && audio.generation == play_generation {
+                    last_stream_failed=stream_failed;
                     last_audio = audio.clone();
                     state["audio"] = json!(audio);
-                    if let Some(error) = audio.error {
+                    if let Some(error) = audio.error.or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
                         state["error"] = json!(error);
                         desired_playing = false;
                         state["intent"] = json!("paused");
@@ -255,19 +301,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state["revision"] = json!(revision.to_string());
                     updates.send_replace(state.clone());
                 }
-                continue;
+                if audio.generation==play_generation && audio.idle && audio.natural_eof && handled_end!=Some(play_generation) && audio.error.is_none() && !stream_failed {
+                    handled_end=Some(play_generation);
+                    Event::Advance(play_generation)
+                } else {continue}
             },
             _ = tokio::signal::ctrl_c() => break,
         };
+        let mut to_prepare = None;
         match event {
-            Event::Request(mut v) => {
+            Event::Advance(g) if g == play_generation => match queue.advance() {
+                Ok(Some(track)) => to_prepare = Some(track),
+                Ok(None) => {
+                    desired_playing = false;
+                    state["intent"] = json!("paused");
+                    state["status"] = json!("End of queue");
+                }
+                Err(error) => {
+                    state["error"] = json!(error.to_string());
+                    desired_playing = false;
+                    state["intent"] = json!("paused");
+                }
+            },
+            Event::Request(v) => {
                 if v["instance"] != instance {
                     continue;
-                }
-                if v["op"] == "resume" && player.status().idle && !state["selection"].is_null() {
-                    v["op"] = json!("play");
-                    v["source"] = state["selection"]["reference"]["source"].clone();
-                    v["key"] = state["selection"]["reference"]["key"].clone();
                 }
                 state["error"] = Value::Null;
                 match v["op"].as_str().unwrap_or("") {
@@ -375,32 +433,123 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "play" => {
-                        if let Some(p) = provider.clone()
-                            && let (Ok(source), Ok(key)) = (
-                                serde_json::from_value::<SourceId>(v["source"].clone()),
-                                serde_json::from_value::<ProviderTrackKey>(v["key"].clone()),
-                            )
-                        {
-                            if let Some(task) = prepare_task.take() {
-                                task.abort();
+                        if provider.is_some() {
+                            match catalog_track(&state, &v) {
+                                Ok(track) => match queue.replace(track.clone()) {
+                                    Ok(_) => {
+                                        desired_playing = true;
+                                        to_prepare = Some(track)
+                                    }
+                                    Err(e) => state["error"] = json!(e.to_string()),
+                                },
+                                Err(error) => state["error"] = json!(error),
                             }
-                            play_generation = play_generation
-                                .checked_add(1)
-                                .ok_or("Generation exhausted")?;
-                            let g = play_generation;
-                            desired_playing = true;
-                            state["intent"] = json!("playing");
-                            state["selection"] = Value::Null;
-                            state["audio"] = Value::Null;
-                            state["status"] = json!("Preparing selected track");
-                            player.send(Command::Pause(true));
-                            player.send(Command::Stop);
-                            proxy.revoke().await;
-                            let tx = tx.clone();
-                            prepare_task = Some(tokio::spawn(async move {
-                                let r = p.prepare(source, key).await;
-                                let _ = tx.send(Event::Media(g, r)).await;
-                            }));
+                        }
+                    }
+                    "enqueue" | "play_next" | "queue_play" | "queue_move" | "queue_remove"
+                    | "clear_upcoming" | "stop_clear" | "next" | "replay" => {
+                        if let Err(error) = check_queue(&queue, &v) {
+                            state["error"] = json!(error.to_string());
+                        } else {
+                            let result: Result<(), String> = (|| {
+                                match v["op"].as_str().unwrap_or("") {
+                                    "enqueue" | "play_next" => {
+                                        if provider.is_none() {
+                                            return Err("Connect Plex before adding tracks.".into());
+                                        }
+                                        let track =
+                                            catalog_track(&state, &v).map_err(str::to_owned)?;
+                                        queue
+                                            .enqueue(track, v["op"] == "play_next")
+                                            .map_err(|e| e.to_string())?;
+                                    }
+                                    "queue_play" => {
+                                        if provider.is_none() {
+                                            return Err(
+                                                "Restore Plex sign-in before playback.".into()
+                                            );
+                                        }
+                                        let id = serde_json::from_value::<OccurrenceId>(
+                                            v["occurrence"].clone(),
+                                        )
+                                        .map_err(|_| queue::Error::Missing.to_string())?;
+                                        to_prepare =
+                                            Some(queue.select(id).map_err(|e| e.to_string())?);
+                                        desired_playing = true;
+                                    }
+                                    "queue_move" => {
+                                        let id = serde_json::from_value(v["occurrence"].clone())
+                                            .map_err(|_| queue::Error::Missing.to_string())?;
+                                        let before = serde_json::from_value(v["before"].clone())
+                                            .map_err(|_| queue::Error::Missing.to_string())?;
+                                        queue.move_before(id, before).map_err(|e| e.to_string())?;
+                                    }
+                                    "queue_remove" => {
+                                        let id = serde_json::from_value(v["occurrence"].clone())
+                                            .map_err(|_| queue::Error::Missing.to_string())?;
+                                        if queue.remove(id).map_err(|e| e.to_string())? {
+                                            to_prepare = queue
+                                                .selected()
+                                                .map(|id| queue.visible_track(id))
+                                                .transpose()
+                                                .map_err(|e| e.to_string())?;
+                                            if to_prepare.is_none() {
+                                                desired_playing = false;
+                                            }
+                                        }
+                                    }
+                                    "clear_upcoming" => {
+                                        queue.clear_upcoming().map_err(|e| e.to_string())?
+                                    }
+                                    "stop_clear" => {
+                                        queue = queue::Queue::default();
+                                        desired_playing = false;
+                                    }
+                                    "next" | "replay" => {
+                                        if provider.is_none() {
+                                            return Err(
+                                                "Restore Plex sign-in before playback.".into()
+                                            );
+                                        }
+                                        to_prepare = if v["op"] == "replay" {
+                                            queue.replay()
+                                        } else {
+                                            queue.advance()
+                                        }
+                                        .map_err(|e| e.to_string())?;
+                                        if v["op"] == "replay" && to_prepare.is_some() {
+                                            desired_playing = true;
+                                        }
+                                        if to_prepare.is_none() {
+                                            desired_playing = false;
+                                            state["status"] = json!("End of queue");
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                Ok(())
+                            })();
+                            if let Err(error) = result {
+                                state["error"] = json!(error);
+                            }
+                            if v["op"] == "stop_clear"
+                                || (v["op"] == "queue_remove" && queue.selected().is_none())
+                                || (v["op"] == "next" && to_prepare.is_none())
+                            {
+                                if let Some(task) = prepare_task.take() {
+                                    task.abort();
+                                }
+                                play_generation = play_generation
+                                    .checked_add(1)
+                                    .ok_or("Generation exhausted")?;
+                                player.send(Command::Pause(true));
+                                player.send(Command::Stop);
+                                proxy.revoke().await;
+                                state["selection"] = Value::Null;
+                                state["audio"] = Value::Null;
+                            }
+                            state["intent"] =
+                                json!(if desired_playing { "playing" } else { "paused" });
                         }
                     }
                     "pause" => {
@@ -409,9 +558,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         state["intent"] = json!("paused");
                     }
                     "resume" => {
-                        desired_playing = true;
-                        player.send(Command::Pause(false));
-                        state["intent"] = json!("playing");
+                        if provider.is_some() {
+                            desired_playing = true;
+                            if player.status().idle {
+                                to_prepare = if queue.ended() || queue.selected().is_none() {
+                                    queue.advance().ok().flatten()
+                                } else {
+                                    queue.selected().and_then(|id| queue.visible_track(id).ok())
+                                };
+                                if to_prepare.is_none() {
+                                    desired_playing = false;
+                                    state["status"] = json!("End of queue — choose Replay");
+                                }
+                            } else {
+                                player.send(Command::Pause(false));
+                            }
+                            state["intent"] =
+                                json!(if desired_playing { "playing" } else { "paused" });
+                        }
                     }
                     "seek" => {
                         if let Some(pos) =
@@ -438,6 +602,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
                         provider = None;
+                        queue = queue::Queue::default();
                         current_credential = None;
                         state["sign_in"]["connected"] = json!(false);
                         state["sign_in"]["can_save"] = json!(false);
@@ -585,11 +750,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             Event::Media(g, r) if g == play_generation => match r {
                 Ok(media) => {
-                    state["selection"] = json!(media.track);
-                    let url = proxy.grant(media.stream).await;
-                    player.send(Command::Load(g, url));
-                    player.send(Command::Pause(!desired_playing));
-                    state["status"] = json!("Track selected; playback requested");
+                    if let Err(error) = queue.update_selected(media.track.clone()) {
+                        state["error"] = json!(error.to_string());
+                        desired_playing = false;
+                        state["intent"] = json!("paused");
+                    } else {
+                        state["selection"] = json!(media.track);
+                        let url = proxy.grant(media.stream).await;
+                        player.send(Command::Load(g, url));
+                        player.send(Command::Pause(!desired_playing));
+                        state["status"] = json!("Track selected; playback requested");
+                    }
                 }
                 Err(e) => {
                     state["status"] = json!("Playback preparation failed");
@@ -600,6 +771,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             _ => continue,
         }
+        if let Some(track) = to_prepare
+            && let Some(provider) = provider.clone()
+        {
+            prepare_track(
+                &player,
+                &proxy,
+                &mut prepare_task,
+                &mut play_generation,
+                provider,
+                track.reference,
+                tx.clone(),
+            )
+            .await?;
+            state["selection"] = Value::Null;
+            state["audio"] = Value::Null;
+            state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
+            state["status"] = json!("Preparing selected queue entry");
+        }
+        state["queue"] = json!(queue.snapshot());
         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
         state["revision"] = json!(revision.to_string());
         updates.send_replace(state.clone());

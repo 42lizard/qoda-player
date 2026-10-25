@@ -53,6 +53,7 @@ pub struct Status {
     pub generation: u64,
     pub position_seconds: Option<f64>,
     pub idle: bool,
+    pub natural_eof: bool,
     pub paused: bool,
     pub error: Option<&'static str>,
 }
@@ -145,6 +146,7 @@ impl Player {
                             Command::Load(g, url) => {
                                 current.generation = g;
                                 current.error = None;
+                                current.natural_eof = false;
                                 current.position_seconds = None;
                                 entry = None;
                                 vec!["loadfile".into(), url, "replace".into()]
@@ -164,6 +166,7 @@ impl Player {
                             }
                             Command::Stop => {
                                 entry = None;
+                                current.natural_eof = false;
                                 current.position_seconds = None;
                                 vec!["stop".into()]
                             }
@@ -188,6 +191,9 @@ impl Player {
                     }
                     if event.id == 7 && !event.data.is_null() {
                         let end = &*event.data.cast::<EndFile>();
+                        if Some(end.entry) == entry && end.reason == 0 && end.error >= 0 {
+                            current.natural_eof = true;
+                        }
                         if Some(end.entry) == entry && end.error < 0 {
                             current.error =
                                 Some("Playback failed. Check server access and audio output.");
@@ -242,6 +248,62 @@ impl Drop for Player {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn silent_file(seconds: u32) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("qoda-native-{}.wav", uuid::Uuid::new_v4()));
+        let samples = 48000_u32 * seconds;
+        let mut wav = Vec::new();
+        wav.extend(b"RIFF");
+        wav.extend((36 + samples * 2).to_le_bytes());
+        wav.extend(b"WAVEfmt ");
+        wav.extend(16_u32.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(1_u16.to_le_bytes());
+        wav.extend(48000_u32.to_le_bytes());
+        wav.extend(96000_u32.to_le_bytes());
+        wav.extend(2_u16.to_le_bytes());
+        wav.extend(16_u16.to_le_bytes());
+        wav.extend(b"data");
+        wav.extend((samples * 2).to_le_bytes());
+        wav.resize(44 + samples as usize * 2, 0);
+        std::fs::write(&path, wav).unwrap();
+        path
+    }
+    fn wait_for(player: &Player, predicate: impl Fn(&Status) -> bool) -> Status {
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = player.status();
+            if predicate(&status) {
+                return status;
+            }
+            assert!(
+                std::time::Instant::now() < until,
+                "Native state timed out: {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    #[test]
+    fn natural_end_is_generation_scoped_and_stop_is_not_completion() {
+        let player = Player::with_output("null").unwrap();
+        let file = silent_file(1);
+        player.send(Command::Load(10, file.to_str().unwrap().into()));
+        player.send(Command::Pause(false));
+        wait_for(&player, |s| s.generation == 10 && s.idle && s.natural_eof);
+        assert!(player.status().error.is_none());
+        player.send(Command::Pause(true));
+        player.send(Command::Load(11, file.to_str().unwrap().into()));
+        wait_for(&player, |s| s.generation == 11 && !s.idle && s.paused);
+        assert!(!player.status().natural_eof);
+        player.send(Command::Stop);
+        wait_for(&player, |s| s.idle);
+        assert!(!player.status().natural_eof);
+        // A second native visit can complete; a stale previous EOF is not reused.
+        player.send(Command::Load(12, file.to_str().unwrap().into()));
+        player.send(Command::Pause(false));
+        wait_for(&player, |s| s.generation == 12 && s.idle && s.natural_eof);
+        drop(player);
+        std::fs::remove_file(file).unwrap();
+    }
     #[test]
     fn synthetic_null_output_load_pause_and_error() {
         let player = Player::with_output("null").unwrap();
