@@ -35,6 +35,8 @@ Credential handling, SQLite persistence, cache budgets, checkpoint/retry default
 
 [Player-side audio measurements](https://github.com/42lizard/qoda-player/issues/13) record decoded-sample and transition evidence from a synthetic libmpv harness. Hardware/DAC fidelity and real-device gapless continuity remain unverified.
 
+The [fidelity and ReplayGain contract](docs/adr/0002-fidelity-and-gain-contract.md) selects desktop PipeWire playback by default, explicit direct ALSA fidelity output, and Auto ReplayGain with a high-precision per-file gain path. Native output and gain transitions require qualification before they receive a verified label.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -107,7 +107,13 @@ Reliable provider evidence that previously accessible content is no longer permi
 Account access whose authentication secrets are retained only for the running application session. It requires sign-in again after the backend exits.
 
 **Desktop playback**:
-Listening that can coexist with audio from other applications.
+Listening that can coexist with audio from other applications and supports ordinary application volume control. Output conversion may be part of the desktop audio path.
 
 **Fidelity playback**:
-Listening intended to preserve decoded audio samples except for optional ReplayGain. The conditions under which this is guaranteed remain to be established.
+Listening intended to preserve decoded PCM sample values at a declared output boundary, except for selected ReplayGain processing and its output quantization. Unsupported conversion stops playback; configured intent and verified output are reported separately.
+
+**ReplayGain mode**:
+The selected loudness adjustment policy: Off, Track, Album, or Auto. Auto preserves album-level differences for an unshuffled album session and otherwise selects track-level adjustment, with missing-data fallbacks made explicit.
+
+**Output verification profile**:
+Evidence for a particular output path, format, package set, and processing configuration at a named measurement boundary. It does not imply verification of unmeasured downstream hardware or other configurations.
