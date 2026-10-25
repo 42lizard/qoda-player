@@ -151,10 +151,12 @@ The current window includes album details/covers, a track browser, Plex playlist
 ## Validation
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+./tools/check.sh
 ```
+
+`tools/check.sh` runs rustfmt, Clippy on all workspace targets/features, and the locked workspace tests. Every crate inherits the Rust and Clippy policy from the root `Cargo.toml`: the standard `clippy::all` group, denied correctness issues, explicit unsafe operations, checked must-use results, and guards against `dbg!`, `todo!` and `unimplemented!`. Fix diagnostics; use a narrowly scoped exception only when the code has a documented reason. Pedantic/restriction/nursery rules are selected individually as needed rather than enabled wholesale.
+
+The Clippy step uses `CARGO_BUILD_WARNINGS=deny`, the [recommended warnings-as-errors setting since Cargo 1.97](https://doc.rust-lang.org/clippy/usage.html#elevating-warning-to-errors). It makes both compiler and Clippy warnings fail the check without changing compiler lint flags and invalidating caches. The GitHub Actions **Rust checks** job runs the same script in an Arch container with Rust/Clippy/rustfmt, libmpv and SQLite. It checks production/test Rust code with synthetic null audio; it does not qualify Quickshell UI behavior, connect to Plex or access a desktop keyring. No editor or rust-analyzer settings are required by this policy.
 
 The 81 tests cover existing core state/fences, bounded private IPC (including a partial frame interrupted by an update), provider endpoint/metadata/secret handling, media range/host/grant revocation and cancellation, and native loading, pause and failure with generated silence through `ao=null`. Native tests never open a real audio output. Keyring tests use a private helper fixture to cover save/restore, idempotent forget, pending-save ordering, missing or malformed credentials, locked leftovers, sanitized diagnostics and timeout cleanup; they do not write test credentials into the real keyring.
 

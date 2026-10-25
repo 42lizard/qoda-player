@@ -26,3 +26,15 @@ rusqlite = { version = "0.41", features = ["backup"] }
 
 sha2 = "0.10"
 base64 = "0.22"
+
+# Inherited by every crate. Keep lint policy here rather than in individual files.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -2 }
+correctness = { level = "deny", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

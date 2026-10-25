@@ -1,0 +1,32 @@
+name: Rust checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    # Match Omarchy's Arch native libraries, especially current libmpv.
+    container: archlinux:base-devel
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install Rust and native dependencies
+        run: pacman -Syu --noconfirm --needed rust mpv sqlite pkgconf git python
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check formatting, lints and tests
+        run: ./tools/check.sh
