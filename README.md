@@ -8,7 +8,7 @@ The first working development slice has a Rust backend, Plex library browsing/se
 
 Run `./tools/dev.py` to build and open it. Use **Save sign-in** after connecting, then **Restore saved sign-in** on later launches. On the original validation machine, `./tools/dev.py --use-validation-login` can still explicitly reuse the validation sign-in. Nothing autoplays. See [development instructions](docs/development.md) for dependencies, sign-in, controls, process ownership and current limitations.
 
-The queue supports Add, FIFO Play next, independent duplicates, reorder/remove, Next, Replay, Clear upcoming and Stop & clear. Playback uses Desktop/PipeWire with ReplayGain off. SQLite checkpoints preserve the queue, selected occurrence, prepared version IDs and local position across backend restarts; restoration stays paused. The UI exposes save failures and Retry save, with daily consistent backups and explicit recovery. Previous/shuffle/repeat, playlist editing, gapless playback and fidelity output are still to come. Run `cargo test --workspace --locked` for the 42 automated checks.
+The queue supports Add, FIFO Play next, independent duplicates, reorder/remove, Previous/Next, stable shuffle, Repeat Off/One/All, Replay, Clear upcoming and Stop & clear. Playback uses Desktop/PipeWire with ReplayGain off. SQLite checkpoints preserve the queue, selected occurrence, prepared version IDs and local position across backend restarts; restoration stays paused. The UI exposes save failures and Retry save, with daily consistent backups and explicit recovery. Playlist editing, album/context browsing, artwork, gapless playback and fidelity output are still to come. Run `cargo test --workspace --locked` for the 53 automated checks.
 
 ## Agreed first-release scope
 

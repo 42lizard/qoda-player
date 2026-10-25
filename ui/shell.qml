@@ -36,7 +36,7 @@ ShellRoot {
     }
     function moveEntry(index, delta) {
         let target = index + delta;
-        if (target < 0 || target >= queueModel.length || queueModel[index].selected || queueModel[target].selected) return;
+        if (target < 0 || target >= queueModel.length || !queueModel[index].can_move || !queueModel[target].can_move) return;
         editQueue("queue_move", {occurrence: queueModel[index].id, before: delta < 0 ? queueModel[target].id : (target + 1 < queueModel.length ? queueModel[target + 1].id : null)});
     }
     function pageOffset(value, delta) {
@@ -187,7 +187,11 @@ ShellRoot {
                     Layout.preferredWidth: 340
                     Layout.fillHeight: true
                     Label { text: "Queue · " + root.queueModel.length; color: "#f2e9db"; font.pixelSize: 20; font.bold: true }
-                    Label { text: root.snapshot.queue && root.snapshot.queue.ended ? "End of selection · Play pending or Replay" : "Selected and upcoming"; color: "#acb8c8"; textFormat: Text.PlainText }
+                    RowLayout {
+                Button { text: "Shuffle: " + (root.snapshot.queue && root.snapshot.queue.shuffled ? "On" : "Off"); enabled: !!root.snapshot.queue; onClicked: root.editQueue("set_shuffle", {enabled: !root.snapshot.queue.shuffled}) }
+                Button { text: "Repeat: " + (root.snapshot.queue ? root.snapshot.queue.repeat : "off"); enabled: !!root.snapshot.queue; onClicked: { let modes = ["off", "one", "all"]; root.editQueue("set_repeat", {mode: modes[(modes.indexOf(root.snapshot.queue.repeat) + 1) % 3]}); } }
+                    }
+                    Label { text: root.snapshot.queue && root.snapshot.queue.navigating ? "Previous navigation · Next returns forward" : root.snapshot.queue && root.snapshot.queue.ended ? "End of selection · Play pending or Replay" : "Selected and upcoming"; color: "#acb8c8"; textFormat: Text.PlainText }
                     ListView {
                         id: queueView
                         Layout.fillWidth: true
@@ -211,8 +215,8 @@ ShellRoot {
                                 Label { text: modelData.track.artist; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                                 RowLayout {
                                     Button { text: "Play"; enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; onClicked: root.editQueue("queue_play", {occurrence: modelData.id}) }
-                                    Button { text: "↑"; enabled: !modelData.selected && index > 0 && !root.queueModel[index - 1].selected; onClicked: root.moveEntry(index, -1) }
-                                    Button { text: "↓"; enabled: !modelData.selected && index + 1 < root.queueModel.length; onClicked: root.moveEntry(index, 1) }
+                                    Button { text: "↑"; enabled: modelData.can_move && index > 0 && root.queueModel[index - 1].can_move; onClicked: root.moveEntry(index, -1) }
+                                    Button { text: "↓"; enabled: modelData.can_move && index + 1 < root.queueModel.length && root.queueModel[index + 1].can_move; onClicked: root.moveEntry(index, 1) }
                                     Button { text: "Remove"; onClicked: root.editQueue("queue_remove", {occurrence: modelData.id}) }
                                 }
                             }
@@ -222,6 +226,7 @@ ShellRoot {
                         Button { text: "Clear upcoming"; onClicked: root.editQueue("clear_upcoming") }
                         Button { text: "Stop & clear"; onClicked: root.editQueue("stop_clear") }
                     }
+                    Label { visible: !!root.snapshot.queue && root.snapshot.queue.navigation_dropped !== "0"; text: "Previous retains the latest 4096 nominal visits; earlier visits were omitted."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { text: "Queue checkpoints restore paused after backend restart."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
             }
@@ -229,6 +234,7 @@ ShellRoot {
             Label { text: root.snapshot.selection ? root.snapshot.selection.title + " · " + root.snapshot.selection.artist : "No track selected"; color: "#f2e9db"; textFormat: Text.PlainText }
             RowLayout {
                 Button { text: root.snapshot.intent === "playing" ? "Pause" : "Resume"; enabled: root.queueModel.length > 0 && !!root.snapshot.sign_in && root.snapshot.sign_in.connected; onClicked: root.send(root.snapshot.intent === "playing" ? "pause" : "resume") }
+                Button { text: "Previous"; enabled: !!root.snapshot.queue && root.snapshot.queue.previous_available; onClicked: root.editQueue("previous") }
                 Button { text: "Next track"; enabled: root.queueModel.length > 0; onClicked: root.editQueue("next") }
                 Button { text: "Replay"; enabled: !!root.snapshot.queue && root.snapshot.queue.membership_count > 0; onClicked: root.editQueue("replay") }
                 Label { text: "Seek (seconds)"; color: "#acb8c8" }
@@ -243,7 +249,7 @@ ShellRoot {
         target: "control"
         function show(): void { window.visible = true;  }
         function hide(): void { window.visible = false; }
-        function status(): string { return JSON.stringify({connected: socket.connected, instance: root.instance, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
+        function status(): string { return JSON.stringify({connected: socket.connected, instance: root.instance, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }

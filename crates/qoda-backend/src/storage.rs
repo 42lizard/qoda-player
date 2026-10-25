@@ -19,6 +19,7 @@ pub enum Error {
     Newer,
     Busy,
     Backup,
+    ReopenRequired,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -28,7 +29,7 @@ impl std::fmt::Display for Error {
   Self::Corrupt=>"The saved session is damaged. Existing data was preserved. Quit Qoda and use --restore-backup to recover a backup.",
   Self::Newer=>"The session uses a newer unsupported schema. Existing data will not be modified; use a compatible Qoda version.",
   Self::Busy=>"Session storage is busy. This change is not yet saved; choose Retry save.",
-  Self::Backup=>"The session was saved, but its backup could not be updated. Choose Retry save.",
+  Self::Backup=>"The session was saved, but its backup could not be updated. Choose Retry save.",Self::ReopenRequired=>"Session storage could not be opened. Existing data was preserved. Fix the problem and restart Qoda; new in-memory changes are not saved.",
  })
     }
 }
@@ -43,17 +44,30 @@ fn decode(value: &str) -> Result<Queue, Error> {
     struct Version {
         format: u8,
     }
-    if serde_json::from_str::<Version>(value)
+    match serde_json::from_str::<Version>(value)
         .map_err(|_| Error::Corrupt)?
         .format
-        != 1
     {
-        return Err(Error::Newer);
+        1 => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Legacy {
+                format: u8,
+                queue: serde_json::Value,
+            }
+            let legacy = serde_json::from_str::<Legacy>(value).map_err(|_| Error::Corrupt)?;
+            if legacy.format != 1 {
+                return Err(Error::Corrupt);
+            }
+            Queue::from_legacy(legacy.queue).map_err(|_| Error::Corrupt)
+        }
+        2 => serde_json::from_str::<Document>(value)
+            .map(|d| d.queue)
+            .map_err(|_| Error::Corrupt),
+        _ => Err(Error::Newer),
     }
-    serde_json::from_str::<Document>(value)
-        .map(|d| d.queue)
-        .map_err(|_| Error::Corrupt)
 }
+
 pub fn path() -> Result<PathBuf, Error> {
     std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
@@ -123,13 +137,13 @@ fn schema(conn: &Connection) -> Result<i64, Error> {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|_| Error::Corrupt)?;
-    if version > 1 {
+    if version > 2 {
         return Err(Error::Newer);
     }
     let id: i32 = conn
         .pragma_query_value(None, "application_id", |r| r.get(0))
         .map_err(|_| Error::Corrupt)?;
-    if version == 1 && id != APP_ID || version == 0 && id != 0 {
+    if version >= 1 && id != APP_ID || version == 0 && id != 0 {
         return Err(Error::Corrupt);
     }
     let check: String = conn
@@ -202,11 +216,30 @@ impl Store {
             tx.execute_batch("CREATE TABLE session(slot INTEGER PRIMARY KEY CHECK(slot=1),payload TEXT NOT NULL);").map_err(|_|Error::Unavailable)?;
             tx.pragma_update(None, "application_id", APP_ID)
                 .map_err(|_| Error::Unavailable)?;
-            tx.pragma_update(None, "user_version", 1)
+            tx.pragma_update(None, "user_version", 2)
                 .map_err(|_| Error::Unavailable)?;
             tx.commit().map_err(|_| Error::Unavailable)?;
         }
         let queue = load(&conn)?;
+        if version == 1 {
+            // Copy a consistent pre-migration database before the transaction.
+            let legacy_store = Self {
+                conn,
+                path: path.to_owned(),
+            };
+            legacy_store.backup(true)?;
+            conn = legacy_store.conn;
+            let payload = serde_json::to_string(&Document {
+                format: 2,
+                queue: queue.clone(),
+            })
+            .map_err(|_| Error::Corrupt)?;
+            let tx = conn.transaction().map_err(|_| Error::Unavailable)?;
+            tx.execute("INSERT INTO session(slot,payload) VALUES(1,?1) ON CONFLICT(slot) DO UPDATE SET payload=excluded.payload",[payload]).map_err(|_|Error::Unavailable)?;
+            tx.pragma_update(None, "user_version", 2)
+                .map_err(|_| Error::Unavailable)?;
+            tx.commit().map_err(|_| Error::Unavailable)?;
+        }
         conn.pragma_update(None, "journal_mode", "DELETE")
             .map_err(|_| Error::Unavailable)?;
         conn.pragma_update(None, "synchronous", "FULL")
@@ -223,7 +256,7 @@ impl Store {
     }
     fn save(&mut self, queue: &Queue) -> Result<Option<Error>, Error> {
         let payload = serde_json::to_string(&Document {
-            format: 1,
+            format: 2,
             queue: queue.clone(),
         })
         .map_err(|_| Error::Corrupt)?;
@@ -243,6 +276,9 @@ impl Store {
         self.path.parent().unwrap().join("backups")
     }
     fn backup_daily(&self) -> Result<(), Error> {
+        self.backup(false)
+    }
+    fn backup(&self, migration: bool) -> Result<(), Error> {
         let dir = self.backups();
         private_dir(&dir)?;
         let day = SystemTime::now()
@@ -252,12 +288,14 @@ impl Store {
             / 86400;
         let prefix = format!("session-{day:010}-");
         let mut backups = backup_files(&dir)?;
-        if !backups.iter().any(|p| {
-            p.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with(&prefix)
-        }) {
+        if migration
+            || !backups.iter().any(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(&prefix)
+            })
+        {
             let target = dir.join(format!("{prefix}{}.sqlite3", uuid::Uuid::new_v4()));
             let temp = dir.join(format!(".backup-{}.sqlite3", uuid::Uuid::new_v4()));
             private_file(&temp, true)?;
@@ -276,8 +314,7 @@ impl Store {
                 let _ = std::fs::remove_file(&temp);
             }
             result?;
-            backups.push(target);
-            backups.sort();
+            backups = backup_files(&dir)?;
         }
         while backups.len() > 3 {
             std::fs::remove_file(backups.remove(0)).map_err(|_| Error::Backup)?;
@@ -338,7 +375,20 @@ fn backup_files(dir: &Path) -> Result<Vec<PathBuf>, Error> {
             files.push(item.path());
         }
     }
-    files.sort();
+    files.sort_by_key(|path| {
+        let day = path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .chars()
+            .skip(8)
+            .take(10)
+            .collect::<String>();
+        let modified = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .unwrap_or(UNIX_EPOCH);
+        (day, modified, path.clone())
+    });
     Ok(files)
 }
 pub fn restore_latest(path: &Path) -> Result<(), Error> {
@@ -354,7 +404,7 @@ pub fn restore_latest(path: &Path) -> Result<(), Error> {
         .pop()
         .ok_or(Error::Backup)?;
     let source = connection(&backup, true)?;
-    if schema(&source)? != 1 {
+    if !matches!(schema(&source)?, 1 | 2) {
         return Err(Error::Corrupt);
     }
     load(&source)?;
@@ -440,10 +490,15 @@ impl Controller {
                 .as_ref()
                 .map_err(|e| *e)
                 .and_then(|path| Store::open(path));
+            let opening_error = opened.as_ref().err().copied();
             let (mut store, queue) = match opened {
                 Ok((s, q)) => (Some(s), Ok(q)),
                 Err(e) => (None, Err(e)),
             };
+            let queue = queue.map_err(|error| match error {
+                Error::Corrupt | Error::Newer | Error::Unsafe => error,
+                _ => Error::ReopenRequired,
+            });
             let _ = ready.send(queue);
             let mut purged = 0;
             while let Ok(first) = rx.recv() {
@@ -458,7 +513,12 @@ impl Controller {
                 let serial = latest.serial;
                 let result = (|| {
                     if store.is_none() {
-                        store = Some(Store::open(path.as_ref().map_err(|e| *e)?)?.0);
+                        return Err(match opening_error {
+                            Some(Error::Corrupt) => Error::Corrupt,
+                            Some(Error::Newer) => Error::Newer,
+                            Some(Error::Unsafe) => Error::Unsafe,
+                            _ => Error::ReopenRequired,
+                        });
                     }
                     let store = store.as_mut().unwrap();
                     if latest.purge_epoch > purged {
@@ -559,6 +619,97 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
+    fn legacy_payload(queue: &Queue) -> String {
+        let mut value = serde_json::to_value(queue).unwrap();
+        let fields = value.as_object_mut().unwrap();
+        for key in [
+            "order",
+            "shuffled",
+            "repeat",
+            "route",
+            "cursor",
+            "navigating",
+            "recorded",
+            "navigation_dropped",
+        ] {
+            fields.remove(key);
+        }
+        serde_json::json!({"format":1,"queue":value}).to_string()
+    }
+    #[tokio::test]
+    async fn a_failed_initial_load_cannot_later_overwrite_recovered_data_with_empty_state() {
+        let f = Fixture::new();
+        private_file(&f.path, true).unwrap();
+        std::fs::write(&f.path, "corrupt fixture").unwrap();
+        let (events, _replies) = tokio::sync::mpsc::channel(8);
+        let (mut controller, ready) = Controller::start(Ok(f.path.clone()), events).await;
+        assert!(ready.is_err());
+        std::fs::remove_file(&f.path).unwrap();
+        let (mut repaired, _) = Store::open(&f.path).unwrap();
+        repaired.save(&queued("recovered")).unwrap();
+        drop(repaired);
+        assert!(controller.flush(Queue::default(), 0).await.is_err());
+        let (_, saved) = Store::open(&f.path).unwrap();
+        assert_eq!(saved.snapshot().entries[0].track.title, "recovered");
+    }
+    #[test]
+    fn legacy_migration_backs_up_then_preserves_queue_and_position() {
+        let f = Fixture::new();
+        let (store, _) = Store::open(&f.path).unwrap();
+        let mut queue = queued("legacy");
+        queue.advance().unwrap();
+        queue.set_position(7.5).unwrap();
+        let session = queue.snapshot().session;
+        let payload = legacy_payload(&queue);
+        store
+            .conn
+            .execute("INSERT INTO session VALUES(1,?1)", [payload.clone()])
+            .unwrap();
+        store.conn.pragma_update(None, "user_version", 1).unwrap();
+        drop(store);
+        let (store, restored) = Store::open(&f.path).unwrap();
+        assert_eq!(restored.snapshot().session, session);
+        assert_eq!(restored.position(), 7.5);
+        assert!(!restored.snapshot().shuffled);
+        assert_eq!(restored.snapshot().repeat, crate::queue::Repeat::Off);
+        assert_eq!(
+            store
+                .conn
+                .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        let backup = backup_files(&store.backups()).unwrap().pop().unwrap();
+        let old = connection(&backup, true).unwrap();
+        assert_eq!(schema(&old).unwrap(), 1);
+        assert_eq!(
+            old.query_row("SELECT payload FROM session", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            payload
+        );
+    }
+    #[test]
+    fn failed_migration_rolls_back_without_erasing_legacy_data() {
+        let f = Fixture::new();
+        let (store, _) = Store::open(&f.path).unwrap();
+        let payload = legacy_payload(&queued("legacy"));
+        store
+            .conn
+            .execute("INSERT INTO session VALUES(1,?1)", [payload.clone()])
+            .unwrap();
+        store.conn.pragma_update(None, "user_version", 1).unwrap();
+        store.conn.execute_batch("CREATE TRIGGER reject_migration BEFORE UPDATE ON session BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+        drop(store);
+        assert!(Store::open(&f.path).is_err());
+        let conn = connection(&f.path, true).unwrap();
+        assert_eq!(schema(&conn).unwrap(), 1);
+        assert_eq!(
+            conn.query_row("SELECT payload FROM session", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            payload
+        );
+        assert!(!backup_files(&f.dir.join("backups")).unwrap().is_empty());
+    }
     #[test]
     fn daily_backup_retention_is_bounded_and_purge_covers_partial_artifacts() {
         let f = Fixture::new();
@@ -636,7 +787,7 @@ mod tests {
         assert_eq!(std::fs::read(&f.path).unwrap(), before);
         std::fs::remove_file(&f.path).unwrap();
         let (store, _) = Store::open(&f.path).unwrap();
-        store.conn.pragma_update(None, "user_version", 2).unwrap();
+        store.conn.pragma_update(None, "user_version", 3).unwrap();
         drop(store);
         let before = std::fs::read(&f.path).unwrap();
         assert!(matches!(Store::open(&f.path), Err(Error::Newer)));
@@ -647,7 +798,7 @@ mod tests {
         store.save(&queued("future")).unwrap();
         store
             .conn
-            .execute("UPDATE session SET payload='{\"format\":2}'", [])
+            .execute("UPDATE session SET payload='{\"format\":3}'", [])
             .unwrap();
         drop(store);
         let before = std::fs::read(&future.path).unwrap();
