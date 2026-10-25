@@ -1,4 +1,5 @@
 mod player;
+mod playlists;
 mod proxy;
 mod queue;
 mod storage;
@@ -25,6 +26,7 @@ enum Event {
     Advance(u64),
     Stored(storage::Reply),
     Checkpoint,
+    Playlists(playlists::Reply),
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
@@ -281,6 +283,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut revision = 0_u64;
 
     let mut handled_end = None;
+    let mut playlists = playlists::Controller::default();
     let mut presented_generation = None;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
     let (tx, mut events) = mpsc::channel(64);
@@ -296,6 +299,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         storage_result(&mut state, Err(error));
     }
     state["queue"] = json!(queue.snapshot());
+    state["playlists"] = json!(playlists.view);
+    state["account_epoch"] = json!("0");
     if queue.snapshot().membership_count > 0 {
         state["status"] = json!("Session restored paused. Restore Plex sign-in to resume.");
     }
@@ -390,6 +395,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             Event::Checkpoint => {}
+            Event::Playlists(reply) => {
+                playlists.apply(reply, auth_generation);
+            }
             Event::Advance(g) if g == play_generation => {
                 match queue.complete(presented_generation == Some(g)) {
                     Ok(Some(track)) => to_prepare = Some(track),
@@ -482,6 +490,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     .await;
                             let _ = tx.send(Event::Pin(g, r)).await;
                         }));
+                    }
+                    "playlist_list" | "playlist_open" | "playlist_refresh" | "playlist_create"
+                    | "playlist_edit" => {
+                        if matches!(v["op"].as_str(), Some("playlist_create" | "playlist_edit"))
+                            && v["account_epoch"].as_str()
+                                != Some(auth_generation.to_string().as_str())
+                        {
+                            state["error"] = json!(
+                                "The account changed. Refresh the app before editing a playlist."
+                            );
+                        } else if let Some(provider) = provider.clone() {
+                            if let Err(error) =
+                                playlists.command(&v, provider, auth_generation, tx.clone())
+                            {
+                                state["error"] = json!(error);
+                            }
+                        } else {
+                            state["error"] =
+                                json!("Connect Plex before browsing or editing playlists.");
+                        }
+                    }
+                    "playlist_play" | "playlist_enqueue" => {
+                        let result: Result<(), String> = (|| {
+                            check_queue(&queue, &v).map_err(|e| e.to_string())?;
+                            let reference = serde_json::from_value::<qoda_provider::PlaylistRef>(
+                                v["reference"].clone(),
+                            )
+                            .map_err(|_| "Choose a loaded playlist.")?;
+                            let snapshot = playlists.checked_snapshot(
+                                &reference,
+                                v["expected_revision"].as_str().unwrap_or_default(),
+                            )?;
+                            let start = if let Some(id) = v["item_id"].as_str() {
+                                snapshot
+                                    .entries
+                                    .iter()
+                                    .position(|e| e.id == id)
+                                    .ok_or("This playlist entry changed. Refresh first.")?
+                            } else {
+                                0
+                            };
+                            let tracks=snapshot.entries[start..].iter().map(|entry|entry.track.clone().ok_or_else(||"Some playlist source references could not be resolved; the snapshot was not partially queued.".to_owned())).collect::<Result<Vec<_>,_>>()?;
+                            if v["op"] == "playlist_play" {
+                                if provider.is_none() {
+                                    return Err("Restore Plex sign-in before playback.".into());
+                                }
+                                to_prepare =
+                                    queue.replace_many(tracks).map_err(|e| e.to_string())?;
+                                desired_playing = true;
+                            } else {
+                                queue.enqueue_many(tracks).map_err(|e| e.to_string())?;
+                            }
+                            Ok(())
+                        })();
+                        if let Err(error) = result {
+                            state["error"] = json!(error);
+                        }
                     }
                     "browse" => {
                         if let Some(p) = provider.clone()
@@ -723,6 +788,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
                         provider = None;
+                        playlists.invalidate();
                         queue = queue.empty_session();
                         purge_epoch = purge_epoch
                             .checked_add(1)
@@ -922,6 +988,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state["status"] = json!("Preparing selected queue entry");
         }
         state["queue"] = json!(queue.snapshot());
+        state["playlists"] = json!(playlists.view);
+        state["account_epoch"] = json!(auth_generation.to_string());
         let stamp = (queue.durable_stamp(), purge_epoch);
         if force_save || stamp != last_requested {
             last_requested = stamp;

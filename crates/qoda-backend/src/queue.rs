@@ -261,6 +261,29 @@ impl Queue {
         self.revision = revision;
         Ok(id)
     }
+    pub fn enqueue_many(&mut self, tracks: Vec<Track>) -> Result<(), Error> {
+        let mut staged = self.clone();
+        for track in tracks {
+            staged.enqueue(track, false)?;
+        }
+        *self = staged;
+        Ok(())
+    }
+    pub fn replace_many(&mut self, tracks: Vec<Track>) -> Result<Option<Track>, Error> {
+        if tracks.is_empty() {
+            return Err(Error::Missing);
+        }
+        let mut staged = self.empty_session();
+        staged.enqueue_many(tracks)?;
+        let first = staged.pending()[0];
+        let selected = staged.select(first)?;
+        if staged.shuffled {
+            staged.shuffled = false;
+            staged.set_shuffle(true)?;
+        }
+        *self = staged;
+        Ok(Some(selected))
+    }
     pub fn replace(&mut self, track: Track) -> Result<OccurrenceId, Error> {
         let mut next = self.empty_session();
         let id = next.enqueue(track, false)?;
@@ -759,6 +782,34 @@ mod tests {
     }
     fn observed(q: &mut Queue) {
         q.confirm_presented().unwrap();
+    }
+    #[test]
+    fn playlist_snapshots_keep_duplicates_and_do_not_follow_saved_playlist_edits() {
+        let mut q = Queue::default();
+        let duplicate = track("same");
+        let mut playlist = vec![duplicate.clone(), duplicate.clone(), track("last")];
+        q.replace_many(playlist.clone()).unwrap();
+        let ids = q
+            .snapshot()
+            .entries
+            .iter()
+            .map(|e| e.id)
+            .collect::<HashSet<_>>();
+        assert_eq!(ids.len(), 3);
+        playlist.remove(0);
+        playlist[0].title = "renamed elsewhere".into();
+        assert_eq!(titles(&q), ["same", "same", "last"]);
+    }
+    #[test]
+    fn oversized_playlist_batch_does_not_partially_replace_or_append() {
+        let mut q = Queue::default();
+        q.replace(track("original")).unwrap();
+        let before = serde_json::to_value(&q).unwrap();
+        let tracks = vec![track("many"); LIMIT + 1];
+        assert!(q.enqueue_many(tracks.clone()).is_err());
+        assert_eq!(serde_json::to_value(&q).unwrap(), before);
+        assert!(q.replace_many(tracks).is_err());
+        assert_eq!(serde_json::to_value(&q).unwrap(), before);
     }
     #[test]
     fn repeat_does_not_retry_an_unconfirmed_visit_and_modes_survive_session_replacement() {

@@ -7,13 +7,31 @@ import Quickshell.Io
 
 ShellRoot {
     id: root
-    property var snapshot: ({libraries: [], status: "Connecting backend", intent: "paused"})
+    property var snapshot: ({libraries: [], status: "Connecting backend", intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
     property var libraryModel: []
     property var trackModel: []
     property var queueModel: []
     property string queueJson: "[]"
     property string libraryJson: "[]"
     property string trackJson: "[]"
+    property var playlistModel: []
+    property var playlistEntries: []
+    property var playlistSeed: null
+    property bool accountExpanded: false
+    property string playlistJson: "[]"
+    property string playlistEntriesJson: "[]"
+    property var playlistView: snapshot.playlists ? snapshot.playlists.selected : null
+    function playlistEdit(edit) {
+        if (playlistView) send("playlist_edit", {reference: playlistView.playlist.reference, expected_revision: playlistView.revision, edit: edit});
+    }
+    function playlistQueue(op, item) {
+        if (!playlistView) return;
+        let fields = {reference: playlistView.playlist.reference, expected_revision: playlistView.revision};
+        if (item) fields.item_id = item;
+        editQueue(op, fields);
+    }
+    function refreshPlaylists() { if (libraryId) send("playlist_refresh", {source: libraryId}); }
+
     property string libraryId: ""
     property string instance: ""
     property int serial: 0
@@ -23,6 +41,7 @@ ShellRoot {
         let data = fields || {};
         data.op = op;
         data.instance = instance;
+        data.account_epoch = snapshot.account_epoch || "0";
         data.id = nonce + "-" + (++serial);
         socket.write(JSON.stringify(data) + "\n");
         socket.flush();
@@ -76,15 +95,19 @@ ShellRoot {
                         root.libraryId = next.page.source;
                         search.text = next.page.query;
                     }
-                    if (!next.libraries || next.libraries.length === 0) { root.libraryId = ""; search.text = ""; }
+                    if (!next.libraries || next.libraries.length === 0) { root.libraryId = ""; search.text = ""; root.playlistSeed = null; }
                     root.instance = next.instance;
+                    root.snapshot = next;
                     let libraries = JSON.stringify(next.libraries || []);
                     if (libraries !== root.libraryJson) { root.libraryJson = libraries; root.libraryModel = next.libraries || []; }
                     let tracks = JSON.stringify(next.page ? next.page.tracks : []);
                     if (tracks !== root.trackJson) { root.trackJson = tracks; root.trackModel = next.page ? next.page.tracks : []; }
                     let queue = JSON.stringify(next.queue ? next.queue.entries : []);
                     if (queue !== root.queueJson) { root.queueJson = queue; root.queueModel = next.queue ? next.queue.entries : []; }
-                    root.snapshot = next;
+                    let lists = JSON.stringify(next.playlists && next.playlists.list ? next.playlists.list.playlists : []);
+                    if (lists !== root.playlistJson) { root.playlistJson = lists; root.playlistModel = next.playlists && next.playlists.list ? next.playlists.list.playlists : []; }
+                    let entries = JSON.stringify(next.playlists && next.playlists.selected ? next.playlists.selected.entries : []);
+                    if (entries !== root.playlistEntriesJson) { root.playlistEntriesJson = entries; root.playlistEntries = next.playlists && next.playlists.selected ? next.playlists.selected.entries : []; }
                 } catch (e) { }
             }
         }
@@ -96,7 +119,7 @@ ShellRoot {
         title: "Qoda Player"
         visible: true
         implicitWidth: 1200
-        implicitHeight: 760
+        implicitHeight: 820
         color: "#141820"
         onClosed: visible = false
 
@@ -107,12 +130,14 @@ ShellRoot {
             RowLayout {
                 Label { text: "Qoda"; color: "#f2e9db"; font.pixelSize: 28; font.bold: true }
                 Label { text: "Plex music"; color: "#acb8c8"; Layout.fillWidth: true }
-                Button { text: "Connect Plex (this session)"; enabled: socket.connected; onClicked: root.send("auth_start") }
+                Button { text: "Account"; onClicked: root.accountExpanded = !root.accountExpanded }
+                Button { text: "Connect Plex (this session)"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
                 Button { text: "Disconnect"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes the saved queue and session backups. Keeps saved sign-in."; onClicked: root.send("disconnect") }
                 Button { text: "Hide"; onClicked: window.visible = false }
                 Button { text: "Quit"; onClicked: { root.send("quit"); Qt.quit(); } }
             }
             RowLayout {
+                visible: root.accountExpanded || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || root.snapshot.sign_in.saved !== "present"
                 Button { text: "Restore saved sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
                 Button { text: "Save sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
                 Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, saved queue and session backups. Keeps general preferences."; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
@@ -135,18 +160,22 @@ ShellRoot {
                     Layout.preferredWidth: 300
                     model: root.libraryModel
                     textRole: "title"
-                    onActivated: index => { root.libraryId = model[index].id; root.browse("0"); }
+                    onActivated: index => { root.libraryId = model[index].id; root.playlistSeed = null; root.browse("0"); if (libraryTabs.currentIndex === 1) root.refreshPlaylists(); }
                     displayText: root.libraryId ? currentText : "Choose a music library"
                 }
-                TextField { id: search; Layout.fillWidth: true; placeholderText: "Search this library"; onTextEdited: searchDelay.restart(); onAccepted: { searchDelay.stop(); root.browse("0"); } }
+                TabBar { id: libraryTabs; Layout.preferredWidth: 230; TabButton { text: "Library" } TabButton { text: "Playlists" } onCurrentIndexChanged: { if (currentIndex === 1 && root.libraryId) root.refreshPlaylists(); } }
+                TextField { visible: libraryTabs.currentIndex === 0; id: search; Layout.fillWidth: true; placeholderText: "Search this library"; onTextEdited: searchDelay.restart(); onAccepted: { searchDelay.stop(); root.browse("0"); } }
             }
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 16
                 ColumnLayout {
+                    visible: libraryTabs.currentIndex === 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+            Label { text: "Click a track title to select the first track for a new playlist."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { visible: !!root.playlistView; text: { if (!root.playlistView) return ""; let library = root.libraryModel.find(item => item.id === root.playlistView.playlist.reference.source); return "+ Playlist saves to: " + root.playlistView.playlist.title + (library ? " · " + library.server : ""); } color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
             ListView {
                 id: tracks
                 Layout.fillWidth: true
@@ -160,8 +189,9 @@ ShellRoot {
                     required property int index
                     width: tracks.width
                     height: 68
-                    color: index % 2 ? "#1a202a" : "#202735"
+                    color: root.playlistSeed && root.playlistSeed.reference.source === modelData.reference.source && root.playlistSeed.reference.key === modelData.reference.key ? "#344354" : index % 2 ? "#1a202a" : "#202735"
                     radius: 5
+                    TapHandler { onTapped: root.playlistSeed = modelData }
                     RowLayout {
                         anchors.fill: parent
                         anchors.margins: 10
@@ -172,6 +202,7 @@ ShellRoot {
                         }
                         Button { text: "Play now"; onClicked: root.send("play", {source: modelData.reference.source, key: modelData.reference.key}) }
                         Button { text: "Next"; onClicked: root.editQueue("play_next", {source: modelData.reference.source, key: modelData.reference.key}) }
+                        Button { text: "+ Playlist"; enabled: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.playlistEdit({action: "append", track: modelData.reference}) }
                         Button { text: "+ Queue"; onClicked: root.editQueue("enqueue", {source: modelData.reference.source, key: modelData.reference.key}) }
                     }
                 }
@@ -181,6 +212,76 @@ ShellRoot {
                 Button { text: "Previous"; enabled: !!root.snapshot.page && root.snapshot.page.offset !== "0"; onClicked: root.browse(root.pageOffset(root.snapshot.page.offset, -100)) }
                 Button { text: "Next"; enabled: !!root.snapshot.page && root.snapshot.page.has_more; onClicked: root.browse(root.pageOffset(root.snapshot.page.offset, 100)) }
             }
+                }
+                ColumnLayout {
+                    visible: libraryTabs.currentIndex === 1
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Label { text: "Audio playlists on the selected library's server"; color: "#f2e9db"; font.bold: true }
+                    Label { text: root.snapshot.playlists ? root.snapshot.playlists.message : "Choose a library, then refresh."; color: root.snapshot.playlists && root.snapshot.playlists.uncertain ? "#f2a89b" : "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
+                    RowLayout {
+                        Button { text: "Refresh from Plex"; enabled: !!root.libraryId && !!root.snapshot.playlists && !root.snapshot.playlists.busy; onClicked: root.refreshPlaylists() }
+                        Button { text: "Previous lists"; enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.offset !== "0" && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, -100)}) }
+                        Button { text: "More lists"; enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.has_more && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, 100)}) }
+                    }
+                    ComboBox {
+                        id: savedLists
+                        Layout.fillWidth: true
+                        model: root.playlistModel
+                        textRole: "title"
+                        displayText: root.playlistView ? root.playlistView.playlist.title : "Choose a saved playlist"
+                        enabled: !!root.snapshot.playlists && !root.snapshot.playlists.busy
+                        contentItem: Text { text: savedLists.displayText; textFormat: Text.PlainText; color: "#f2e9db"; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+                        delegate: ItemDelegate {
+                            id: playlistDelegate
+                            required property var modelData
+                            width: savedLists.width
+                            text: modelData.title + (modelData.smart ? " · Smart / read-only" : "")
+                            contentItem: Text { text: playlistDelegate.text; textFormat: Text.PlainText; color: "#f2e9db"; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+                        }
+                        onActivated: index => root.send("playlist_open", {reference: model[index].reference})
+                    }
+                    RowLayout {
+                        TextField { id: playlistName; placeholderText: "New playlist title / rename to…"; maximumLength: 512; Layout.fillWidth: true }
+                        Button { text: "Create from selected track"; enabled: !!root.libraryId && !!root.playlistSeed && playlistName.text.trim().length > 0 && !!root.snapshot.playlists && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.send("playlist_create", {source: root.libraryId, title: playlistName.text, seed: root.playlistSeed.reference}) }
+                    }
+                    Label { visible: !!root.playlistSeed; text: root.playlistSeed ? "New playlist starts with: " + root.playlistSeed.title : "Select a track in Library to create a playlist."; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: root.playlistView ? root.playlistView.playlist.title + (root.playlistView.playlist.can_edit ? " · Edits are saved to Plex" : " · Read-only") : "Open a playlist"; color: "#f2e9db"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    RowLayout {
+                        Button { text: "Play playlist"; enabled: !!root.playlistView && root.playlistEntries.length > 0 && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_play", null) }
+                        Button { text: "+ Queue"; enabled: !!root.playlistView && root.playlistEntries.length > 0 && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_enqueue", null) }
+                        Button { text: "Rename"; enabled: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain && playlistName.text.trim().length > 0; onClicked: root.playlistEdit({action: "rename", title: playlistName.text}) }
+                        Button { text: "Delete from Plex"; ToolTip.visible: hovered; ToolTip.text: "Deletes this saved playlist from Plex. The local queue is kept."; enabled: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.playlistEdit({action: "delete"}) }
+                    }
+                    ListView {
+                        id: playlistTracks
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: root.playlistEntries
+                        spacing: 4
+                        ScrollBar.vertical: ScrollBar {}
+                        delegate: Rectangle {
+                            required property var modelData
+                            required property int index
+                            width: playlistTracks.width
+                            height: 62
+                            color: index % 2 ? "#1a202a" : "#202735"
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Label { text: modelData.title; color: "#f2e9db"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Label { text: modelData.track ? modelData.artist : "Source unavailable or unresolved"; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                                }
+                                Button { text: "Play from here"; enabled: !!root.playlistView && !!modelData.track && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_play", modelData.id) }
+                                Button { text: "↑"; enabled: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain && index > 0; onClicked: root.playlistEdit({action: "move", item_id: modelData.id, after: index > 1 ? root.playlistEntries[index - 2].id : null}) }
+                                Button { text: "↓"; enabled: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain && index + 1 < root.playlistEntries.length; onClicked: root.playlistEdit({action: "move", item_id: modelData.id, after: root.playlistEntries[index + 1].id}) }
+                                Button { text: "Remove"; enabled: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.playlistEdit({action: "remove", item_id: modelData.id}) }
+                            }
+                        }
+                    }
                 }
                 Rectangle { width: 1; Layout.fillHeight: true; color: "#394355" }
                 ColumnLayout {
@@ -249,7 +350,8 @@ ShellRoot {
         target: "control"
         function show(): void { window.visible = true;  }
         function hide(): void { window.visible = false; }
-        function status(): string { return JSON.stringify({connected: socket.connected, instance: root.instance, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
+        function browsePlaylists(): void { libraryTabs.currentIndex = 1; window.visible = true; }
+        function status(): string { return JSON.stringify({geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }

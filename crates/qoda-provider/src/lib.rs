@@ -31,6 +31,76 @@ pub struct CatalogPage {
     pub tracks: Vec<Track>,
     pub has_more: bool,
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlaylistRef {
+    pub source: SourceId,
+    pub key: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Playlist {
+    pub reference: PlaylistRef,
+    pub title: String,
+    pub smart: bool,
+    pub can_edit: bool,
+    pub item_count: Counter,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlaylistPage {
+    pub source: SourceId,
+    pub offset: Counter,
+    pub playlists: Vec<Playlist>,
+    pub has_more: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlaylistEntry {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub track: Option<Track>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlaylistSnapshot {
+    pub playlist: Playlist,
+    pub revision: String,
+    pub entries: Vec<PlaylistEntry>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum PlaylistEdit {
+    Rename {
+        title: String,
+    },
+    Delete,
+    Append {
+        track: TrackRef,
+    },
+    Remove {
+        item_id: String,
+    },
+    Move {
+        item_id: String,
+        after: Option<String>,
+    },
+}
+#[derive(Clone, Debug)]
+pub enum PlaylistChange {
+    Create {
+        source: SourceId,
+        title: String,
+        seed: Option<TrackRef>,
+    },
+    Update {
+        reference: PlaylistRef,
+        expected_revision: String,
+        edit: PlaylistEdit,
+    },
+}
+#[derive(Clone, Debug)]
+pub enum PlaylistOutcome {
+    Saved(PlaylistSnapshot),
+    Deleted,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderError {
     Network,
@@ -43,6 +113,11 @@ pub enum ProviderError {
     UnsupportedMedia,
     InvalidCredential,
     InvalidRange,
+    Unsupported,
+    PlaylistChanged,
+    UncertainMutation,
+    ReadOnly,
+    InvalidPlaylist,
 }
 impl std::fmt::Display for ProviderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,12 +132,27 @@ impl std::fmt::Display for ProviderError {
             Self::UnsupportedMedia => "This media version is not supported.",
             Self::InvalidCredential => "The saved sign-in could not be read.",
             Self::InvalidRange => "The requested media range is invalid.",
+            Self::Unsupported=>"This provider does not support this playlist action.",
+            Self::PlaylistChanged=>"The playlist changed. Refresh and review its contents before editing again.",
+            Self::UncertainMutation=>"The playlist edit may have reached Plex. Refresh and inspect the result before making another edit; the request was not retried.",
+            Self::ReadOnly=>"This playlist is read-only in Qoda. Smart playlists cannot be edited here.",
+            Self::InvalidPlaylist=>"The playlist request or complete playlist snapshot is not supported.",
         })
     }
 }
 impl std::error::Error for ProviderError {}
 
 pub trait MusicProvider: Send + Sync {
+    fn playlists(&self, _source: SourceId, _offset: u64) -> ProviderFuture<'_, PlaylistPage> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
+    fn playlist(&self, _reference: PlaylistRef) -> ProviderFuture<'_, PlaylistSnapshot> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
+    fn edit_playlist(&self, _change: PlaylistChange) -> ProviderFuture<'_, PlaylistOutcome> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
+
     fn libraries(&self) -> Vec<Library>;
     fn tracks(
         &self,

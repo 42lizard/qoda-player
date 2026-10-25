@@ -1,3 +1,4 @@
+mod playlists;
 use crate::*;
 use futures_util::StreamExt;
 use reqwest::{
@@ -241,6 +242,7 @@ impl BrowserPin {
 }
 #[derive(Clone)]
 struct Source {
+    server_id: String,
     view: Library,
     base: Url,
     headers: HeaderMap,
@@ -360,6 +362,7 @@ impl PlexProvider {
                     sources.insert(
                         id,
                         Source {
+                            server_id: server.id.clone(),
                             view: Library {
                                 id,
                                 title: attr(node, "title"),
@@ -409,6 +412,16 @@ fn parse_track(node: Node<'_, '_>, source: SourceId) -> Result<Track, ProviderEr
     })
 }
 impl MusicProvider for PlexProvider {
+    fn playlists(&self, source: SourceId, offset: u64) -> ProviderFuture<'_, PlaylistPage> {
+        Box::pin(self.playlist_list(source, offset))
+    }
+    fn playlist(&self, reference: PlaylistRef) -> ProviderFuture<'_, PlaylistSnapshot> {
+        Box::pin(self.playlist_snapshot(reference))
+    }
+    fn edit_playlist(&self, change: PlaylistChange) -> ProviderFuture<'_, PlaylistOutcome> {
+        Box::pin(self.playlist_change(change))
+    }
+
     fn libraries(&self) -> Vec<Library> {
         let mut v: Vec<_> = self.sources.values().map(|s| s.view.clone()).collect();
         v.sort_by(|a, b| (&a.server, &a.title).cmp(&(&b.server, &b.title)));
