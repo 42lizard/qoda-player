@@ -1,5 +1,6 @@
 mod albums;
 mod artwork;
+mod catalog;
 mod gapless;
 mod mpris;
 mod player;
@@ -237,6 +238,7 @@ fn guarded_queue_command(op: &str) -> bool {
     matches!(
         op,
         "play"
+            | "play_selected"
             | "album_play"
             | "playlist_play"
             | "queue_play"
@@ -251,6 +253,8 @@ fn guarded_queue_command(op: &str) -> bool {
             | "queue_move"
             | "enqueue"
             | "play_next"
+            | "enqueue_selected"
+            | "play_next_selected"
             | "set_shuffle"
             | "set_repeat"
             | "set_gapless"
@@ -263,6 +267,7 @@ fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
     matches!(
         op,
         "play"
+            | "play_selected"
             | "album_play"
             | "playlist_play"
             | "queue_play"
@@ -438,6 +443,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     state["playlists"] = json!(playlists.view);
     state["albums"] = json!(albums.view);
     state["account_epoch"] = json!("0");
+    state["catalog"] = json!({"revision":"0","busy":false});
     if queue.snapshot().membership_count > 0 {
         state["status"] = json!("Session restored paused. Restore Plex sign-in to resume.");
     }
@@ -622,6 +628,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             event
         };
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
+            && catalog::is_batch(request["op"].as_str().unwrap_or(""))
+            && let Err(error) = catalog::selected_tracks(&state, request, auth_generation)
+        {
+            state["error"] = json!(error);
+            event = Event::Checkpoint;
+        }
         if let Event::Request(request) = &event
             && request["instance"] == instance
             && guarded_queue_command(request["op"].as_str().unwrap_or(""))
@@ -991,10 +1005,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let g = browse_generation;
                             let tx = tx.clone();
                             state["status"] = json!("Loading tracks");
+                            state["page"] = Value::Null;
+                            state["catalog"] = json!({"revision":g.to_string(),"busy":true});
                             browse_task = Some(tokio::spawn(async move {
                                 let r = p.tracks(source, offset, query).await;
                                 let _ = tx.send(Event::Page(g, r)).await;
                             }));
+                        }
+                    }
+                    "play_selected" | "enqueue_selected" | "play_next_selected" => {
+                        let result: Result<(), String> = (|| {
+                            check_queue(&queue, &v).map_err(|error| error.to_string())?;
+                            let tracks = catalog::selected_tracks(&state, &v, auth_generation)
+                                .map_err(str::to_owned)?;
+                            let count = tracks.len();
+                            match v["op"].as_str() {
+                                Some("play_selected") => {
+                                    to_prepare = queue
+                                        .replace_many(tracks)
+                                        .map_err(|error| error.to_string())?;
+                                    desired_playing = true;
+                                }
+                                Some("play_next_selected") => queue
+                                    .enqueue_next_many(tracks)
+                                    .map_err(|error| error.to_string())?,
+                                _ => queue
+                                    .enqueue_many(tracks)
+                                    .map_err(|error| error.to_string())?,
+                            }
+                            state["status"] =
+                                json!(format!("Applied selection of {count} tracks."));
+                            Ok(())
+                        })();
+                        if let Err(error) = result {
+                            state["error"] = json!(error);
                         }
                     }
                     "play" => {
@@ -1255,6 +1299,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         proxy.revoke().await;
                         state["libraries"] = json!([]);
                         state["page"] = Value::Null;
+                        state["catalog"] =
+                            json!({"revision":browse_generation.to_string(),"busy":false});
                         state["selection"] = Value::Null;
                         state["audio"] = Value::Null;
                         state["signin_url"] = Value::Null;
@@ -1381,16 +1427,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            Event::Page(g, r) if g == browse_generation => match r {
-                Ok(page) => {
-                    state["page"] = json!(page);
-                    state["status"] = json!("Ready");
+            Event::Page(g, r) if g == browse_generation => {
+                state["catalog"]["busy"] = json!(false);
+                match r {
+                    Ok(page) => {
+                        state["page"] = json!(page);
+                        state["status"] = json!("Ready");
+                    }
+                    Err(e) => {
+                        state["status"] = json!("Browse failed");
+                        state["error"] = json!(e.to_string());
+                    }
                 }
-                Err(e) => {
-                    state["status"] = json!("Browse failed");
-                    state["error"] = json!(e.to_string());
-                }
-            },
+            }
             Event::Media(g, r) if g == epochs.current => match r {
                 Ok(media) => {
                     if let Err(error) = queue.update_selected(media.track.clone(), &media.version) {

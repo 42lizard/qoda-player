@@ -262,9 +262,15 @@ impl Queue {
         Ok(id)
     }
     pub fn enqueue_many(&mut self, tracks: Vec<Track>) -> Result<(), Error> {
+        self.insert_many(tracks, false)
+    }
+    pub fn enqueue_next_many(&mut self, tracks: Vec<Track>) -> Result<(), Error> {
+        self.insert_many(tracks, true)
+    }
+    fn insert_many(&mut self, tracks: Vec<Track>, next: bool) -> Result<(), Error> {
         let mut staged = self.clone();
         for track in tracks {
-            staged.enqueue(track, false)?;
+            staged.enqueue(track, next)?;
         }
         *self = staged;
         Ok(())
@@ -799,6 +805,42 @@ mod tests {
         playlist.remove(0);
         playlist[0].title = "renamed elsewhere".into();
         assert_eq!(titles(&q), ["same", "same", "last"]);
+    }
+    #[test]
+    fn play_next_batches_keep_fifo_duplicates_modes_and_selected_identity() {
+        let mut q = Queue::default();
+        q.replace(track("current")).unwrap();
+        let selected = q.selected();
+        q.enqueue(track("tail"), false).unwrap();
+        q.set_shuffle(true).unwrap();
+        q.set_repeat(Repeat::All).unwrap();
+        q.enqueue_next_many(vec![track("A"), track("A")]).unwrap();
+        q.enqueue_next_many(vec![track("B"), track("C")]).unwrap();
+        assert_eq!(titles(&q), ["current", "A", "A", "B", "C", "tail"]);
+        assert_eq!(q.selected(), selected);
+        assert!(q.snapshot().shuffled);
+        assert_eq!(q.snapshot().repeat, Repeat::All);
+        assert_eq!(
+            q.snapshot()
+                .entries
+                .iter()
+                .map(|row| row.id)
+                .collect::<HashSet<_>>()
+                .len(),
+            6
+        );
+    }
+    #[test]
+    fn overflowing_play_next_batch_preserves_the_entire_session() {
+        let mut q = Queue::default();
+        q.replace(track("original")).unwrap();
+        q.enqueue_many(vec![track("filler"); LIMIT - 2]).unwrap();
+        let before = serde_json::to_value(&q).unwrap();
+        assert!(
+            q.enqueue_next_many(vec![track("one"), track("two")])
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(&q).unwrap(), before);
     }
     #[test]
     fn oversized_playlist_batch_does_not_partially_replace_or_append() {

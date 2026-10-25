@@ -1,4 +1,4 @@
-name: Rust checks
+name: Rust and QML checks
 
 on:
   push:
@@ -23,8 +23,8 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Install Rust and native dependencies
-        run: pacman -Syu --noconfirm --needed rust mpv sqlite pkgconf git python dbus ffmpeg
+      - name: Install Rust, Qt and native dependencies
+        run: pacman -Syu --noconfirm --needed rust mpv sqlite pkgconf git python dbus ffmpeg qt6-declarative
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

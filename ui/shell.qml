@@ -30,6 +30,18 @@ ShellRoot {
     property var snapshot: ({albums: {page: null, selected: null, busy: false, message: "Choose a library to browse albums."}, libraries: [], status: "Connecting backend", intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
     property var libraryModel: []
     property var trackModel: []
+    readonly property bool trackPageReady: socket.connected && !!snapshot.page && !!snapshot.catalog && !snapshot.catalog.busy && snapshot.page.source === libraryId && snapshot.page.query === trackQuery && !!snapshot.sign_in && snapshot.sign_in.connected
+    onTrackPageReadyChanged: if (!trackPageReady) trackSelection.clear()
+    TrackSelection {
+        id: trackSelection
+        tracks: root.trackModel
+        revision: (root.snapshot.account_epoch || "0") + ":" + (root.snapshot.catalog ? root.snapshot.catalog.revision : "0")
+    }
+    function bulkTracks(op) {
+        if (!trackPageReady || !trackSelection.count) return;
+        editQueue(op, {tracks: trackSelection.references, catalog_revision: snapshot.catalog.revision});
+    }
+
     property var queueModel: []
     property string queueJson: "[]"
     property string libraryJson: "[]"
@@ -245,7 +257,7 @@ ShellRoot {
                         if (currentIndex === 3 && root.libraryId && !(root.snapshot.albums && root.snapshot.albums.artists && root.snapshot.albums.artists.source === root.libraryId && root.snapshot.albums.artists.query === root.artistQuery)) root.browseArtists("0");
                     }
                 }
-                TextField { visible: libraryTabs.currentIndex !== 1; id: search; Layout.fillWidth: true; Layout.columnSpan: window.width < 980 ? 2 : 1; placeholderText: libraryTabs.currentIndex === 2 ? "Search album titles" : libraryTabs.currentIndex === 3 ? "Search artist names" : "Search this library"; onTextEdited: { root.rememberQuery(); searchDelay.restart(); } onAccepted: { searchDelay.stop(); root.searchCatalog(); } }
+                TextField { visible: libraryTabs.currentIndex !== 1; id: search; maximumLength: 512; Layout.fillWidth: true; Layout.columnSpan: window.width < 980 ? 2 : 1; placeholderText: libraryTabs.currentIndex === 2 ? "Search album titles" : libraryTabs.currentIndex === 3 ? "Search artist names" : "Search this library"; onTextEdited: { root.rememberQuery(); searchDelay.restart(); } onAccepted: { searchDelay.stop(); root.searchCatalog(); } }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -277,7 +289,18 @@ ShellRoot {
                     visible: libraryTabs.currentIndex === 0 && !root.queueOnly
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-            Label { text: "Click a track title to select the first track for a new playlist."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { text: "Select tracks with checkboxes or Ctrl/Shift-click titles. The last clicked track seeds a new playlist."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Flow {
+                Layout.fillWidth: true
+                Layout.preferredHeight: childrenRect.height
+                spacing: 6
+                Label { text: trackSelection.count + " selected on this page"; color: "#acb8c8"; padding: 6 }
+                Button { text: "Select page"; enabled: root.trackPageReady && root.trackModel.length > 0; onClicked: trackSelection.selectAll() }
+                Button { text: "Clear selection"; enabled: trackSelection.count > 0; onClicked: trackSelection.clear() }
+                Button { text: "Play selected"; enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_selected") }
+                Button { text: "Play selected next"; enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_next_selected") }
+                Button { text: "+ Queue selected"; enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("enqueue_selected") }
+            }
             Label { visible: !!root.playlistView; text: { if (!root.playlistView) return ""; let library = root.libraryModel.find(item => item.id === root.playlistView.playlist.reference.source); return "+ Playlist saves to: " + root.playlistView.playlist.title + (library ? " · " + library.server : ""); } color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
             ListView {
                 id: tracks
@@ -287,27 +310,17 @@ ShellRoot {
                 spacing: 5
                 model: root.trackModel
                 ScrollBar.vertical: ScrollBar {}
-                delegate: Rectangle {
+                delegate: TrackRow {
                     required property var modelData
-                    required property int index
+                    track: modelData
+                    selected: trackSelection.contains(index)
+                    enabled: root.trackPageReady
+                    playlistEditable: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain
                     width: tracks.width
-                    height: 68
-                    color: root.playlistSeed && root.playlistSeed.reference.source === modelData.reference.source && root.playlistSeed.reference.key === modelData.reference.key ? "#344354" : index % 2 ? "#1a202a" : "#202735"
-                    radius: 5
-                    TapHandler { onTapped: root.playlistSeed = modelData }
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Label { text: modelData.title; color: "#f2e9db"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                            Label { text: modelData.artist + " · " + modelData.album; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                        }
-                        Button { text: "Play now"; onClicked: root.send("play", {source: modelData.reference.source, key: modelData.reference.key}) }
-                        Button { text: "Next"; onClicked: root.editQueue("play_next", {source: modelData.reference.source, key: modelData.reference.key}) }
-                        Button { text: "+ Playlist"; enabled: !!root.playlistView && root.playlistView.playlist.can_edit && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.playlistEdit({action: "append", track: modelData.reference}) }
-                        Button { text: "+ Queue"; onClicked: root.editQueue("enqueue", {source: modelData.reference.source, key: modelData.reference.key}) }
-                    }
+                    onSelectionRequested: modifiers => { trackSelection.choose(index, modifiers); root.playlistSeed = modelData; }
+                    onCheckboxRequested: { trackSelection.toggle(index); root.playlistSeed = modelData; }
+                    onActionRequested: op => { if (op === "play") root.send(op, {source: modelData.reference.source, key: modelData.reference.key}); else root.editQueue(op, {source: modelData.reference.source, key: modelData.reference.key}); }
+                    onPlaylistRequested: root.playlistEdit({action: "append", track: modelData.reference})
                 }
             }
             RowLayout {
@@ -474,12 +487,13 @@ ShellRoot {
         function toggle(): void { root.toggleSurface(); }
         function dismiss(): void { if (root.form === "compact") root.hideSurface(); }
         function hide(): void { root.hideSurface(); }
+        function browseTracks(): void { root.queueRequested = false; libraryTabs.currentIndex = 0; root.showSurface("full", true); }
         function browseAlbums(): void { root.queueRequested = false; albumBrowser.showDetails = !!albumBrowser.selected; libraryTabs.currentIndex = 2; root.showSurface("full", true); }
         function albumOverview(): void { root.queueRequested = false; albumBrowser.showDetails = false; libraryTabs.currentIndex = 2; root.showSurface("full", true); }
         function showQueue(): void { root.queueRequested = true; root.showSurface("full", true); }
         function browseArtists(): void { root.queueRequested = false; libraryTabs.currentIndex = 3; root.showSurface("full", true); }
         function browsePlaylists(): void { root.queueRequested = false; libraryTabs.currentIndex = 1; root.showSurface("full", true); }
-        function status(): string { return JSON.stringify({artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, query: search.text, tab: libraryTabs.currentIndex}); }
+        function status(): string { return JSON.stringify({artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, query: search.text, tab: libraryTabs.currentIndex}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }
