@@ -4,3 +4,6 @@
 !.env.example
 
 /target/
+
+__pycache__/
+*.pyc

@@ -1,0 +1,23 @@
+[package]
+name = "qoda-backend"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+qoda-core = { path = "../qoda-core" }
+qoda-provider = { path = "../qoda-provider" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+libc.workspace = true
+axum.workspace = true
+futures-util.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+bytes.workspace = true

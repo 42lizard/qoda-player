@@ -1,12 +1,14 @@
 # Qoda Player
 
-A planned standalone music player for Omarchy, built with Quickshell/QML and mpv/libmpv. Plex is the first music provider; additional providers may follow.
+A standalone music player in development for Omarchy, built with Quickshell/QML and mpv/libmpv. Plex is the first music provider; additional providers may follow.
 
 ## Status
 
-Core implementation has started in [Implement the first Plex browse/play vertical slice](https://github.com/42lizard/qoda-player/issues/21). The Cargo workspace currently contains the session identity, queue-membership and event-fencing foundation; there is no playable production application yet. The decision map remains the specification record, while real-provider, physical-input and audio-profile acceptance continues alongside development.
+The first working development slice has a Rust backend, Plex library browsing/search, a standalone Quickshell/QML window, and embedded libmpv playback controls. Live read-only checks reached five music libraries and verified catalog display, search, hide/show and UI restart. Native playback checks use synthetic audio with null output; real-music playback and the full release remain under development in [issue 21](https://github.com/42lizard/qoda-player/issues/21).
 
-Run the core checks with `cargo test --workspace --locked`. The backend process, QML shell and Plex browse/play path are the next implementation increments; the foundation alone does not complete that slice.
+Run `./tools/dev.py` to build and open it. On the original validation machine, `./tools/dev.py --use-validation-login` explicitly reuses the existing local sign-in for this session. Nothing autoplays. See [development instructions](docs/development.md) for dependencies, sign-in, controls, process ownership and current limitations.
+
+The application currently provides single-track playback through Desktop/PipeWire with ReplayGain off. Saved sign-in, queue/playlist management, durable session restoration, gapless playback and fidelity output are still to come. Run `cargo test --workspace --locked` for the 18 automated checks.
 
 ## Agreed first-release scope
 

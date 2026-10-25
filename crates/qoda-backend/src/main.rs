@@ -1,0 +1,532 @@
+mod player;
+mod proxy;
+use player::{Command, Player};
+use qoda_core::{ProviderTrackKey, SourceId};
+use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider, PreparedMedia};
+use serde_json::{Value, json};
+use std::{
+    collections::HashMap,
+    io::Read,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    path::PathBuf,
+    sync::Arc,
+};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    sync::{mpsc, watch},
+};
+use zeroize::Zeroizing;
+
+enum Event {
+    Request(Value),
+    Connected(
+        u64,
+        Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
+    ),
+    Page(
+        u64,
+        Result<qoda_provider::CatalogPage, qoda_provider::ProviderError>,
+    ),
+    Media(u64, Result<PreparedMedia, qoda_provider::ProviderError>),
+    Pin(u64, Result<BrowserPin, qoda_provider::ProviderError>),
+    Credential(u64, Result<Credential, qoda_provider::ProviderError>),
+}
+fn runtime() -> std::io::Result<PathBuf> {
+    let base = PathBuf::from(
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .ok_or_else(|| std::io::Error::other("XDG_RUNTIME_DIR is required"))?,
+    );
+    let uid = unsafe { libc::getuid() };
+    let meta = std::fs::symlink_metadata(&base)?;
+    if !meta.is_dir() || meta.uid() != uid || meta.permissions().mode() & 0o077 != 0 {
+        return Err(std::io::Error::other("Unsafe runtime directory"));
+    }
+    let dir = base.join("qoda");
+    match std::fs::create_dir(&dir) {
+        Ok(()) => std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
+    }
+    let m = std::fs::symlink_metadata(&dir)?;
+    if !m.is_dir() || m.uid() != uid || m.permissions().mode() & 0o077 != 0 {
+        return Err(std::io::Error::other("Unsafe Qoda runtime directory"));
+    }
+    Ok(dir)
+}
+fn identities_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
+        .map(|p| p.join("qoda/source-identities.json"))
+}
+fn identities() -> HashMap<String, SourceId> {
+    identities_path()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+fn save_identities(ids: &HashMap<String, SourceId>) -> std::io::Result<()> {
+    let p = identities_path().ok_or_else(|| std::io::Error::other("No config directory"))?;
+    let parent = p.parent().unwrap();
+    std::fs::create_dir_all(parent)?;
+    let tmp = parent.join(format!(".sources-{}", uuid::Uuid::new_v4()));
+    let mut f = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    use std::io::Write;
+    f.write_all(&serde_json::to_vec(ids)?)?;
+    f.sync_all()?;
+    std::fs::rename(tmp, p)
+}
+async fn connection(
+    stream: tokio::net::UnixStream,
+    tx: mpsc::Sender<Event>,
+    mut updates: watch::Receiver<Value>,
+) -> std::io::Result<()> {
+    if stream.peer_cred()?.uid() != unsafe { libc::getuid() } {
+        return Ok(());
+    }
+    let (read, mut write) = stream.into_split();
+    let mut read = BufReader::new(read);
+    let mut hello = false;
+    let mut frame = Vec::new();
+    loop {
+        tokio::select! {
+            result = async {
+                use tokio::io::AsyncReadExt;
+                (&mut read).take((65537 - frame.len()) as u64)
+                    .read_until(b'\n', &mut frame).await
+            } => {
+                if result? == 0 { return Ok(()); }
+                if frame.len() > 65536 || frame.last() != Some(&b'\n') { return Ok(()); }
+                let Ok(value) = serde_json::from_slice::<Value>(&frame) else { return Ok(()); };
+                frame.clear();
+                if !hello {
+                    if value["op"] != "hello" || value["protocol"] != 1 { return Ok(()); }
+                    hello = true;
+                } else {
+                    tx.send(Event::Request(value)).await.map_err(|_| std::io::Error::other("Backend stopped"))?;
+                }
+                let mut line = serde_json::to_vec(&*updates.borrow_and_update())?;
+                line.push(b'\n');
+                tokio::time::timeout(std::time::Duration::from_secs(3), write.write_all(&line)).await??;
+            },
+            changed = updates.changed(), if hello => {
+                if changed.is_err() { return Ok(()); }
+                let mut line = serde_json::to_vec(&*updates.borrow_and_update())?;
+                line.push(b'\n');
+                tokio::time::timeout(std::time::Duration::from_secs(3), write.write_all(&line)).await??;
+            }
+        }
+    }
+}
+fn connect(
+    tx: mpsc::Sender<Event>,
+    generation: u64,
+    credential: Credential,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let r = PlexProvider::connect(credential, identities()).await;
+        let _ = tx.send(Event::Connected(generation, r)).await;
+    })
+}
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let credential = if std::env::args().any(|s| s == "--credential-stdin") {
+        let mut input = Zeroizing::new(String::new());
+        std::io::stdin().take(65537).read_to_string(&mut input)?;
+        if input.len() > 65536 {
+            return Err("Credential input too large".into());
+        }
+        Some(serde_json::from_str::<Credential>(&input).map_err(|_| "Invalid credential input")?)
+    } else {
+        None
+    };
+    let dir = runtime()?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(dir.join("backend.lock"))?;
+    use std::os::fd::AsRawFd;
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return Err("Qoda backend is already running".into());
+    }
+    let path = dir.join("backend.sock");
+    if path.exists() {
+        std::fs::remove_file(&path)?
+    }
+    let listener = tokio::net::UnixListener::bind(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    let player = Player::start()?;
+    let proxy = proxy::Proxy::start().await?;
+    let instance = uuid::Uuid::new_v4().to_string();
+    let mut revision = 0_u64;
+    let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null});
+    let (updates, rx) = watch::channel(state.clone());
+    let (tx, mut events) = mpsc::channel(64);
+    let permits = Arc::new(tokio::sync::Semaphore::new(16));
+    let server_tx = tx.clone();
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            let Ok(permit) = permits.clone().try_acquire_owned() else {
+                continue;
+            };
+            let tx = server_tx.clone();
+            let rx = rx.clone();
+            tokio::spawn(async move {
+                let _permit = permit;
+                let _ = connection(stream, tx, rx).await;
+            });
+        }
+    });
+    let mut provider: Option<Arc<PlexProvider>> = None;
+    let mut browse_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut prepare_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut auth_task: Option<tokio::task::JoinHandle<()>> = None;
+    let (mut auth_generation, mut browse_generation, mut play_generation) = (0_u64, 0_u64, 0_u64);
+    let mut desired_playing = false;
+    let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
+    let mut last_audio = player.status();
+    if let Some(c) = credential {
+        auth_generation = auth_generation
+            .checked_add(1)
+            .ok_or("Generation exhausted")?;
+        auth_task = Some(connect(tx.clone(), auth_generation, c));
+        state["status"] = json!("Connecting Plex");
+        updates.send_replace(state.clone());
+    }
+    loop {
+        let event = tokio::select! {
+            event = events.recv() => match event { Some(event) => event, None => break },
+            _ = audio_tick.tick() => {
+                let audio = player.status();
+                if audio != last_audio && audio.generation == play_generation {
+                    if audio.idle && !last_audio.idle && audio.generation == last_audio.generation {
+                        desired_playing = false;
+                        state["intent"] = json!("paused");
+                        state["status"] = json!("Playback stopped");
+                    }
+                    last_audio = audio.clone();
+                    state["audio"] = json!(audio);
+                    if let Some(error) = audio.error {
+                        state["error"] = json!(error);
+                        desired_playing = false;
+                        state["intent"] = json!("paused");
+                        player.send(Command::Pause(true));
+                    }
+                    revision = revision.checked_add(1).ok_or("Revision exhausted")?;
+                    state["revision"] = json!(revision.to_string());
+                    updates.send_replace(state.clone());
+                }
+                continue;
+            },
+            _ = tokio::signal::ctrl_c() => break,
+        };
+        match event {
+            Event::Request(mut v) => {
+                if v["instance"] != instance {
+                    continue;
+                }
+                if v["op"] == "resume" && player.status().idle && !state["selection"].is_null() {
+                    v["op"] = json!("play");
+                    v["source"] = state["selection"]["reference"]["source"].clone();
+                    v["key"] = state["selection"]["reference"]["key"].clone();
+                }
+                state["error"] = Value::Null;
+                match v["op"].as_str().unwrap_or("") {
+                    "quit" => break,
+                    "auth_start" => {
+                        if provider.is_some() {
+                            state["error"] = json!("Disconnect before changing Plex accounts");
+                            revision = revision.checked_add(1).ok_or("Revision exhausted")?;
+                            state["revision"] = json!(revision.to_string());
+                            updates.send_replace(state.clone());
+                            continue;
+                        }
+                        if let Some(task) = auth_task.take() {
+                            task.abort();
+                        }
+                        state["signin_url"] = Value::Null;
+                        auth_generation = auth_generation
+                            .checked_add(1)
+                            .ok_or("Generation exhausted")?;
+                        let g = auth_generation;
+                        let tx = tx.clone();
+                        state["status"] = json!("Starting Plex sign-in");
+                        auth_task = Some(tokio::spawn(async move {
+                            let r =
+                                BrowserPin::begin(format!("qoda-player-{}", uuid::Uuid::new_v4()))
+                                    .await;
+                            let _ = tx.send(Event::Pin(g, r)).await;
+                        }));
+                    }
+                    "browse" => {
+                        if let Some(p) = provider.clone()
+                            && let Ok(source) =
+                                serde_json::from_value::<SourceId>(v["source"].clone())
+                        {
+                            let Ok(offset) =
+                                serde_json::from_value::<qoda_core::Counter>(v["offset"].clone())
+                            else {
+                                continue;
+                            };
+                            let offset = offset.get();
+                            let query = v["query"]
+                                .as_str()
+                                .unwrap_or("")
+                                .chars()
+                                .take(512)
+                                .collect();
+                            if let Some(task) = browse_task.take() {
+                                task.abort();
+                            }
+                            browse_generation = browse_generation
+                                .checked_add(1)
+                                .ok_or("Generation exhausted")?;
+                            let g = browse_generation;
+                            let tx = tx.clone();
+                            state["status"] = json!("Loading tracks");
+                            browse_task = Some(tokio::spawn(async move {
+                                let r = p.tracks(source, offset, query).await;
+                                let _ = tx.send(Event::Page(g, r)).await;
+                            }));
+                        }
+                    }
+                    "play" => {
+                        if let Some(p) = provider.clone()
+                            && let (Ok(source), Ok(key)) = (
+                                serde_json::from_value::<SourceId>(v["source"].clone()),
+                                serde_json::from_value::<ProviderTrackKey>(v["key"].clone()),
+                            )
+                        {
+                            if let Some(task) = prepare_task.take() {
+                                task.abort();
+                            }
+                            play_generation = play_generation
+                                .checked_add(1)
+                                .ok_or("Generation exhausted")?;
+                            let g = play_generation;
+                            desired_playing = true;
+                            state["intent"] = json!("playing");
+                            state["selection"] = Value::Null;
+                            state["audio"] = Value::Null;
+                            state["status"] = json!("Preparing selected track");
+                            player.send(Command::Pause(true));
+                            player.send(Command::Stop);
+                            proxy.revoke().await;
+                            let tx = tx.clone();
+                            prepare_task = Some(tokio::spawn(async move {
+                                let r = p.prepare(source, key).await;
+                                let _ = tx.send(Event::Media(g, r)).await;
+                            }));
+                        }
+                    }
+                    "pause" => {
+                        desired_playing = false;
+                        player.send(Command::Pause(true));
+                        state["intent"] = json!("paused");
+                    }
+                    "resume" => {
+                        desired_playing = true;
+                        player.send(Command::Pause(false));
+                        state["intent"] = json!("playing");
+                    }
+                    "seek" => {
+                        if let Some(pos) =
+                            v["seconds"].as_f64().filter(|p| p.is_finite() && *p >= 0.0)
+                        {
+                            player.send(Command::Seek(pos));
+                        }
+                    }
+                    "disconnect" => {
+                        for task in [browse_task.take(), prepare_task.take(), auth_task.take()]
+                            .into_iter()
+                            .flatten()
+                        {
+                            task.abort();
+                        }
+                        auth_generation = auth_generation
+                            .checked_add(1)
+                            .ok_or("Generation exhausted")?;
+                        browse_generation = browse_generation
+                            .checked_add(1)
+                            .ok_or("Generation exhausted")?;
+                        play_generation = play_generation
+                            .checked_add(1)
+                            .ok_or("Generation exhausted")?;
+                        provider = None;
+                        desired_playing = false;
+                        player.send(Command::Pause(true));
+                        player.send(Command::Stop);
+                        proxy.revoke().await;
+                        state["libraries"] = json!([]);
+                        state["page"] = Value::Null;
+                        state["selection"] = Value::Null;
+                        state["audio"] = Value::Null;
+                        state["signin_url"] = Value::Null;
+                        state["intent"] = json!("paused");
+                        state["status"] = json!("Disconnected");
+                    }
+                    _ => {}
+                }
+            }
+            Event::Pin(g, r) if g == auth_generation => match r {
+                Ok(pin) => {
+                    state["signin_url"] = json!(pin.url);
+                    state["status"] = json!("Finish sign-in in your browser");
+                    let tx = tx.clone();
+                    auth_task = Some(tokio::spawn(async move {
+                        let until = tokio::time::Instant::now()
+                            + std::time::Duration::from_secs(pin.expires_in);
+                        while tokio::time::Instant::now() < until {
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            match pin.poll().await {
+                                Ok(Some(c)) => {
+                                    let _ = tx.send(Event::Credential(g, Ok(c))).await;
+                                    return;
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    let _ = tx.send(Event::Credential(g, Err(e))).await;
+                                    return;
+                                }
+                            }
+                        }
+                        let _ = tx
+                            .send(Event::Credential(
+                                g,
+                                Err(qoda_provider::ProviderError::SignInRequired),
+                            ))
+                            .await;
+                    }));
+                }
+                Err(e) => state["error"] = json!(e.to_string()),
+            },
+            Event::Credential(g, r) if g == auth_generation => match r {
+                Ok(c) => {
+                    state["signin_url"] = Value::Null;
+                    state["status"] = json!("Connecting Plex");
+                    auth_task = Some(connect(tx.clone(), g, c));
+                }
+                Err(e) => state["error"] = json!(e.to_string()),
+            },
+            Event::Connected(g, r) if g == auth_generation => match r {
+                Ok((p, ids)) => {
+                    if save_identities(&ids).is_err() {
+                        state["error"] = json!("Library identities could not be saved");
+                    }
+                    state["libraries"] = json!(p.libraries());
+                    state["status"] = json!("Choose a music library");
+                    provider = Some(Arc::new(p));
+                }
+                Err(e) => {
+                    state["status"] = json!("Plex connection failed");
+                    state["error"] = json!(e.to_string());
+                }
+            },
+            Event::Page(g, r) if g == browse_generation => match r {
+                Ok(page) => {
+                    state["page"] = json!(page);
+                    state["status"] = json!("Ready");
+                }
+                Err(e) => {
+                    state["status"] = json!("Browse failed");
+                    state["error"] = json!(e.to_string());
+                }
+            },
+            Event::Media(g, r) if g == play_generation => match r {
+                Ok(media) => {
+                    state["selection"] = json!(media.track);
+                    let url = proxy.grant(media.stream).await;
+                    player.send(Command::Load(g, url));
+                    player.send(Command::Pause(!desired_playing));
+                    state["status"] = json!("Track selected; playback requested");
+                }
+                Err(e) => {
+                    state["status"] = json!("Playback preparation failed");
+                    state["error"] = json!(e.to_string());
+                    desired_playing = false;
+                    state["intent"] = json!("paused");
+                }
+            },
+            _ => continue,
+        }
+        revision = revision.checked_add(1).ok_or("Revision exhausted")?;
+        state["revision"] = json!(revision.to_string());
+        updates.send_replace(state.clone());
+    }
+    proxy.revoke().await;
+    player.send(Command::Stop);
+    server.abort();
+    drop(player);
+    std::fs::remove_file(path)?;
+    drop(lock);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn socket_requires_hello_and_preserves_partial_frames_across_updates() {
+        let (server, client) = tokio::net::UnixStream::pair().unwrap();
+        let (tx, mut events) = mpsc::channel(4);
+        let (updates, rx) = watch::channel(json!({"instance":"fixture","revision":"0"}));
+        let task = tokio::spawn(connection(server, tx, rx));
+        let (read, mut write) = client.into_split();
+        let mut read = BufReader::new(read);
+        let mut line = String::new();
+        write
+            .write_all(b"{\"op\":\"hello\",\"protocol\":1}\n")
+            .await
+            .unwrap();
+        read.read_line(&mut line).await.unwrap();
+        assert!(line.contains("fixture"));
+        write.write_all(b"{\"op\":\"pa").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        updates.send_replace(json!({"instance":"fixture","revision":"1"}));
+        line.clear();
+        read.read_line(&mut line).await.unwrap();
+        assert!(line.contains("\"1\""));
+        write
+            .write_all(b"use\",\"instance\":\"fixture\"}\n")
+            .await
+            .unwrap();
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(event,Event::Request(v)if v["op"]=="pause"));
+        line.clear();
+        read.read_line(&mut line).await.unwrap();
+        drop(write);
+        drop(read);
+        task.await.unwrap().unwrap();
+    }
+    #[tokio::test]
+    async fn socket_rejects_wrong_version_and_oversized_frames() {
+        for data in [
+            b"{\"op\":\"hello\",\"protocol\":2}\n".to_vec(),
+            vec![b'a'; 65537],
+        ] {
+            let (server, mut client) = tokio::net::UnixStream::pair().unwrap();
+            let (tx, _events) = mpsc::channel(4);
+            let (_updates, rx) = watch::channel(json!({}));
+            let task = tokio::spawn(connection(server, tx, rx));
+            client.write_all(&data).await.unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+    }
+}
