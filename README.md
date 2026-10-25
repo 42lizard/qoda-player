@@ -31,6 +31,8 @@ The selected interface direction is the album browser with a persistent queue, d
 
 Playback actions, shuffle/repeat, restoration, recovery, and transition edits are specified in [Define listening-session and queue behavior](https://github.com/42lizard/qoda-player/issues/7). The UI prototype's illustrative queue behavior is superseded by that contract.
 
+Credential handling, SQLite persistence, cache budgets, checkpoint/retry defaults, and recovery are specified in [Define authentication, cache and durable-state policies](https://github.com/42lizard/qoda-player/issues/10). Live Plex compatibility validation remains a separate prerequisite for the final specification.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

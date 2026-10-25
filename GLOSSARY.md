@@ -94,6 +94,18 @@ The session's automatic completion behavior: Off ends the queue, One repeats the
 **Playback intent**:
 Whether the user currently wants playback to proceed or remain paused/stopped. Buffering and recovery do not override a later pause, stop, or session replacement.
 
+**Cached catalog**:
+Locally retained metadata from previously accessed provider content. It may be stale or incomplete and does not imply that music is available for offline playback.
+
+**Sign out**:
+An explicit account action that stops affected playback and removes that account's credentials, cached catalog/artwork, and saved listening session. General application preferences remain.
+
+**Confirmed access loss**:
+Reliable provider evidence that previously accessible content is no longer permitted. A temporary network failure or expired sign-in alone is not confirmed access loss.
+
+**Session-only sign-in**:
+Account access whose authentication secrets are retained only for the running application session. It requires sign-in again after the backend exits.
+
 **Desktop playback**:
 Listening that can coexist with audio from other applications.
 
