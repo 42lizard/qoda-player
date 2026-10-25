@@ -64,6 +64,18 @@ _Avoid_: Playlist
 **Queue entry**:
 One occurrence of a track in the listening queue, with its own identity and any selected media version. Repeated occurrences of the same track remain distinct.
 
+**Current occurrence**:
+The queue occurrence identified as nominally presenting. Preparing or decoding an occurrence does not establish it as current. If presentation cannot be identified, that uncertainty is explicit and the last confirmed occurrence remains recovery information.
+
+**Playback visit**:
+One presentation pass through a queue occurrence. Repeat or explicit replay starts another visit; seeking or recovering the same pass does not. Visit identity is separate from queue membership and the Previous navigation cursor.
+
+**Nominal presentation**:
+An estimate of which content has reached the output's reported playback position. It does not establish physical sound or listener audibility.
+
+**Presentation uncertainty**:
+An inability to identify presenting content or position from the available output evidence. It is distinct from playback intent and from a failure to load content.
+
 **Listening session**:
 The player's current collection of listening entries, their order, playback position, history, and shuffle/repeat state. Play now starts a new session; Stop and clear discards it.
 
