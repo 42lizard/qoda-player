@@ -446,6 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|id| queue.visible_track(id).ok())
         .map(|track| json!(track))
         .unwrap_or(Value::Null);
+    state["presentation"] = mpris::View::default().presentation();
     let (updates, rx) = watch::channel(state.clone());
     let vault = vault::start(tx.clone());
     let mut vault_generation = 0_u64;
@@ -546,10 +547,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                     state["revision"] = json!(revision.to_string());
+                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale);
+                    state["presentation"]=view.presentation();
+                    state["gapless"]=json!(gapless.view);
                     updates.send_replace(state.clone());
-                    if let Some(desktop) = &mut desktop {
-                        desktop.publish(mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale));
-                    }
+                    if let Some(desktop) = &mut desktop { desktop.publish(view); }
                 }
                 if audio.generation==epochs.current && audio.idle && audio.natural_eof && handled_end!=Some(epochs.current) && audio.error.is_none() && !stream_failed {
                     handled_end=Some(epochs.current);
@@ -1451,19 +1453,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state["error"] = json!(error);
         }
         state["gapless"] = json!(gapless.view);
+        let view = mpris::View::capture(
+            &queue,
+            &player.status(),
+            epochs.current,
+            presented_generation,
+            provider.is_some(),
+            desired_playing,
+            last_stream_failed || last_clock_stale,
+        );
+        state["presentation"] = view.presentation();
         if let Some(desktop) = &mut desktop {
             if seeked {
                 desktop.mark_seek(&queue, epochs.current);
             }
-            desktop.publish(mpris::View::capture(
-                &queue,
-                &player.status(),
-                epochs.current,
-                presented_generation,
-                provider.is_some(),
-                desired_playing,
-                last_stream_failed || last_clock_stale,
-            ));
+            desktop.publish(view);
         }
         state["queue"] = json!(queue.snapshot());
         state["playlists"] = json!(playlists.view);

@@ -1,12 +1,32 @@
 //@ pragma AppId qoda-player
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 
 ShellRoot {
     id: root
+    property string form: "full"
+    property string lastForm: "full"
+    readonly property var selectedTrack: queueModel.find(row => row.selected)?.track || snapshot.selection || null
+    function showSurface(next, interactive) {
+        if (next === "compact") {
+            const monitor = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
+            compact.targetScreen = Quickshell.screens.find(screen => screen.name === monitor) || Quickshell.screens[0] || null;
+            compact.interactive = !!interactive;
+        }
+        form = next;
+        if (next !== "hidden") lastForm = next;
+        compact.visible = next === "compact";
+        if (next === "full" && interactive) Qt.callLater(() => {
+            if (window.contentItem.Window.window) window.contentItem.Window.window.requestActivate();
+        });
+    }
+    function hideSurface() { showSurface("hidden", false); }
+    function toggleSurface() { if (form === "hidden") showSurface(lastForm, true); else hideSurface(); }
     property var snapshot: ({albums: {page: null, selected: null, busy: false, message: "Choose a library to browse albums."}, libraries: [], status: "Connecting backend", intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
     property var libraryModel: []
     property var trackModel: []
@@ -145,13 +165,21 @@ ShellRoot {
     FloatingWindow {
         id: window
         title: "Qoda Player"
-        visible: true
+        visible: root.form === "full"
         implicitWidth: 1200
         implicitHeight: 820
         color: "#141820"
-        onClosed: visible = false
+        onClosed: root.hideSurface()
 
         ColumnLayout {
+            focus: true
+            Keys.priority: Keys.AfterItem
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Space && event.modifiers === Qt.NoModifier && socket.connected && root.snapshot.presentation && (root.snapshot.intent === "playing" ? root.snapshot.presentation.can_pause : root.snapshot.presentation.can_play)) {
+                    root.send(root.snapshot.intent === "playing" ? "pause" : "resume"); event.accepted = true;
+                }
+            }
+            Shortcut { sequence: "Ctrl+K"; enabled: window.visible; onActivated: search.forceActiveFocus() }
             anchors.fill: parent
             anchors.margins: 16
             spacing: 8
@@ -166,7 +194,8 @@ ShellRoot {
                 Button { text: "Account"; onClicked: root.accountExpanded = !root.accountExpanded }
                 Button { text: "Connect Plex"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
                 Button { text: "Disconnect"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes the saved queue and session backups. Keeps saved sign-in."; onClicked: root.send("disconnect") }
-                Button { text: "Hide"; onClicked: window.visible = false }
+                Button { text: "Compact"; onClicked: root.showSurface("compact", true) }
+                Button { text: "Hide"; onClicked: root.hideSurface() }
                 Button { text: "Quit"; onClicked: { root.send("quit"); Qt.quit(); } }
             }
             Flow {
@@ -424,16 +453,33 @@ ShellRoot {
             }
         }
     }
+    CompactPlayer {
+        id: compact
+        snapshot: root.snapshot
+        selectedTrack: root.selectedTrack
+        connected: socket.connected
+        onSearchRequested: { root.showSurface("full", true); Qt.callLater(() => search.forceActiveFocus()); }
+        onExpandRequested: root.showSurface("full", true)
+        onHideRequested: root.hideSurface()
+        onQuitRequested: { root.send("quit"); Qt.quit(); }
+        onTransportRequested: op => root.send(op)
+        onQueueRequested: op => { if (op === "show") root.queueRequested = true; else root.editQueue(op); }
+    }
     IpcHandler {
         target: "control"
-        function show(): void { window.visible = true;  }
-        function hide(): void { window.visible = false; }
-        function browseAlbums(): void { root.queueRequested = false; albumBrowser.showDetails = !!albumBrowser.selected; libraryTabs.currentIndex = 2; window.visible = true; }
-        function albumOverview(): void { root.queueRequested = false; albumBrowser.showDetails = false; libraryTabs.currentIndex = 2; window.visible = true; }
-        function showQueue(): void { root.queueRequested = true; window.visible = true; }
-        function browseArtists(): void { root.queueRequested = false; libraryTabs.currentIndex = 3; window.visible = true; }
-        function browsePlaylists(): void { root.queueRequested = false; libraryTabs.currentIndex = 1; window.visible = true; }
-        function status(): string { return JSON.stringify({artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
+        function show(): void { root.showSurface(root.lastForm, true); }
+        function showFull(): void { root.showSurface("full", true); }
+        function showCompact(): void { root.showSurface("compact", true); }
+        function previewCompact(): void { root.showSurface("compact", false); }
+        function toggle(): void { root.toggleSurface(); }
+        function dismiss(): void { if (root.form === "compact") root.hideSurface(); }
+        function hide(): void { root.hideSurface(); }
+        function browseAlbums(): void { root.queueRequested = false; albumBrowser.showDetails = !!albumBrowser.selected; libraryTabs.currentIndex = 2; root.showSurface("full", true); }
+        function albumOverview(): void { root.queueRequested = false; albumBrowser.showDetails = false; libraryTabs.currentIndex = 2; root.showSurface("full", true); }
+        function showQueue(): void { root.queueRequested = true; root.showSurface("full", true); }
+        function browseArtists(): void { root.queueRequested = false; libraryTabs.currentIndex = 3; root.showSurface("full", true); }
+        function browsePlaylists(): void { root.queueRequested = false; libraryTabs.currentIndex = 1; root.showSurface("full", true); }
+        function status(): string { return JSON.stringify({artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, query: search.text, tab: libraryTabs.currentIndex}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }

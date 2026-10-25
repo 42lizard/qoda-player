@@ -123,6 +123,21 @@ impl Clock {
     }
 }
 impl View {
+    /// Shared nominal presentation for UI surfaces, including when D-Bus is unavailable.
+    pub fn presentation(&self) -> Json {
+        json!({
+            "known": self.track.is_some(),
+            "status": self.status,
+            "track": self.track.as_ref().map(|track| json!({
+                "id": track.path, "title": track.title, "artist": track.artist,
+                "album": track.album, "duration_seconds": track.length.map(|length| length as f64 / 1.0e6)
+            })),
+            "position_seconds": self.track.as_ref().map(|_| self.position as f64 / 1.0e6),
+            "can_play": self.can_play, "can_pause": self.can_pause,
+            "can_next": self.can_next, "can_previous": self.can_previous,
+            "can_seek": self.can_seek
+        })
+    }
     pub fn capture(
         queue: &queue::Queue,
         audio: &player::Status,
@@ -754,6 +769,33 @@ mod tests {
         assert!(translate(&Action::Play, &restored, &queue, "fixture").is_none());
         assert!(translate(&Action::Seek(1), &restored, &queue, "fixture").is_none());
         assert!(translate(&Action::Previous, &restored, &queue, "fixture").is_none());
+    }
+    #[test]
+    fn ui_presentation_uses_the_same_nominal_identity_and_uncertainty_as_desktop_metadata() {
+        let (queue, mut audio) = fixture();
+        let known = view(&queue, &audio).presentation();
+        assert_eq!(known["known"], true);
+        assert_eq!(known["status"], "Playing");
+        assert_eq!(known["position_seconds"], audio.position_seconds.unwrap());
+        assert_eq!(
+            known["track"]["id"],
+            view(&queue, &audio).track.unwrap().path
+        );
+        audio.paused = true;
+        assert_eq!(view(&queue, &audio).presentation()["status"], "Paused");
+        for uncertain in [
+            View::capture(&queue, &audio, 7, None, true, false, false),
+            View::capture(&queue, &audio, 8, Some(7), true, false, false),
+            View::capture(&queue, &audio, 7, Some(7), true, false, true),
+        ] {
+            let state = uncertain.presentation();
+            assert_eq!(state["known"], false);
+            assert!(state["track"].is_null());
+            assert!(state["position_seconds"].is_null());
+            assert_eq!(state["can_seek"], false);
+        }
+        audio.entry_ready = false;
+        assert_eq!(view(&queue, &audio).presentation()["known"], false);
     }
     #[test]
     fn position_ticks_do_not_emit_properties_changed_but_transport_and_metadata_do() {
