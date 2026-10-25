@@ -22,9 +22,14 @@ struct Grant {
     cancel: watch::Sender<bool>,
     failed: Arc<AtomicBool>,
 }
+#[derive(Default)]
+struct Grants {
+    entries: HashMap<String, Grant>,
+    current: Option<String>,
+}
 #[derive(Clone)]
 pub struct Proxy {
-    grants: Arc<RwLock<HashMap<String, Grant>>>,
+    grants: Arc<RwLock<Grants>>,
     pub port: u16,
 }
 impl Proxy {
@@ -43,24 +48,70 @@ impl Proxy {
         Ok(this)
     }
     pub async fn failed(&self) -> bool {
-        self.grants
-            .read()
-            .await
-            .values()
-            .any(|grant| grant.failed.load(Ordering::Acquire))
+        let grants = self.grants.read().await;
+        grants
+            .current
+            .as_ref()
+            .and_then(|id| grants.entries.get(id))
+            .is_some_and(|grant| grant.failed.load(Ordering::Acquire))
     }
     pub async fn revoke(&self) {
-        let mut g = self.grants.write().await;
-        for grant in g.values() {
+        let mut grants = self.grants.write().await;
+        for grant in grants.entries.values() {
             grant.cancel.send_replace(true);
         }
-        g.clear();
+        grants.entries.clear();
+        grants.current = None;
+    }
+    fn id<'a>(&self, url: &'a str) -> Option<&'a str> {
+        url.strip_prefix(&format!("http://127.0.0.1:{}/media/", self.port))
+    }
+    pub async fn revoke_url(&self, url: &str) {
+        let Some(id) = self.id(url) else {
+            return;
+        };
+        let mut grants = self.grants.write().await;
+        if let Some(grant) = grants.entries.remove(id) {
+            grant.cancel.send_replace(true);
+        }
+        if grants.current.as_deref() == Some(id) {
+            grants.current = None;
+        }
+    }
+    pub async fn promote(&self, url: &str) -> Result<(), &'static str> {
+        let id = self.id(url).ok_or("Invalid media grant")?;
+        let mut grants = self.grants.write().await;
+        if !grants.entries.contains_key(id) {
+            return Err("The prepared media grant expired");
+        }
+        grants.entries.retain(|key, grant| {
+            if key == id {
+                true
+            } else {
+                grant.cancel.send_replace(true);
+                false
+            }
+        });
+        grants.current = Some(id.to_owned());
+        Ok(())
     }
     pub async fn grant(&self, source: Box<dyn MediaSource>) -> String {
         self.revoke().await;
+        let url = self
+            .grant_next(source)
+            .await
+            .expect("empty media grant set");
+        self.promote(&url).await.expect("new media grant");
+        url
+    }
+    pub async fn grant_next(&self, source: Box<dyn MediaSource>) -> Result<String, &'static str> {
+        let mut grants = self.grants.write().await;
+        if grants.entries.len() >= 2 {
+            return Err("The current/next media grant limit was reached");
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let (cancel, _) = watch::channel(false);
-        self.grants.write().await.insert(
+        grants.entries.insert(
             id.clone(),
             Grant {
                 source: Arc::from(source),
@@ -68,7 +119,7 @@ impl Proxy {
                 cancel,
             },
         );
-        format!("http://127.0.0.1:{}/media/{id}", self.port)
+        Ok(format!("http://127.0.0.1:{}/media/{id}", self.port))
     }
 }
 async fn media(
@@ -86,6 +137,7 @@ async fn media(
         .grants
         .read()
         .await
+        .entries
         .get(&id)
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -257,5 +309,58 @@ mod tests {
         assert_eq!(http.get(&url).send().await.unwrap().status(), 404);
         proxy.revoke().await;
         assert_eq!(http.get(new_url).send().await.unwrap().status(), 404);
+    }
+}
+
+#[cfg(test)]
+mod gapless_tests {
+    use super::*;
+    use qoda_provider::{MediaResponse, ProviderError, ProviderFuture};
+    struct Source(bool);
+    impl MediaSource for Source {
+        fn open(&self, _: Option<ByteRange>, _: bool) -> ProviderFuture<'_, MediaResponse> {
+            Box::pin(async move {
+                if self.0 {
+                    return Err(ProviderError::Network);
+                }
+                Ok(MediaResponse {
+                    status: 200,
+                    content_type: Some("audio/flac".into()),
+                    content_length: Some(4),
+                    content_range: None,
+                    etag: None,
+                    body: futures_util::stream::once(async {
+                        Ok(bytes::Bytes::from_static(b"test"))
+                    })
+                    .boxed(),
+                })
+            })
+        }
+    }
+    #[tokio::test]
+    async fn current_and_next_are_bounded_and_future_failures_do_not_stop_current() {
+        let proxy = Proxy::start().await.unwrap();
+        let current = proxy.grant(Box::new(Source(false))).await;
+        let next = proxy.grant_next(Box::new(Source(true))).await.unwrap();
+        assert!(proxy.grant_next(Box::new(Source(false))).await.is_err());
+        assert_eq!(reqwest::get(&next).await.unwrap().status(), 502);
+        assert!(!proxy.failed().await);
+        assert_eq!(reqwest::get(&current).await.unwrap().status(), 200);
+        proxy.promote(&next).await.unwrap();
+        assert!(proxy.failed().await);
+        assert_eq!(reqwest::get(current).await.unwrap().status(), 404);
+        proxy.revoke().await;
+        assert_eq!(reqwest::get(next).await.unwrap().status(), 404);
+    }
+    #[tokio::test]
+    async fn cancelling_only_future_keeps_current_access_and_allows_one_replacement() {
+        let proxy = Proxy::start().await.unwrap();
+        let current = proxy.grant(Box::new(Source(false))).await;
+        let future = proxy.grant_next(Box::new(Source(false))).await.unwrap();
+        proxy.revoke_url(&future).await;
+        assert_eq!(reqwest::get(future).await.unwrap().status(), 404);
+        assert_eq!(reqwest::get(current).await.unwrap().status(), 200);
+        assert!(proxy.grant_next(Box::new(Source(false))).await.is_ok());
+        assert!(!proxy.failed().await);
     }
 }

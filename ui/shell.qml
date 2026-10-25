@@ -162,6 +162,7 @@ ShellRoot {
                 Label { text: "Qoda"; color: "#f2e9db"; font.pixelSize: 28; font.bold: true }
                 Label { text: "Plex music"; color: "#acb8c8" }
                 Button { text: root.queueOnly ? "Browser" : "Queue"; visible: window.width < 980; onClicked: root.queueRequested = !root.queueRequested }
+                Button { text: "Gapless: " + (root.snapshot.gapless && root.snapshot.gapless.enabled ? "On" : "Off"); enabled: socket.connected && !!root.snapshot.gapless; onClicked: root.send("set_gapless", {enabled: !root.snapshot.gapless.enabled}) }
                 Button { text: "Account"; onClicked: root.accountExpanded = !root.accountExpanded }
                 Button { text: "Connect Plex"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
                 Button { text: "Disconnect"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes the saved queue and session backups. Keeps saved sign-in."; onClicked: root.send("disconnect") }
@@ -183,6 +184,7 @@ ShellRoot {
                 Button { text: "Retry save"; enabled: socket.connected; onClicked: root.send("retry_save") }
             }
             Label { visible: !!root.snapshot.mpris && root.snapshot.mpris.state !== "available"; text: root.snapshot.mpris ? root.snapshot.mpris.message : ""; color: "#acb8c8"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+            Label { visible: !!root.snapshot.gapless && ["preparing", "staged", "transition", "review", "fallback"].includes(root.snapshot.gapless.phase); text: root.snapshot.gapless ? root.snapshot.gapless.message : ""; color: root.snapshot.gapless && root.snapshot.gapless.phase === "review" ? "#f2a89b" : "#acb8c8"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
             Label { text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: "#acb8c8"; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
             Label { visible: !!root.snapshot.error; text: root.snapshot.error || ""; color: "#f2a89b"; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
             RowLayout {

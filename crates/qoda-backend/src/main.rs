@@ -1,5 +1,6 @@
 mod albums;
 mod artwork;
+mod gapless;
 mod mpris;
 mod player;
 mod playlists;
@@ -33,6 +34,7 @@ enum Event {
     Checkpoint,
     Playlists(playlists::Reply),
     Albums(albums::Reply),
+    Gapless(gapless::Reply),
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
@@ -152,16 +154,16 @@ async fn prepare_track(
     player: &Player,
     proxy: &proxy::Proxy,
     pending: &mut Option<tokio::task::JoinHandle<()>>,
-    generation: &mut u64,
+    generation: &mut gapless::Epochs,
     provider: Arc<dyn MusicProvider>,
     reference: TrackRef,
     tx: mpsc::Sender<Event>,
 ) -> Result<(), &'static str> {
-    let next = generation.checked_add(1).ok_or("Generation exhausted")?;
+    let next = generation.allocate()?;
     if let Some(task) = pending.take() {
         task.abort();
     }
-    *generation = next;
+    generation.current = next;
     player.send(Command::Pause(true));
     player.send(Command::Stop);
     proxy.revoke().await;
@@ -188,6 +190,94 @@ fn catalog_track(
         .find(|t| t.reference == reference)
         .or_else(|| albums.track(&reference))
         .ok_or("That track is no longer on the displayed page. Browse again.")
+}
+fn record_clock(
+    queue: &mut queue::Queue,
+    audio: &player::Status,
+    generation: u64,
+    presented: &mut Option<u64>,
+    failed: bool,
+) -> bool {
+    if audio.generation != generation {
+        return false;
+    }
+    if let Some(position) = audio.position_seconds {
+        let _ = queue.set_position(position);
+    }
+    if audio
+        .position_seconds
+        .is_some_and(|position| position > 0.0)
+        && !audio.paused
+        && !audio.idle
+        && audio.error.is_none()
+        && !failed
+    {
+        *presented = Some(generation);
+        return queue.confirm_presented().unwrap_or(false);
+    }
+    false
+}
+async fn finish_gapless_reset(
+    gapless: &mut gapless::Controller,
+    queue: &mut queue::Queue,
+    epochs: &mut gapless::Epochs,
+    before: &player::Status,
+    presented: &mut Option<u64>,
+    proxy: &proxy::Proxy,
+) -> Result<(), String> {
+    let promoted = gapless.handoff(queue, epochs, before, proxy).await;
+    record_clock(queue, before, epochs.current, presented, false);
+    gapless.invalidate();
+    proxy.revoke().await;
+    epochs.reset().map_err(str::to_owned)?;
+    gapless.review();
+    promoted.map(|_| ())
+}
+fn guarded_queue_command(op: &str) -> bool {
+    matches!(
+        op,
+        "play"
+            | "album_play"
+            | "playlist_play"
+            | "queue_play"
+            | "replay"
+            | "previous"
+            | "next"
+            | "seek"
+            | "stop"
+            | "stop_clear"
+            | "queue_remove"
+            | "clear_upcoming"
+            | "queue_move"
+            | "enqueue"
+            | "play_next"
+            | "set_shuffle"
+            | "set_repeat"
+            | "set_gapless"
+            | "disconnect"
+            | "forget_signin"
+            | "quit"
+    )
+}
+fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
+    matches!(
+        op,
+        "play"
+            | "album_play"
+            | "playlist_play"
+            | "queue_play"
+            | "replay"
+            | "previous"
+            | "next"
+            | "seek"
+            | "stop"
+            | "stop_clear"
+            | "disconnect"
+            | "forget_signin"
+            | "quit"
+    ) || op == "queue_remove"
+        && serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
+            == queue.selected()
 }
 enum ResumePlan {
     Waiting,
@@ -382,7 +472,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut browse_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut prepare_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut auth_task: Option<tokio::task::JoinHandle<()>> = None;
-    let (mut auth_generation, mut browse_generation, mut play_generation) = (0_u64, 0_u64, 0_u64);
+    let (mut auth_generation, mut browse_generation) = (0_u64, 0_u64);
+    let mut epochs = gapless::Epochs::default();
+    let mut gapless = gapless::Controller::default();
+    state["gapless"] = json!(gapless.view);
     let mut desired_playing = false;
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut last_audio = player.status();
@@ -421,19 +514,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             event = events.recv() => match event { Some(event) => event, None => break },
             _ = audio_tick.tick() => {
                 let audio = player.status();
+                let mut gapless_changed=false;
+                match gapless.handoff(&mut queue,&mut epochs,&audio,&proxy).await {
+                    Ok(true) => { gapless_changed=true; state["selection"]=queue.selected().and_then(|id|queue.visible_track(id).ok()).map(|track|json!(track)).unwrap_or(Value::Null); handled_end=None; },
+                    Ok(false) if audio.generation<=epochs.current => {},
+                    result => {
+                        desired_playing=false;
+                        if let Ok(before)=player.barrier().await {let _=finish_gapless_reset(&mut gapless,&mut queue,&mut epochs,&before,&mut presented_generation,&proxy).await;}
+                        else {gapless.invalidate();proxy.revoke().await;epochs.reset()?;gapless.review();}
+                        state["error"]=json!(result.err().unwrap_or_else(||"An unbound native transition was reset; review the selected occurrence.".into()));
+                        state["intent"]=json!("paused");gapless_changed=true;
+                    },
+                }
                 let stream_failed=proxy.failed().await;
                 let observed_at=std::time::Instant::now();
                 desktop_clock.observe(&audio,observed_at);
                 let clock_stale=desktop_clock.stale(&audio,observed_at);
                 let mut presentation_changed=false;
-                if (audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale) && audio.generation == play_generation {
+                if audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale {
                     last_stream_failed=stream_failed;
                     last_clock_stale=clock_stale;
-                    if let Some(position)=audio.position_seconds{let _=queue.set_position(position);}
-                    if audio.position_seconds.is_some_and(|position|position>0.0)&&!audio.paused&&!audio.idle&&audio.error.is_none()&&!stream_failed{presented_generation=Some(play_generation);presentation_changed=queue.confirm_presented().unwrap_or(false);}
+                    presentation_changed=record_clock(&mut queue,&audio,epochs.current,&mut presented_generation,stream_failed);
+                    gapless.observed(&audio,presented_generation);
                     last_audio = audio.clone();
                     state["audio"] = json!(audio);
-                    if let Some(error) = audio.error.or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
+                    if let Some(error) = audio.error.filter(|_|audio.generation==epochs.current).or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
                         state["error"] = json!(error);
                         desired_playing = false;
                         state["intent"] = json!("paused");
@@ -443,19 +548,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state["revision"] = json!(revision.to_string());
                     updates.send_replace(state.clone());
                     if let Some(desktop) = &mut desktop {
-                        desktop.publish(mpris::View::capture(&queue,&audio,play_generation,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale));
+                        desktop.publish(mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale));
                     }
                 }
-                if audio.generation==play_generation && audio.idle && audio.natural_eof && handled_end!=Some(play_generation) && audio.error.is_none() && !stream_failed {
-                    handled_end=Some(play_generation);
-                    Event::Advance(play_generation)
-                } else if presentation_changed {Event::Checkpoint} else {continue}
+                if audio.generation==epochs.current && audio.idle && audio.natural_eof && handled_end!=Some(epochs.current) && audio.error.is_none() && !stream_failed {
+                    handled_end=Some(epochs.current);
+                    Event::Advance(epochs.current)
+                } else if presentation_changed || gapless_changed || state["queue"]["selected"]!=json!(queue.selected()) {Event::Checkpoint} else {continue}
             },
             _ = checkpoint_tick.tick()=>Event::Checkpoint,
             _ = tokio::signal::ctrl_c() => break,
         };
+        if matches!(&event, Event::Request(_) | Event::Desktop(_)) {
+            let audio = player.status();
+            match gapless
+                .handoff(&mut queue, &mut epochs, &audio, &proxy)
+                .await
+            {
+                Ok(true) => {
+                    record_clock(
+                        &mut queue,
+                        &audio,
+                        epochs.current,
+                        &mut presented_generation,
+                        false,
+                    );
+                    state["selection"] = queue
+                        .selected()
+                        .and_then(|id| queue.visible_track(id).ok())
+                        .map(|track| json!(track))
+                        .unwrap_or(Value::Null);
+                    handled_end = None;
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    desired_playing = false;
+                    player.send(Command::Pause(true));
+                    state["error"] = json!(error);
+                    gapless.review();
+                }
+            }
+        }
         let mut desktop_reply = None;
-        let event = if let Event::Desktop(request) = event {
+        let mut desktop_action = None;
+        let mut desktop_deadline = None;
+        let mut event = if let Event::Desktop(request) = event {
             if !request.is_live() {
                 let _ = request.reply.send(Err(
                     "The desktop command expired before it was applied.".into(),
@@ -465,26 +602,130 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let view = mpris::View::capture(
                 &queue,
                 &player.status(),
-                play_generation,
+                epochs.current,
                 presented_generation,
                 provider.is_some(),
                 desired_playing,
                 last_stream_failed || last_clock_stale,
             );
             if let Some(command) = mpris::translate(&request.action, &view, &queue, &instance) {
+                desktop_deadline = Some(request.deadline);
+                desktop_action = Some(request.action);
                 desktop_reply = Some(request.reply);
                 Event::Request(command)
             } else {
                 let _ = request.reply.send(Ok(()));
-                continue;
+                Event::Checkpoint
             }
         } else {
             event
         };
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
+            && guarded_queue_command(request["op"].as_str().unwrap_or(""))
+            && (request.get("queue_session").is_none() || check_queue(&queue, request).is_ok())
+        {
+            let op = request["op"].as_str().unwrap_or("");
+            let cancelled = gapless.cancel(&player, &proxy).await;
+            let reset = match cancelled {
+                Ok(Some(before)) => Some(Ok(before)),
+                Ok(None)
+                    if gapless.chained
+                        && changes_current(op, request, &queue)
+                        && presented_generation != Some(epochs.current) =>
+                {
+                    Some(player.barrier().await)
+                }
+                Ok(None) => None,
+                Err(_) => Some(player.barrier().await),
+            };
+            if let Some(reset) = reset {
+                desired_playing = false;
+                match reset {
+                    Ok(before) => {
+                        if let Err(error) = finish_gapless_reset(
+                            &mut gapless,
+                            &mut queue,
+                            &mut epochs,
+                            &before,
+                            &mut presented_generation,
+                            &proxy,
+                        )
+                        .await
+                        {
+                            state["error"] = json!(error);
+                            event = Event::Checkpoint;
+                        }
+                    }
+                    Err(error) => {
+                        gapless.invalidate();
+                        proxy.revoke().await;
+                        epochs.reset()?;
+                        player.send(Command::Pause(true));
+                        gapless.review();
+                        state["error"] = json!(error);
+                        event = Event::Checkpoint;
+                    }
+                }
+                state["audio"] = Value::Null;
+                state["intent"] = json!("paused");
+                state["status"] = json!("Buffered transition reset; playback paused for review.");
+            }
+        }
+        if let Some(action) = &desktop_action {
+            if desktop_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now())
+                || desktop_reply
+                    .as_ref()
+                    .is_some_and(|reply| reply.is_closed())
+            {
+                event = Event::Checkpoint;
+                state["error"] = json!("The desktop command expired before queue mutation.");
+            } else if matches!(event, Event::Request(_)) {
+                let view = mpris::View::capture(
+                    &queue,
+                    &player.status(),
+                    epochs.current,
+                    presented_generation,
+                    provider.is_some(),
+                    desired_playing,
+                    last_stream_failed || last_clock_stale,
+                );
+                event = mpris::translate(action, &view, &queue, &instance)
+                    .map(Event::Request)
+                    .unwrap_or(Event::Checkpoint);
+            }
+        }
         let mut to_prepare = None;
         let mut force_save = false;
         let mut seeked = false;
         match event {
+            Event::Gapless(reply) => {
+                if let Err(error) = gapless.ready(reply, &queue, &epochs, &player, &proxy).await {
+                    desired_playing = false;
+                    match player.barrier().await {
+                        Ok(before) => {
+                            let _ = finish_gapless_reset(
+                                &mut gapless,
+                                &mut queue,
+                                &mut epochs,
+                                &before,
+                                &mut presented_generation,
+                                &proxy,
+                            )
+                            .await;
+                        }
+                        Err(_) => {
+                            gapless.invalidate();
+                            proxy.revoke().await;
+                            epochs.reset()?;
+                            gapless.review();
+                        }
+                    }
+                    state["error"] = json!(error);
+                    state["intent"] = json!("paused");
+                    state["audio"] = Value::Null;
+                }
+            }
             Event::DesktopLost => {
                 if let Some(desktop) = desktop.take() {
                     desktop.shutdown().await;
@@ -514,7 +755,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::Playlists(reply) => {
                 playlists.apply(reply, auth_generation);
             }
-            Event::Advance(g) if g == play_generation => {
+            Event::Advance(g) if g == epochs.current => {
                 match queue.complete(presented_generation == Some(g)) {
                     Ok(Some(track)) => to_prepare = Some(track),
                     Ok(None) => {
@@ -546,6 +787,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                     "retry_save" => force_save = true,
+                    "set_gapless" => {
+                        if let Some(enabled) = v["enabled"].as_bool() {
+                            gapless.view.enabled = enabled;
+                            gapless.retry();
+                            gapless.view.phase = if enabled { "idle" } else { "off" };
+                            gapless.view.message = if enabled {
+                                "Gapless chaining enabled for compatible audio."
+                            } else {
+                                "Gapless chaining disabled for this backend session."
+                            }
+                            .into();
+                        }
+                    }
                     "restore_signin" => {
                         if provider.is_some() || !state["sign_in"]["keyring_action"].is_null() {
                             state["error"] = json!(
@@ -817,7 +1071,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     "previous" => {
                                         let audio = player.status();
-                                        if audio.generation == play_generation
+                                        if audio.generation == epochs.current
                                             && let Some(position) = audio.position_seconds
                                         {
                                             let _ = queue.set_position(position);
@@ -871,9 +1125,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Some(task) = prepare_task.take() {
                                     task.abort();
                                 }
-                                play_generation = play_generation
-                                    .checked_add(1)
-                                    .ok_or("Generation exhausted")?;
+                                epochs.reset()?;
+                                gapless.invalidate();
                                 player.send(Command::Pause(true));
                                 player.send(Command::Stop);
                                 proxy.revoke().await;
@@ -892,9 +1145,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let _ = queue.seek_to(0.0);
                         }
                         desired_playing = false;
-                        play_generation = play_generation
-                            .checked_add(1)
-                            .ok_or("Generation exhausted")?;
+                        epochs.reset()?;
+                        gapless.invalidate();
                         player.send(Command::Pause(true));
                         player.send(Command::Stop);
                         proxy.revoke().await;
@@ -908,7 +1160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "pause" => {
                         let audio = player.status();
-                        if audio.generation == play_generation
+                        if audio.generation == epochs.current
                             && let Some(position) = audio.position_seconds
                         {
                             let _ = queue.set_position(position);
@@ -921,13 +1173,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "resume" => {
                         if provider.is_some() {
                             desired_playing = true;
+                            if gapless.view.phase == "review" {
+                                gapless.view.phase = "idle";
+                                gapless.view.message =
+                                    "Resuming the selected occurrence after review.".into();
+                            }
                             let preparing = prepare_task
                                 .as_ref()
                                 .is_some_and(|task| !task.is_finished());
                             match resume_selection(
                                 &mut queue,
                                 &player.status(),
-                                play_generation,
+                                epochs.current,
                                 preparing,
                             ) {
                                 Ok(ResumePlan::Waiting) => {}
@@ -976,9 +1233,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         browse_generation = browse_generation
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
-                        play_generation = play_generation
-                            .checked_add(1)
-                            .ok_or("Generation exhausted")?;
+                        epochs.reset()?;
+                        gapless.invalidate();
                         provider = None;
                         playlists.invalidate();
                         albums.invalidate();
@@ -1133,7 +1389,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state["error"] = json!(e.to_string());
                 }
             },
-            Event::Media(g, r) if g == play_generation => match r {
+            Event::Media(g, r) if g == epochs.current => match r {
                 Ok(media) => {
                     if let Err(error) = queue.update_selected(media.track.clone(), &media.version) {
                         state["error"] = json!(error.to_string());
@@ -1166,11 +1422,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(track) = to_prepare
             && let Some(provider) = provider.clone()
         {
+            gapless.invalidate();
             prepare_track(
                 &player,
                 &proxy,
                 &mut prepare_task,
-                &mut play_generation,
+                &mut epochs,
                 provider,
                 track.reference,
                 tx.clone(),
@@ -1181,14 +1438,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
             state["status"] = json!("Preparing selected queue entry");
         }
+        let audio = player.status();
+        if desired_playing
+            && presented_generation == Some(epochs.current)
+            && audio.generation == epochs.current
+            && !audio.idle
+            && !audio.paused
+            && audio.error.is_none()
+            && let Some(provider) = provider.clone()
+            && let Err(error) = gapless.schedule(&queue, &mut epochs, provider, tx.clone())
+        {
+            state["error"] = json!(error);
+        }
+        state["gapless"] = json!(gapless.view);
         if let Some(desktop) = &mut desktop {
             if seeked {
-                desktop.mark_seek(&queue, play_generation);
+                desktop.mark_seek(&queue, epochs.current);
             }
             desktop.publish(mpris::View::capture(
                 &queue,
                 &player.status(),
-                play_generation,
+                epochs.current,
                 presented_generation,
                 provider.is_some(),
                 desired_playing,
@@ -1222,11 +1492,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let audio = player.status();
-    if audio.generation == play_generation
+    if audio.generation == epochs.current
         && let Some(position) = audio.position_seconds
     {
         let _ = queue.set_position(position);
     }
+    gapless.invalidate();
     player.send(Command::Pause(true));
     player.send(Command::Stop);
     proxy.revoke().await;

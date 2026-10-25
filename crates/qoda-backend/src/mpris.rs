@@ -150,6 +150,7 @@ impl View {
             && confirmed == Some(generation)
             && audio.generation == generation
             && !audio.idle
+            && audio.entry_ready
             && audio.error.is_none()
             && !failed
             && !q.ended
@@ -608,10 +609,12 @@ mod tests {
             player::Status {
                 generation: 7,
                 position_seconds: Some(2.5),
+                entry_ready: true,
                 idle: false,
                 paused: false,
                 natural_eof: false,
                 error: None,
+                ..Default::default()
             },
         )
     }
