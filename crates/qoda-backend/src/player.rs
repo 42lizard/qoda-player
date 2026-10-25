@@ -738,9 +738,11 @@ mod gapless_tests {
             expected.extend(second);
             let capture = std::env::temp_dir()
                 .join(format!("qoda-gapless-capture-{}.pcm", uuid::Uuid::new_v4()));
+            let diagnostic = capture.with_extension("log");
             let player = Player::with_options(
                 "pcm",
                 &[
+                    ("log-file", diagnostic.to_str().unwrap().into()),
                     ("ao-pcm-file", capture.to_str().unwrap().into()),
                     ("ao-pcm-waveheader", "no".into()),
                     ("ao-pcm-append", "yes".into()),
@@ -768,6 +770,17 @@ mod gapless_tests {
             assert!(final_status.error.is_none());
             drop(player);
             let actual = std::fs::read(&capture).unwrap();
+            if actual != expected {
+                eprintln!(
+                    "Capture mismatch: flac={flac}, bytes={}, prefix={:?}; expected prefix={:?}, second prefix={:?}\n{}",
+                    actual.len(),
+                    actual.get(..16),
+                    expected.get(..16),
+                    expected.get(96000..96016),
+                    std::fs::read_to_string(&diagnostic).unwrap_or_default()
+                );
+            }
+            std::fs::remove_file(diagnostic).unwrap();
             assert_eq!(
                 actual.len(),
                 expected.len(),
