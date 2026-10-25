@@ -1,4 +1,5 @@
 //! Provider metadata and media access. Credentials and upstream URLs never enter UI DTOs.
+pub mod artwork;
 mod plex;
 use bytes::Bytes;
 use futures_util::stream::BoxStream;

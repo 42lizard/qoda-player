@@ -1,5 +1,6 @@
 mod albums;
 mod artwork;
+mod artwork_store;
 mod catalog;
 mod gapless;
 mod mpris;
@@ -36,6 +37,8 @@ enum Event {
     Playlists(playlists::Reply),
     Albums(albums::Reply),
     Gapless(gapless::Reply),
+    Artwork,
+    CacheDone(u64, bool, Result<(), String>),
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
@@ -418,7 +421,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     let player = Player::start()?;
     let proxy = proxy::Proxy::start().await?;
-    let artwork = artwork::Artwork::start().await?;
     let instance = uuid::Uuid::new_v4().to_string();
     let mut revision = 0_u64;
 
@@ -428,6 +430,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut presented_generation = None;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
     let (tx, mut events) = mpsc::channel(64);
+    let artwork = artwork::Artwork::persistent(tx.clone()).await?;
+    state["artwork_cache"] = artwork.view().await;
     let (mut durable, restored) = storage::Controller::start(storage::path(), tx.clone()).await;
     let (mut queue, start_error) = match restored {
         Ok(queue) => (queue, None),
@@ -457,6 +461,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vault = vault::start(tx.clone());
     let mut vault_generation = 0_u64;
     let mut current_credential: Option<Credential> = None;
+    let mut cache_task: Option<tokio::task::JoinHandle<()>> = None;
     let permits = Arc::new(tokio::sync::Semaphore::new(16));
     let server_tx = tx.clone();
     let server = tokio::spawn(async move {
@@ -556,6 +561,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale);
                     state["presentation"]=view.presentation();
                     state["gapless"]=json!(gapless.view);
+                    state["artwork_cache"]=artwork.view().await;
                     updates.send_replace(state.clone());
                     if let Some(desktop) = &mut desktop { desktop.publish(view); }
                 }
@@ -758,7 +764,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 continue;
             }
-            Event::Checkpoint => {}
+            Event::Checkpoint | Event::Artwork => {}
+            Event::CacheDone(g, clear, result) => {
+                cache_task = None;
+                state["cache_action"] = Value::Null;
+                if let Err(error) = result {
+                    state["error"] = json!(error);
+                }
+                if clear
+                    && g == auth_generation
+                    && let Some(provider) = provider.clone()
+                {
+                    let refs = albums
+                        .view
+                        .page
+                        .as_ref()
+                        .map(|page| {
+                            page.albums
+                                .iter()
+                                .map(|album| album.reference.clone())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    artwork.publish(provider, refs).await;
+                }
+            }
             Event::Albums(reply) => {
                 if albums.apply(reply, auth_generation)
                     && let (Some(page), Some(provider)) = (&albums.view.page, provider.clone())
@@ -803,6 +833,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         break;
                     }
                     "retry_save" => force_save = true,
+                    "clear_artwork_cache" | "set_artwork_budget" => {
+                        if cache_task.is_some() {
+                            state["error"] = json!("Wait for the current artwork cache operation.");
+                        } else {
+                            let clear = v["op"] == "clear_artwork_cache";
+                            let mib = v["mib"].as_u64().filter(|mib| *mib <= 4096);
+                            if !clear && mib.is_none() {
+                                state["error"] =
+                                    json!("Choose an artwork cache target between 0 and 4096 MiB.");
+                            } else {
+                                let epoch = if clear {
+                                    artwork.begin_clear().await
+                                } else {
+                                    None
+                                };
+                                let disk = artwork.disk.clone();
+                                let tx = tx.clone();
+                                let g = auth_generation;
+                                state["cache_action"] =
+                                    json!(if clear { "clear" } else { "budget" });
+                                cache_task = Some(tokio::spawn(async move {
+                                    let result = if clear {
+                                        match epoch {
+                                            Some(epoch) => disk.finish_clear(epoch).await,
+                                            None => Err("Artwork cleanup could not start."),
+                                        }
+                                    } else {
+                                        disk.budget(mib.unwrap() as u16).await
+                                    };
+                                    let _ = tx
+                                        .send(Event::CacheDone(
+                                            g,
+                                            clear,
+                                            result.map_err(str::to_owned),
+                                        ))
+                                        .await;
+                                }));
+                            }
+                        }
+                    }
                     "set_gapless" => {
                         if let Some(enabled) = v["enabled"].as_bool() {
                             gapless.view.enabled = enabled;
@@ -982,7 +1052,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 serde_json::from_value::<SourceId>(v["source"].clone())
                         {
                             if albums.source_changed(source) {
-                                artwork.revoke(true).await;
+                                artwork.revoke(false).await;
                             }
                             let Ok(offset) =
                                 serde_json::from_value::<qoda_core::Counter>(v["offset"].clone())
@@ -1284,6 +1354,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         provider = None;
                         playlists.invalidate();
                         albums.invalidate();
+                        player.send(Command::Pause(true));
+                        player.send(Command::Stop);
                         artwork.revoke(true).await;
                         queue = queue.empty_session();
                         purge_epoch = purge_epoch
@@ -1520,7 +1592,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         state["queue"] = json!(queue.snapshot());
         state["playlists"] = json!(playlists.view);
+        albums.view.covers = artwork.urls().await;
         state["albums"] = json!(albums.view);
+        state["artwork_cache"] = artwork.view().await;
         state["account_epoch"] = json!(auth_generation.to_string());
         let stamp = (queue.durable_stamp(), purge_epoch);
         if force_save || stamp != last_requested {
@@ -1554,6 +1628,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     player.send(Command::Pause(true));
     player.send(Command::Stop);
     proxy.revoke().await;
+    artwork.revoke(false).await;
+    if let Some(task) = cache_task {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), task).await;
+    }
+    artwork.disk.shutdown().await;
     server.abort();
     match durable.flush(queue.clone(), purge_epoch).await {
         Err(error) => eprintln!("Qoda: final checkpoint failed: {error}"),

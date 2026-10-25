@@ -1,4 +1,5 @@
-//! Revocable lazy artwork URLs. At most two upstream reads and 16 MiB of JPEGs.
+//! Revocable lazy artwork URLs with bounded memory/disk caches and background refresh.
+use crate::artwork_store::{Disk, Loaded};
 use axum::{
     Router,
     body::Body,
@@ -7,14 +8,13 @@ use axum::{
     routing::get,
 };
 use bytes::Bytes;
-use qoda_provider::{AlbumRef, MusicProvider};
+use qoda_provider::{AlbumRef, MusicProvider, ProviderError};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::{Mutex, Semaphore, watch};
-
+use tokio::sync::{Mutex, Semaphore, mpsc, watch};
 const ENTRIES: usize = 64;
 const IMAGE_BYTES: usize = 256 * 1024;
 #[derive(Clone)]
@@ -22,34 +22,55 @@ struct Grant {
     reference: AlbumRef,
     provider: Arc<dyn MusicProvider>,
     cancel: watch::Sender<bool>,
+    epoch: u64,
+}
+#[derive(Clone)]
+struct Hit {
+    image: Option<Bytes>,
+    stale: bool,
 }
 struct Cached {
     reference: AlbumRef,
     image: Option<Bytes>,
     until: Instant,
+    stale: bool,
 }
 #[derive(Default)]
 struct Data {
     grants: HashMap<String, Grant>,
     cache: VecDeque<Cached>,
+    stale: HashSet<AlbumRef>,
+    refreshing: HashMap<AlbumRef, String>,
+    retry: HashMap<AlbumRef, Instant>,
 }
 impl Data {
-    fn get(&mut self, reference: &AlbumRef) -> Option<Option<Bytes>> {
+    fn get(&mut self, reference: &AlbumRef) -> Option<Hit> {
         self.cache.retain(|c| c.until > Instant::now());
         let index = self.cache.iter().position(|c| &c.reference == reference)?;
         let entry = self.cache.remove(index)?;
-        let result = entry.image.clone();
+        let result = Hit {
+            image: entry.image.clone(),
+            stale: entry.stale,
+        };
         self.cache.push_back(entry);
         Some(result)
     }
     fn put(&mut self, reference: AlbumRef, image: Option<Bytes>) {
+        let ttl = if image.is_some() {
+            7 * 24 * 60 * 60
+        } else {
+            30
+        };
+        self.cache(reference, image, Duration::from_secs(ttl), false);
+    }
+    fn cache(&mut self, reference: AlbumRef, image: Option<Bytes>, ttl: Duration, stale: bool) {
         self.cache
             .retain(|c| c.reference != reference && c.until > Instant::now());
-        let ttl = if image.is_some() { 300 } else { 30 };
         self.cache.push_back(Cached {
             reference,
             image,
-            until: Instant::now() + Duration::from_secs(ttl),
+            until: Instant::now() + ttl,
+            stale,
         });
         while self.cache.len() > ENTRIES {
             self.cache.pop_front();
@@ -62,15 +83,33 @@ pub struct Artwork {
     active: Arc<Semaphore>,
     pending: Arc<Semaphore>,
     port: u16,
+    pub disk: Disk,
+    events: Option<mpsc::Sender<crate::Event>>,
 }
 impl Artwork {
+    #[cfg(test)]
     pub async fn start() -> std::io::Result<Self> {
+        Self::with_disk(Disk::disabled(), None).await
+    }
+    pub async fn persistent(events: mpsc::Sender<crate::Event>) -> std::io::Result<Self> {
+        Self::with_disk(
+            Disk::start(crate::artwork_store::Paths::discover()).await,
+            Some(events),
+        )
+        .await
+    }
+    async fn with_disk(
+        disk: Disk,
+        events: Option<mpsc::Sender<crate::Event>>,
+    ) -> std::io::Result<Self> {
         let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let this = Self {
             data: Default::default(),
             active: Arc::new(Semaphore::new(2)),
             pending: Arc::new(Semaphore::new(32)),
             port: listener.local_addr()?.port(),
+            disk,
+            events,
         };
         let app = Router::new()
             .route("/art/{id}", get(image))
@@ -80,15 +119,28 @@ impl Artwork {
         });
         Ok(this)
     }
-    pub async fn revoke(&self, clear_cache: bool) {
+    async fn revoke_memory(&self, clear_cache: bool) {
         let mut data = self.data.lock().await;
         for grant in data.grants.values() {
             grant.cancel.send_replace(true);
         }
         data.grants.clear();
+        data.stale.clear();
+        data.refreshing.clear();
+        data.retry.clear();
         if clear_cache {
             data.cache.clear();
         }
+    }
+    pub async fn revoke(&self, clear_cache: bool) {
+        self.revoke_memory(clear_cache).await;
+        if clear_cache {
+            self.disk.clear().await;
+        }
+    }
+    pub async fn begin_clear(&self) -> Option<u64> {
+        self.revoke_memory(true).await;
+        self.disk.begin_clear()
     }
     pub async fn publish(
         &self,
@@ -97,24 +149,150 @@ impl Artwork {
     ) -> HashMap<String, String> {
         self.revoke(false).await;
         let mut data = self.data.lock().await;
-        let mut urls = HashMap::new();
         for reference in references.into_iter().take(100) {
             let id = uuid::Uuid::new_v4().to_string();
             let (cancel, _) = watch::channel(false);
-            urls.insert(
-                reference.key.clone(),
-                format!("http://127.0.0.1:{}/art/{id}", self.port),
-            );
             data.grants.insert(
                 id,
                 Grant {
                     reference,
                     provider: provider.clone(),
                     cancel,
+                    epoch: self.disk.epoch(),
                 },
             );
         }
-        urls
+        self.urls_locked(&data)
+    }
+    fn urls_locked(&self, data: &Data) -> HashMap<String, String> {
+        data.grants
+            .iter()
+            .map(|(id, grant)| {
+                (
+                    grant.reference.key.clone(),
+                    format!("http://127.0.0.1:{}/art/{id}", self.port),
+                )
+            })
+            .collect()
+    }
+    pub async fn urls(&self) -> HashMap<String, String> {
+        let data = self.data.lock().await;
+        self.urls_locked(&data)
+    }
+    pub async fn view(&self) -> serde_json::Value {
+        let mut view = serde_json::to_value(self.disk.view()).expect("cache view");
+        let data = self.data.lock().await;
+        view["refreshing"] = serde_json::json!(data.refreshing.len());
+        view["stale"] = serde_json::json!(!data.stale.is_empty());
+        view
+    }
+    fn notify(&self) {
+        if let Some(tx) = &self.events {
+            let _ = tx.try_send(crate::Event::Artwork);
+        }
+    }
+    async fn cached(&self, grant: &Grant) -> Option<Hit> {
+        if let Some(hit) = self.data.lock().await.get(&grant.reference) {
+            return Some(hit);
+        }
+        let Loaded { image, fresh_for } = self.disk.get(grant.epoch, &grant.reference).await?;
+        let mut data = self.data.lock().await;
+        if *grant.cancel.borrow() {
+            return None;
+        }
+        let stale = fresh_for.is_zero();
+        let hit = Hit {
+            image: Some(image.clone()),
+            stale,
+        };
+        data.cache(
+            grant.reference.clone(),
+            Some(image),
+            if stale {
+                Duration::from_secs(30)
+            } else {
+                fresh_for
+            },
+            stale,
+        );
+        Some(hit)
+    }
+    async fn refresh(&self, id: &str, grant: &Grant) {
+        let mut data = self.data.lock().await;
+        if !data.grants.contains_key(id) {
+            return;
+        }
+        data.stale.insert(grant.reference.clone());
+        if data.refreshing.contains_key(&grant.reference)
+            || data
+                .retry
+                .get(&grant.reference)
+                .is_some_and(|until| *until > Instant::now())
+        {
+            return;
+        }
+        data.refreshing.insert(grant.reference.clone(), id.into());
+        data.retry.insert(
+            grant.reference.clone(),
+            Instant::now() + Duration::from_secs(30),
+        );
+        drop(data);
+        let this = self.clone();
+        let grant = grant.clone();
+        let id = id.to_owned();
+        tokio::spawn(async move {
+            let mut cancel = grant.cancel.subscribe();
+            let work = async {
+                let _permit = this
+                    .active
+                    .acquire()
+                    .await
+                    .map_err(|_| ProviderError::Network)?;
+                grant.provider.cover(grant.reference.clone()).await
+            };
+            let result = tokio::select! {result=tokio::time::timeout(Duration::from_secs(25),work)=>result.unwrap_or(Err(ProviderError::Network)),_=cancel.changed()=>Err(ProviderError::Network)};
+            if !*cancel.borrow() {
+                match result {
+                    Ok(bytes) if qoda_provider::artwork::bounded_jpeg(&bytes) => {
+                        let image = Bytes::from(bytes);
+                        this.disk
+                            .put(grant.epoch, &grant.reference, image.clone())
+                            .await;
+                        this.replace(&id, &grant, Some(image)).await;
+                    }
+                    Err(ProviderError::AccessDenied) => {
+                        this.disk.remove(grant.epoch, &grant.reference).await;
+                        this.replace(&id, &grant, None).await;
+                    }
+                    _ => {}
+                }
+            }
+            let mut data = this.data.lock().await;
+            if data.refreshing.get(&grant.reference) == Some(&id) {
+                data.refreshing.remove(&grant.reference);
+            }
+            drop(data);
+            this.notify();
+        });
+        self.notify();
+    }
+    async fn replace(&self, id: &str, grant: &Grant, image: Option<Bytes>) {
+        let mut data = self.data.lock().await;
+        if *grant.cancel.borrow() || !data.grants.contains_key(id) {
+            return;
+        }
+        data.put(grant.reference.clone(), image);
+        data.stale.remove(&grant.reference);
+        data.grants.remove(id);
+        grant.cancel.send_replace(true);
+        let (cancel, _) = watch::channel(false);
+        data.grants.insert(
+            uuid::Uuid::new_v4().to_string(),
+            Grant {
+                cancel,
+                ..grant.clone()
+            },
+        );
     }
 }
 async fn image(
@@ -145,8 +323,11 @@ async fn image(
     }
     let fetch_cancel = cancel.clone();
     let fetch = async {
-        if let Some(image) = art.data.lock().await.get(&grant.reference) {
-            return Ok(image);
+        if let Some(hit) = art.cached(&grant).await {
+            if hit.stale {
+                art.refresh(&id, &grant).await;
+            }
+            return Ok(hit.image);
         }
         let _active = art
             .active
@@ -156,27 +337,33 @@ async fn image(
         if *fetch_cancel.borrow() {
             return Err(StatusCode::NOT_FOUND);
         }
-        if let Some(image) = art.data.lock().await.get(&grant.reference) {
-            return Ok(image);
+        if let Some(hit) = art.data.lock().await.get(&grant.reference) {
+            return Ok(hit.image);
         }
         let image = grant
             .provider
             .cover(grant.reference.clone())
             .await
             .ok()
-            .filter(|v| !v.is_empty() && v.len() <= IMAGE_BYTES)
+            .filter(|bytes| {
+                bytes.len() <= IMAGE_BYTES && qoda_provider::artwork::bounded_jpeg(bytes)
+            })
             .map(Bytes::from);
         let mut data = art.data.lock().await;
         if *fetch_cancel.borrow() {
             return Err(StatusCode::NOT_FOUND);
         }
         data.put(grant.reference.clone(), image.clone());
+        drop(data);
+        if let Some(image) = &image {
+            art.disk
+                .put(grant.epoch, &grant.reference, image.clone())
+                .await;
+        }
+        art.notify();
         Ok(image)
     };
-    let result = tokio::select! {
-        r=tokio::time::timeout(Duration::from_secs(25),fetch)=>r.map_err(|_|StatusCode::GATEWAY_TIMEOUT)??,
-        _=cancel.changed()=>return Err(StatusCode::NOT_FOUND),
-    };
+    let result = tokio::select! {r=tokio::time::timeout(Duration::from_secs(25),fetch)=>r.map_err(|_|StatusCode::GATEWAY_TIMEOUT)??,_=cancel.changed()=>return Err(StatusCode::NOT_FOUND)};
     let bytes = result.ok_or(StatusCode::NOT_FOUND)?;
     Response::builder()
         .header("content-type", "image/jpeg")
@@ -224,6 +411,7 @@ mod tests {
                 match self.mode {
                     2 => Err(ProviderError::AccessDenied),
                     3 => Ok(vec![0; IMAGE_BYTES + 1]),
+                    4 => Err(ProviderError::Network),
                     _ => {
                         Ok(include_bytes!("../../qoda-provider/tests/fixtures/cover.jpg").to_vec())
                     }
@@ -324,6 +512,125 @@ mod tests {
             let data = art.data.lock().await;
             assert!(data.cache[0].image.is_none());
             assert!(data.cache[0].until <= Instant::now() + Duration::from_secs(30));
+        }
+    }
+    async fn cached_fixture(stale: bool) -> (crate::artwork_store::tests::Fixture, Disk, AlbumRef) {
+        let fixture = crate::artwork_store::tests::Fixture::new();
+        let reference = reference(1);
+        let disk = Disk::start(Ok(fixture.paths.clone())).await;
+        disk.put(
+            disk.epoch(),
+            &reference,
+            Bytes::from_static(include_bytes!(
+                "../../qoda-provider/tests/fixtures/cover.jpg"
+            )),
+        )
+        .await;
+        if stale {
+            for file in std::fs::read_dir(&fixture.paths.cache).unwrap() {
+                let path = file.unwrap().path();
+                if path.extension().is_some_and(|ext| ext == "jpg") {
+                    std::fs::File::open(path)
+                        .unwrap()
+                        .set_times(std::fs::FileTimes::new().set_modified(
+                            std::time::SystemTime::now() - Duration::from_secs(8 * 86400),
+                        ))
+                        .unwrap();
+                }
+            }
+        }
+        (fixture, disk, reference)
+    }
+    #[tokio::test]
+    async fn disk_artwork_is_reused_after_restart_without_a_provider_image_request() {
+        let (fixture, disk, reference) = cached_fixture(false).await;
+        disk.shutdown().await;
+        let disk = Disk::start(Ok(fixture.paths.clone())).await;
+        let art = Artwork::with_disk(disk.clone(), None).await.unwrap();
+        let provider = Arc::new(Fixture::default());
+        let url = art.publish(provider.clone(), [reference]).await["1"].clone();
+        assert_eq!(reqwest::get(url).await.unwrap().status(), 200);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        disk.shutdown().await;
+    }
+    #[tokio::test]
+    async fn stale_artwork_is_immediate_and_clearing_cancels_a_hung_refresh_without_resurrection() {
+        let (_fixture, disk, reference) = cached_fixture(true).await;
+        let art = Artwork::with_disk(disk.clone(), None).await.unwrap();
+        let provider = Arc::new(Fixture {
+            mode: 1,
+            ..Default::default()
+        });
+        let url = art.publish(provider.clone(), [reference]).await["1"].clone();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), reqwest::get(url))
+                .await
+                .unwrap()
+                .unwrap()
+                .status(),
+            200
+        );
+        tokio::time::timeout(Duration::from_secs(2), provider.started.notified())
+            .await
+            .unwrap();
+        assert_eq!(art.view().await["stale"], true);
+        art.revoke(true).await;
+        assert!(art.data.lock().await.cache.is_empty());
+        assert_eq!(disk.view().entries, 0);
+        tokio::task::yield_now().await;
+        assert!(art.data.lock().await.cache.is_empty());
+        disk.shutdown().await;
+    }
+    #[tokio::test]
+    async fn refresh_rotates_the_local_url_and_denial_purges_while_network_failure_retains_stale_bytes()
+     {
+        for mode in [0, 2, 4] {
+            let (_fixture, disk, reference) = cached_fixture(true).await;
+            let art = Artwork::with_disk(disk.clone(), None).await.unwrap();
+            let provider = Arc::new(Fixture {
+                mode,
+                ..Default::default()
+            });
+            let old = art.publish(provider.clone(), [reference.clone()]).await["1"].clone();
+            assert_eq!(reqwest::get(&old).await.unwrap().status(), 200);
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if provider.calls.load(Ordering::SeqCst) > 0
+                        && art.data.lock().await.refreshing.is_empty()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let new = art.urls().await["1"].clone();
+            if mode == 4 {
+                assert_eq!(old, new);
+                assert_eq!(reqwest::get(&new).await.unwrap().status(), 200);
+                assert_eq!(disk.view().entries, 1);
+            } else {
+                assert_ne!(old, new);
+                assert_eq!(reqwest::get(&old).await.unwrap().status(), 404);
+                assert_eq!(
+                    reqwest::get(&new).await.unwrap().status(),
+                    if mode == 0 { 200 } else { 404 }
+                );
+                assert_eq!(disk.view().entries, usize::from(mode == 0));
+                if mode == 0 {
+                    assert!(
+                        !disk
+                            .get(disk.epoch(), &reference)
+                            .await
+                            .unwrap()
+                            .fresh_for
+                            .is_zero()
+                    );
+                }
+            }
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+            disk.shutdown().await;
         }
     }
     #[test]
