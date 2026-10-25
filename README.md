@@ -41,6 +41,8 @@ The [fidelity and ReplayGain contract](docs/adr/0002-fidelity-and-gain-contract.
 
 The [desktop lifecycle and distribution contract](https://github.com/42lizard/qoda-player/issues/11) selects on-demand user services, targeted launch/toggle commands, explicit Quit, paused crash recovery, and versioned source installs under a user prefix. Installation, desktop identity, upgrade and rollback behavior require separate qualification; no production package or desktop integration has been installed.
 
+[Rust–Quickshell integration observations](https://github.com/42lizard/qoda-player/issues/15) demonstrate local IPC, bounded catalog models, mock-authenticated artwork, libmpv events and minimal backend MPRIS controls without a custom native Quickshell plugin. The throwaway artifact uses fictional data and null audio; durable restoration, live Plex, desktop lifecycle and hardware output still require their own acceptance gates.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
