@@ -4,7 +4,9 @@ A planned standalone music player for Omarchy, built with Quickshell/QML and mpv
 
 ## Status
 
-Planning. No playable application exists yet. The current effort will produce an implementation-ready specification through a Wayfinder decision map on this repository's GitHub issue tracker.
+Core implementation has started in [Implement the first Plex browse/play vertical slice](https://github.com/42lizard/qoda-player/issues/21). The Cargo workspace currently contains the session identity, queue-membership and event-fencing foundation; there is no playable production application yet. The decision map remains the specification record, while real-provider, physical-input and audio-profile acceptance continues alongside development.
+
+Run the core checks with `cargo test --workspace --locked`. The backend process, QML shell and Plex browse/play path are the next implementation increments; the foundation alone does not complete that slice.
 
 ## Agreed first-release scope
 
