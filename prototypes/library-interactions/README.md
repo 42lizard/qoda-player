@@ -28,10 +28,20 @@ Use the floating bottom switcher or left/right arrows outside form fields. The U
 6. Switch full → compact → hidden and reopen via the simulated shortcut. The playing state remains independent of visibility.
 7. Navigate with Tab/Shift+Tab and Enter; use Ctrl+K for search, Space for play/pause outside controls, Escape to dismiss a dialog then collapse/hide the player.
 
+8. Select tracks with their checkboxes or Ctrl/Shift clicks; apply bulk Play, Play next, Add to queue, or Add to playlist. Queue and editable playlist selections can be removed together. Duplicate playlist occurrences remain independently selectable.
+9. Drag editable playlist entries or queue entries to reorder, or use their move buttons with the keyboard. Shrink the browser below 1,050 CSS pixels: A hides the right queue pane and keeps its Queue button/dialog.
+10. Hide from full or compact, then simulate the toggle: it restores the last visible form. Escape closes dialogs and hides compact; it leaves full mode open. The player menu offers explicit Quit, simulated without closing the review page.
+
 The expandable Prototype state below the application shows full fixture state, including independent playlist-entry identities and queue order. It is study instrumentation, not proposed application UI.
+
+## Accepted direction
+
+The human chose A and confirmed the interaction contract in [Choose library browsing and player interactions](https://github.com/42lizard/qoda-player/issues/6). B and C remain only as comparison evidence. A now reflects the selected responsive queue, selection/bulk actions, drag and keyboard ordering, and full/compact/hidden transitions.
+
+The proposed native surface contract is a normal tileable full window plus a compact overlay on the invoking monitor, with no reserved desktop area and keyboard focus only when used. The HTML compact panel suggests placement inside its review surface; it does not establish actual native placement or focus behavior.
 
 ## Limits
 
-No OS window/layer-shell behavior, global shortcut, real keyboard focus restoration across native windows, hardware audio, accessibility audit, large-library benchmark, network request, or backend persistence is implemented. These layouts propose interactions for human review; none has been chosen yet.
+No OS window/layer-shell behavior, global shortcut, real keyboard focus restoration across native windows, hardware audio, accessibility audit, large-library benchmark, network request, or backend persistence is implemented. The selected design and prototype coverage are distinct from native validation. JavaScript syntax and local HTTP delivery were checked; no automated browser surface was available for agent click-through or visual QA.
 
 Decision ticket: [Choose library browsing and player interactions](https://github.com/42lizard/qoda-player/issues/6).
