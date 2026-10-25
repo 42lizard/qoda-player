@@ -56,6 +56,8 @@ ShellRoot {
     property bool cacheExpanded: false
     property bool cacheBudgetInitialized: false
     property int cacheBudgetDraft: 1024
+    property bool metadataBudgetInitialized: false
+    property int metadataBudgetDraft: 256
     property bool accountExpanded: false
     property bool queueRequested: false
     readonly property bool queueOnly: window.width < 980 && queueRequested
@@ -158,7 +160,8 @@ ShellRoot {
                         search.text = libraryTabs.currentIndex === 0 ? root.trackQuery : root.albumQuery;
                     }
                     if (!next.libraries || next.libraries.length === 0) { root.libraryId = ""; search.text = ""; root.albumQuery = ""; root.artistQuery = ""; root.trackQuery = ""; root.playlistSeed = null; }
-                    if (root.instance !== next.instance) root.cacheBudgetInitialized = false;
+                    if (root.instance !== next.instance) { root.cacheBudgetInitialized = false; root.metadataBudgetInitialized = false; }
+                    if (!root.metadataBudgetInitialized && next.metadata_cache && next.metadata_cache.state !== "opening") { root.metadataBudgetDraft = next.metadata_cache.budget_mib; root.metadataBudgetInitialized = true; }
                     if (!root.cacheBudgetInitialized && next.artwork_cache) { root.cacheBudgetDraft = next.artwork_cache.budget_mib; root.cacheBudgetInitialized = true; }
                     root.instance = next.instance;
                     root.snapshot = next;
@@ -211,7 +214,7 @@ ShellRoot {
                 Button { text: "Cache"; onClicked: root.cacheExpanded = !root.cacheExpanded }
                 Button { text: "Account"; onClicked: root.accountExpanded = !root.accountExpanded }
                 Button { text: "Connect Plex"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
-                Button { text: "Disconnect"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes cached artwork, the saved queue and session backups. Keeps saved sign-in."; onClicked: root.send("disconnect") }
+                Button { text: "Disconnect"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes cached metadata/artwork, the saved queue and session backups. Keeps saved sign-in."; onClicked: root.send("disconnect") }
                 Button { text: "Compact"; onClicked: root.showSurface("compact", true) }
                 Button { text: "Hide"; onClicked: root.hideSurface() }
                 Button { text: "Quit"; onClicked: { root.send("quit"); Qt.quit(); } }
@@ -223,11 +226,11 @@ ShellRoot {
                 visible: root.accountExpanded || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || root.snapshot.sign_in.saved !== "present"
                 Button { text: "Restore saved sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
                 Button { text: "Save sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
-                Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, cached artwork, saved queue and session backups. Keeps general preferences."; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
+                Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, cached metadata/artwork, saved queue and session backups. Keeps general preferences."; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
                 Label { text: root.snapshot.sign_in ? root.snapshot.sign_in.message || "" : ""; color: "#acb8c8"; width: parent.width; wrapMode: Text.Wrap; textFormat: Text.PlainText }
             }
             ColumnLayout {
-                visible: root.cacheExpanded || !!root.snapshot.artwork_cache && ["unavailable", "cleanup_pending"].includes(root.snapshot.artwork_cache.state)
+                visible: root.cacheExpanded || !!root.snapshot.artwork_cache && ["unavailable", "cleanup_pending"].includes(root.snapshot.artwork_cache.state) || !!root.snapshot.metadata_cache && ["unavailable", "cleanup_pending"].includes(root.snapshot.metadata_cache.state)
                 Layout.fillWidth: true
                 Label { text: root.snapshot.artwork_cache ? root.snapshot.artwork_cache.message + (root.snapshot.artwork_cache.usage_known ? " · " + (root.snapshot.artwork_cache.bytes / 1048576).toFixed(1) + " MiB · " + root.snapshot.artwork_cache.entries + " covers" : "") + (root.snapshot.artwork_cache.stale ? " · Cached artwork may be stale" : "") : "Opening artwork cache…"; color: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? "#f2a89b" : "#acb8c8"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
                 Flow {
@@ -239,6 +242,17 @@ ShellRoot {
                     Button { text: "Apply"; enabled: socket.connected && !root.snapshot.cache_action && !!root.snapshot.artwork_cache && !root.snapshot.artwork_cache.cleanup_pending; onClicked: root.send("set_artwork_budget", {mib: root.cacheBudgetDraft}) }
                     Button { text: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? "Retry cleanup" : "Clear artwork"; enabled: socket.connected && !root.snapshot.cache_action; ToolTip.visible: hovered; ToolTip.text: "Keeps your queue, sign-in and cache target. Visible covers are fetched again."; onClicked: root.send("clear_artwork_cache") }
                     Label { visible: !!root.snapshot.cache_action; text: "Updating artwork cache…"; color: "#acb8c8"; padding: 6 }
+                }
+                Label { text: root.snapshot.metadata_cache ? "Metadata · " + root.snapshot.metadata_cache.message + (root.snapshot.metadata_cache.usage_known ? " · " + (root.snapshot.metadata_cache.bytes / 1048576).toFixed(1) + " MiB · " + root.snapshot.metadata_cache.pages + " pages · " + root.snapshot.metadata_cache.tracks + " indexed tracks" : "") : "Opening metadata cache…"; color: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? "#f2a89b" : "#acb8c8"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+                Flow {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: childrenRect.height
+                    spacing: 6
+                    Label { text: "Metadata target (MiB, 0 disables)"; color: "#acb8c8"; padding: 6 }
+                    SpinBox { from: 0; to: 1024; editable: true; value: root.metadataBudgetDraft; onValueModified: root.metadataBudgetDraft = value }
+                    Button { text: "Apply metadata target"; enabled: socket.connected && !root.snapshot.metadata_cache_action && !!root.snapshot.metadata_cache && !root.snapshot.metadata_cache.cleanup_pending && root.snapshot.metadata_cache.state !== "opening"; onClicked: root.send("set_metadata_budget", {mib: root.metadataBudgetDraft}) }
+                    Button { text: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? "Retry metadata cleanup" : "Clear metadata"; enabled: socket.connected && !root.snapshot.metadata_cache_action; ToolTip.visible: hovered; ToolTip.text: "Resets loaded browser views and cached metadata. Keeps your queue, sign-in, artwork and cache targets."; onClicked: root.send("clear_metadata_cache") }
+                    Label { visible: !!root.snapshot.metadata_cache_action; text: "Updating metadata cache…"; color: "#acb8c8"; padding: 6 }
                 }
             }
             RowLayout {
@@ -310,6 +324,7 @@ ShellRoot {
                     visible: libraryTabs.currentIndex === 0 && !root.queueOnly
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+            Label { visible: !!root.snapshot.catalog && !!root.snapshot.catalog.cache && root.snapshot.catalog.cache.origin !== "live"; text: root.snapshot.catalog && root.snapshot.catalog.cache ? root.snapshot.catalog.cache.message : ""; color: "#acb8c8"; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Label { text: "Select tracks with checkboxes or Ctrl/Shift-click titles. The last clicked track seeds a new playlist."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Flow {
                 Layout.fillWidth: true
@@ -515,7 +530,7 @@ ShellRoot {
         function showQueue(): void { root.queueRequested = true; root.showSurface("full", true); }
         function browseArtists(): void { root.queueRequested = false; libraryTabs.currentIndex = 3; root.showSurface("full", true); }
         function browsePlaylists(): void { root.queueRequested = false; libraryTabs.currentIndex = 1; root.showSurface("full", true); }
-        function status(): string { return JSON.stringify({artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
+        function status(): string { return JSON.stringify({artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }

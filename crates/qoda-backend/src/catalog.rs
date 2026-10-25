@@ -58,6 +58,23 @@ pub fn selected_tracks(
     Ok(tracks)
 }
 
+/// A background refresh invalidates selections only when the displayed contents change.
+pub fn publish_page(
+    state: &mut Value,
+    revision: &mut u64,
+    page: Option<CatalogPage>,
+) -> Result<(), &'static str> {
+    let page = serde_json::to_value(page).map_err(|_| "Catalog page could not be encoded")?;
+    if state["page"] != page {
+        *revision = revision
+            .checked_add(1)
+            .ok_or("Catalog revision exhausted")?;
+    }
+    state["page"] = page;
+    state["catalog"]["revision"] = serde_json::json!(revision.to_string());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,6 +98,21 @@ mod tests {
         let state = json!({"sign_in":{"connected":true},"catalog":{"revision":"9007199254740993","busy":false},"page":CatalogPage{source,offset:qoda_core::Counter::ZERO,total:None,query:"fixture".into(),tracks:tracks.clone(),has_more:false}});
         let request = json!({"account_epoch":"4","catalog_revision":"9007199254740993","tracks":[tracks[2].reference,tracks[0].reference]});
         (state, request)
+    }
+    #[test]
+    fn identical_refresh_retains_selection_but_changed_cached_contents_reject_old_actions() {
+        let (mut state, request) = fixture();
+        let mut revision = 9_007_199_254_740_993;
+        let page: CatalogPage = serde_json::from_value(state["page"].clone()).unwrap();
+        publish_page(&mut state, &mut revision, Some(page.clone())).unwrap();
+        assert!(selected_tracks(&state, &request, 4).is_ok());
+        let mut changed = page;
+        changed.tracks.swap(0, 1);
+        publish_page(&mut state, &mut revision, Some(changed)).unwrap();
+        assert_eq!(state["catalog"]["revision"], "9007199254740994");
+        assert!(selected_tracks(&state, &request, 4).is_err());
+        publish_page(&mut state, &mut revision, None).unwrap();
+        assert!(state["page"].is_null());
     }
     #[test]
     fn batch_uses_current_server_metadata_and_display_order_with_lossless_page_fences() {

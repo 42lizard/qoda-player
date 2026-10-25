@@ -1,4 +1,5 @@
 //! Cancellable album browsing; account and request generations fence late reads.
+use crate::metadata_cache::{Cache, Info, Page, Query};
 use qoda_core::{Counter, SourceId};
 use qoda_provider::{
     AlbumPage, AlbumRef, AlbumSnapshot, ArtistPage, ArtistRef, MusicProvider, ProviderError, Track,
@@ -16,8 +17,10 @@ pub struct View {
     pub selected: Option<AlbumSnapshot>,
     pub busy: bool,
     pub message: String,
+    pub cache: Info,
 }
 pub struct Reply {
+    info: Info,
     auth: u64,
     generation: u64,
     result: Result<Update, ProviderError>,
@@ -33,8 +36,15 @@ pub struct Controller {
     generation: u64,
     source: Option<SourceId>,
     task: Option<tokio::task::JoinHandle<()>>,
+    cache: Cache,
 }
 impl Controller {
+    pub fn with_cache(cache: Cache) -> Self {
+        Self {
+            cache,
+            ..Self::default()
+        }
+    }
     pub fn invalidate(&mut self) {
         if let Some(task) = self.task.take() {
             task.abort();
@@ -143,36 +153,60 @@ impl Controller {
         if matches!(action, Action::Artists(..)) {
             self.view.artists = None;
         }
+        let cache = self.cache.clone();
         self.task = Some(tokio::spawn(async move {
-            let work = async {
-                match action {
-                    Action::Page(source, offset, query, artist) => match artist {
-                        Some(reference) => provider
-                            .artist_albums(reference, offset, query)
-                            .await
-                            .map(Update::Page),
-                        None => provider
-                            .albums(source, offset, query)
-                            .await
-                            .map(Update::Page),
-                    },
-                    Action::Artists(source, offset, query) => provider
-                        .artists(source, offset, query)
-                        .await
-                        .map(Update::Artists),
-                    Action::Open(reference) => provider.album(reference).await.map(Update::Open),
-                }
+            let query = match &action {
+                Action::Page(source, offset, query, artist) => Some(Query::Albums {
+                    source: *source,
+                    offset: *offset,
+                    query: query.clone(),
+                    artist: artist.clone(),
+                }),
+                Action::Artists(source, offset, query) => Some(Query::Artists {
+                    source: *source,
+                    offset: *offset,
+                    query: query.clone(),
+                }),
+                Action::Open(_) => None,
             };
-            let result = tokio::time::timeout(std::time::Duration::from_secs(45), work)
+            if let Some(query) = query {
+                cache
+                    .read(provider, query, move |result, info| {
+                        let events = events.clone();
+                        async move {
+                            let result = result.and_then(|page| match page {
+                                Page::Albums(page) => Ok(Update::Page(page)),
+                                Page::Artists(page) => Ok(Update::Artists(page)),
+                                _ => Err(ProviderError::InvalidReply),
+                            });
+                            let _ = events
+                                .send(crate::Event::Albums(Reply {
+                                    auth,
+                                    generation,
+                                    result,
+                                    info,
+                                }))
+                                .await;
+                        }
+                    })
+                    .await;
+            } else if let Action::Open(reference) = action {
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(45),
+                    provider.album(reference),
+                )
                 .await
-                .unwrap_or(Err(ProviderError::Network));
-            let _ = events
-                .send(crate::Event::Albums(Reply {
-                    auth,
-                    generation,
-                    result,
-                }))
-                .await;
+                .unwrap_or(Err(ProviderError::Network))
+                .map(Update::Open);
+                let _ = events
+                    .send(crate::Event::Albums(Reply {
+                        auth,
+                        generation,
+                        result,
+                        info: Info::default(),
+                    }))
+                    .await;
+            }
         }));
         Ok(())
     }
@@ -198,8 +232,11 @@ impl Controller {
         if reply.auth != auth || reply.generation != self.generation {
             return false;
         }
-        self.task = None;
+        if !reply.info.refreshing {
+            self.task = None;
+        }
         self.view.busy = false;
+        self.view.cache = reply.info;
         let new_page = matches!(&reply.result, Ok(Update::Page(_)));
         match reply.result {
             Ok(Update::Artists(page)) => {
@@ -231,7 +268,19 @@ impl Controller {
             }
             Err(error) => {
                 self.view.message = error.to_string();
+                if matches!(
+                    error,
+                    ProviderError::AccessDenied | ProviderError::UnknownSource
+                ) {
+                    self.view.page = None;
+                    self.view.artists = None;
+                    self.view.selected = None;
+                    self.view.covers.clear();
+                }
             }
+        }
+        if self.view.cache.origin != "live" {
+            self.view.message = format!("{} {}", self.view.cache.message, self.view.message);
         }
         new_page
     }
@@ -414,6 +463,7 @@ mod tests {
         for (auth, generation) in [(1, 4), (2, 3)] {
             assert!(!c.apply(
                 Reply {
+                    info: Info::default(),
                     auth,
                     generation,
                     result: Ok(Update::Artists(artist_page(source)))
@@ -424,6 +474,7 @@ mod tests {
         }
         c.apply(
             Reply {
+                info: Info::default(),
                 auth: 2,
                 generation: 4,
                 result: Ok(Update::Artists(artist_page(source))),
@@ -434,6 +485,7 @@ mod tests {
         c.source_changed(SourceId::new());
         c.apply(
             Reply {
+                info: Info::default(),
                 auth: 2,
                 generation: 4,
                 result: Ok(Update::Artists(artist_page(source))),
@@ -450,6 +502,7 @@ mod tests {
         };
         c.apply(
             Reply {
+                info: Info::default(),
                 auth: 1,
                 generation: 3,
                 result: Ok(Update::Open(snapshot())),
@@ -458,6 +511,7 @@ mod tests {
         );
         c.apply(
             Reply {
+                info: Info::default(),
                 auth: 2,
                 generation: 2,
                 result: Ok(Update::Open(snapshot())),
@@ -467,6 +521,7 @@ mod tests {
         assert!(c.view.selected.is_none());
         c.apply(
             Reply {
+                info: Info::default(),
                 auth: 2,
                 generation: 3,
                 result: Ok(Update::Open(snapshot())),
@@ -477,6 +532,7 @@ mod tests {
         c.invalidate();
         c.apply(
             Reply {
+                info: Info::default(),
                 auth: 2,
                 generation: 3,
                 result: Ok(Update::Open(snapshot())),

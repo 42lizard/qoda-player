@@ -4,7 +4,7 @@
 Build qoda-backend first. Requires a running Wayland desktop, Quickshell,
 busctl and an unused Qoda MPRIS name. Does not modify desktop configuration; stops its owned processes.
 """
-import os,subprocess,tempfile,socket,json,time
+import os,subprocess,tempfile,socket,json,time,sqlite3,uuid
 from pathlib import Path
 root=Path(__file__).resolve().parent.parent
 name='org.mpris.MediaPlayer2.qoda';path='/org/mpris/MediaPlayer2';player='org.mpris.MediaPlayer2.Player'
@@ -19,6 +19,14 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
  if not env.get('WAYLAND_DISPLAY','').startswith('/'):env['WAYLAND_DISPLAY']=old+'/'+env.get('WAYLAND_DISPLAY','wayland-1')
  cache=Path(temp+'/cache/qoda/artwork-v1');cache.mkdir(parents=True,mode=0o700)
  cached=cache/('0'*64+'.jpg');cached.write_bytes((root/'crates/qoda-provider/tests/fixtures/cover.jpg').read_bytes());cached.chmod(0o600)
+ metadata=Path(temp+'/cache/qoda/catalog-v1');metadata.mkdir(parents=True,mode=0o700)
+ database=metadata/'catalog.sqlite3';source=str(uuid.uuid4())
+ payload=json.dumps({'kind':'tracks','page':{'source':source,'offset':'0','total':None,'query':'','tracks':[],'has_more':False}}).encode()
+ with sqlite3.connect(database) as db:
+  db.executescript('PRAGMA auto_vacuum=INCREMENTAL;CREATE TABLE pages(key TEXT PRIMARY KEY,source TEXT NOT NULL,payload BLOB NOT NULL,fetched INTEGER NOT NULL,accessed INTEGER NOT NULL,bytes INTEGER NOT NULL);CREATE TABLE tracks(source TEXT NOT NULL,key TEXT NOT NULL,payload BLOB NOT NULL,title TEXT NOT NULL,artist TEXT NOT NULL,album TEXT NOT NULL,fetched INTEGER NOT NULL,accessed INTEGER NOT NULL,bytes INTEGER NOT NULL,PRIMARY KEY(source,key));PRAGMA application_id=1364149315;PRAGMA user_version=1;')
+  db.execute('INSERT INTO pages VALUES(?,?,?,?,?,?)',('fixture',source,payload,int(time.time()),1,len(payload)+128))
+ database.chmod(0o600)
+
  p=None;ui=None;f=None;s=None;log=open(temp+'/ui.log','w+')
  try:
   def start(unavailable=False):
@@ -42,6 +50,13 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
     state=json.loads(f.readline(2**24));assert not state.get('error'),'Controlled error: '+str(state.get('error'))
   start();assert state['intent']=='paused' and not state['sign_in']['connected'];assert bus('get-property',name,path,player,'PlaybackStatus').stdout.strip()=='s "Stopped"'
   assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('Native desktop bus registered with stopped, metadata-free, unsigned-in state',flush=True)
+
+  assert state['metadata_cache']['pages']==1
+  queue_before=state['queue']
+  command('set_metadata_budget',mib=1);until(lambda v:v.get('metadata_cache',{}).get('budget_mib')==1 and not v.get('metadata_cache_action'))
+  command('clear_metadata_cache');until(lambda v:v.get('metadata_cache',{}).get('pages')==0 and not v.get('metadata_cache_action') and not v.get('metadata_cache',{}).get('cleanup_pending'))
+  assert state['queue']==queue_before and state['intent']=='paused' and 'clearing' not in state['status'].lower()
+  print('Metadata target persisted and synthetic cached page cleared without queue or playback changes',flush=True)
   assert state['artwork_cache']['entries']==1
   command('set_artwork_budget',mib=1);until(lambda v:v.get('artwork_cache',{}).get('budget_mib')==1 and not v.get('cache_action'))
   command('clear_artwork_cache');until(lambda v:v.get('artwork_cache',{}).get('entries')==0 and not v.get('cache_action') and not v.get('artwork_cache',{}).get('cleanup_pending'))
@@ -93,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   bus('set-property',name,path,player,'Shuffle','b','true');until(lambda v:v['queue']['shuffled']);print('Desktop controls remained active while native QML was hidden',flush=True)
   bus('call',name,path,'org.mpris.MediaPlayer2','Quit');p.wait(timeout=15);assert p.returncode==0;ui.wait(timeout=5);assert ui.returncode==0;f.close();f=None;s.close();s=None
   assert bus('get-property',name,path,player,'PlaybackStatus',ok=False).returncode!=0
-  start();assert state['artwork_cache']['budget_mib']==1;assert state['queue']['shuffled'] and state['queue']['repeat']=='all' and state['intent']=='paused';assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('MPRIS Quit closed backend/UI and released the name; restart retained modes without sign-in or autoplay',flush=True)
+  start();assert state['metadata_cache']['budget_mib']==1;assert state['artwork_cache']['budget_mib']==1;assert state['queue']['shuffled'] and state['queue']['repeat']=='all' and state['intent']=='paused';assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('MPRIS Quit closed backend/UI and released the name; restart retained modes without sign-in or autoplay',flush=True)
   command('quit');p.wait(timeout=15);assert p.returncode==0;f.close();f=None;s.close();s=None
   start(unavailable=True);assert state['intent']=='paused';command('quit');p.wait(timeout=15);assert p.returncode==0;print('Unavailable session bus remained a visible, nonfatal feature limitation',flush=True)
   log.flush();log.seek(0);errors=[line for line in log.read().splitlines() if any(e in line for e in ['TypeError','ReferenceError','Cannot assign','Failed to load','SyntaxError'])];assert not errors,'QML runtime error: '+repr(errors)

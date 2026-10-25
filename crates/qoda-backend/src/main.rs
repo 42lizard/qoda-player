@@ -1,8 +1,10 @@
 mod albums;
 mod artwork;
 mod artwork_store;
+mod cache_files;
 mod catalog;
 mod gapless;
+mod metadata_cache;
 mod mpris;
 mod player;
 mod playlists;
@@ -39,6 +41,7 @@ enum Event {
     Gapless(gapless::Reply),
     Artwork,
     CacheDone(u64, bool, Result<(), String>),
+    MetadataCacheDone(u64, Result<(), String>),
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
@@ -48,6 +51,7 @@ enum Event {
     Page(
         u64,
         Result<qoda_provider::CatalogPage, qoda_provider::ProviderError>,
+        metadata_cache::Info,
     ),
     Media(u64, Result<PreparedMedia, qoda_provider::ProviderError>),
     Pin(u64, Result<BrowserPin, qoda_provider::ProviderError>),
@@ -426,12 +430,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut handled_end = None;
     let mut playlists = playlists::Controller::default();
-    let mut albums = albums::Controller::default();
+    let metadata = metadata_cache::Cache::start(metadata_cache::Paths::discover()).await;
+    let mut albums = albums::Controller::with_cache(metadata.clone());
     let mut presented_generation = None;
+    let mut catalog_revision = 0_u64;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
     let (tx, mut events) = mpsc::channel(64);
     let artwork = artwork::Artwork::persistent(tx.clone()).await?;
     state["artwork_cache"] = artwork.view().await;
+    state["metadata_cache"] = json!(metadata.view());
     let (mut durable, restored) = storage::Controller::start(storage::path(), tx.clone()).await;
     let (mut queue, start_error) = match restored {
         Ok(queue) => (queue, None),
@@ -462,6 +469,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut vault_generation = 0_u64;
     let mut current_credential: Option<Credential> = None;
     let mut cache_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut metadata_task: Option<tokio::task::JoinHandle<()>> = None;
     let permits = Arc::new(tokio::sync::Semaphore::new(16));
     let server_tx = tx.clone();
     let server = tokio::spawn(async move {
@@ -562,6 +570,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state["presentation"]=view.presentation();
                     state["gapless"]=json!(gapless.view);
                     state["artwork_cache"]=artwork.view().await;
+                    state["metadata_cache"]=json!(metadata.view());
                     updates.send_replace(state.clone());
                     if let Some(desktop) = &mut desktop { desktop.publish(view); }
                 }
@@ -765,6 +774,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             Event::Checkpoint | Event::Artwork => {}
+            Event::MetadataCacheDone(g, result) => {
+                metadata_task = None;
+                state["metadata_cache_action"] = Value::Null;
+                if g == auth_generation {
+                    let clearing = state["status"]
+                        == "Metadata cache clearing. Browse again to load catalog pages.";
+                    match result {
+                        Ok(()) if clearing => {
+                            state["status"] =
+                                json!("Metadata cache cleared. Browse again to load catalog pages.")
+                        }
+                        Err(error) => {
+                            state["error"] = json!(error);
+                            if clearing {
+                                state["status"] = json!("Metadata cache cleanup is incomplete.");
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             Event::CacheDone(g, clear, result) => {
                 cache_task = None;
                 state["cache_action"] = Value::Null;
@@ -866,6 +896,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         .send(Event::CacheDone(
                                             g,
                                             clear,
+                                            result.map_err(str::to_owned),
+                                        ))
+                                        .await;
+                                }));
+                            }
+                        }
+                    }
+                    "clear_metadata_cache" | "set_metadata_budget" => {
+                        if metadata_task.is_some() {
+                            state["error"] =
+                                json!("Wait for the current metadata cache operation.");
+                        } else {
+                            let clear = v["op"] == "clear_metadata_cache";
+                            let mib = v["mib"].as_u64().filter(|mib| *mib <= 1024);
+                            if !clear && mib.is_none() {
+                                state["error"] =
+                                    json!("Choose a metadata target from 0 to 1024 MiB.");
+                            } else {
+                                let epoch = if clear {
+                                    if let Some(task) = browse_task.take() {
+                                        task.abort();
+                                    }
+                                    browse_generation = browse_generation
+                                        .checked_add(1)
+                                        .ok_or("Browse generation exhausted")?;
+                                    catalog_revision = catalog_revision
+                                        .checked_add(1)
+                                        .ok_or("Catalog revision exhausted")?;
+                                    state["page"] = Value::Null;
+                                    state["catalog"] = json!({"revision":catalog_revision.to_string(),"busy":false});
+                                    albums.invalidate();
+                                    artwork.revoke(false).await;
+                                    state["status"] = json!(
+                                        "Metadata cache clearing. Browse again to load catalog pages."
+                                    );
+                                    metadata.begin_clear()
+                                } else {
+                                    None
+                                };
+                                let cache = metadata.clone();
+                                let tx = tx.clone();
+                                let g = auth_generation;
+                                state["metadata_cache_action"] =
+                                    json!(if clear { "clear" } else { "budget" });
+                                metadata_task = Some(tokio::spawn(async move {
+                                    let result = if clear {
+                                        match epoch {
+                                            Some(epoch) => cache.finish_clear(epoch).await,
+                                            None => Err("Metadata cleanup could not start."),
+                                        }
+                                    } else {
+                                        cache.budget(mib.unwrap() as u16).await
+                                    };
+                                    let _ = tx
+                                        .send(Event::MetadataCacheDone(
+                                            g,
                                             result.map_err(str::to_owned),
                                         ))
                                         .await;
@@ -1060,7 +1146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 continue;
                             };
                             let offset = offset.get();
-                            let query = v["query"]
+                            let query: String = v["query"]
                                 .as_str()
                                 .unwrap_or("")
                                 .chars()
@@ -1076,10 +1162,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let tx = tx.clone();
                             state["status"] = json!("Loading tracks");
                             state["page"] = Value::Null;
-                            state["catalog"] = json!({"revision":g.to_string(),"busy":true});
+                            catalog_revision = catalog_revision
+                                .checked_add(1)
+                                .ok_or("Catalog revision exhausted")?;
+                            state["catalog"] = json!({"revision":catalog_revision.to_string(),"busy":true,"refreshing":false});
+                            let cache = metadata.clone();
                             browse_task = Some(tokio::spawn(async move {
-                                let r = p.tracks(source, offset, query).await;
-                                let _ = tx.send(Event::Page(g, r)).await;
+                                cache
+                                    .read(
+                                        p,
+                                        metadata_cache::Query::Tracks {
+                                            source,
+                                            offset,
+                                            query,
+                                        },
+                                        move |result, info| {
+                                            let tx = tx.clone();
+                                            async move {
+                                                let result = result.and_then(|page| match page {
+                                                    metadata_cache::Page::Tracks(page) => Ok(page),
+                                                    _ => Err(
+                                                        qoda_provider::ProviderError::InvalidReply,
+                                                    ),
+                                                });
+                                                let _ = tx.send(Event::Page(g, result, info)).await;
+                                            }
+                                        },
+                                    )
+                                    .await;
                             }));
                         }
                     }
@@ -1356,7 +1466,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         albums.invalidate();
                         player.send(Command::Pause(true));
                         player.send(Command::Stop);
-                        artwork.revoke(true).await;
+                        tokio::join!(artwork.revoke(true), metadata.clear());
                         queue = queue.empty_session();
                         purge_epoch = purge_epoch
                             .checked_add(1)
@@ -1499,16 +1609,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            Event::Page(g, r) if g == browse_generation => {
+            Event::Page(g, r, info) if g == browse_generation => {
                 state["catalog"]["busy"] = json!(false);
+                state["catalog"]["refreshing"] = json!(info.refreshing);
+                state["catalog"]["cache"] = json!(info);
                 match r {
                     Ok(page) => {
-                        state["page"] = json!(page);
-                        state["status"] = json!("Ready");
+                        catalog::publish_page(&mut state, &mut catalog_revision, Some(page))?;
+                        state["status"] = json!(if info.origin == "live" {
+                            "Ready"
+                        } else {
+                            info.message
+                        });
                     }
-                    Err(e) => {
+                    Err(error) => {
                         state["status"] = json!("Browse failed");
-                        state["error"] = json!(e.to_string());
+                        state["error"] = json!(error.to_string());
+                        if matches!(
+                            error,
+                            qoda_provider::ProviderError::AccessDenied
+                                | qoda_provider::ProviderError::UnknownSource
+                        ) {
+                            catalog::publish_page(&mut state, &mut catalog_revision, None)?;
+                        }
                     }
                 }
             }
@@ -1595,6 +1718,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         albums.view.covers = artwork.urls().await;
         state["albums"] = json!(albums.view);
         state["artwork_cache"] = artwork.view().await;
+        state["metadata_cache"] = json!(metadata.view());
         state["account_epoch"] = json!(auth_generation.to_string());
         let stamp = (queue.durable_stamp(), purge_epoch);
         if force_save || stamp != last_requested {
@@ -1633,6 +1757,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), task).await;
     }
     artwork.disk.shutdown().await;
+    if let Some(task) = metadata_task {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), task).await;
+    }
+    metadata.shutdown().await;
     server.abort();
     match durable.flush(queue.clone(), purge_epoch).await {
         Err(error) => eprintln!("Qoda: final checkpoint failed: {error}"),
