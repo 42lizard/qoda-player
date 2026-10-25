@@ -1,5 +1,6 @@
 mod player;
 mod proxy;
+mod vault;
 use player::{Command, Player};
 use qoda_core::{ProviderTrackKey, SourceId};
 use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider, PreparedMedia};
@@ -22,7 +23,9 @@ enum Event {
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
+        Credential,
     ),
+    Vault(vault::Reply),
     Page(
         u64,
         Result<qoda_provider::CatalogPage, qoda_provider::ProviderError>,
@@ -128,9 +131,32 @@ fn connect(
     credential: Credential,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let r = PlexProvider::connect(credential, identities()).await;
-        let _ = tx.send(Event::Connected(generation, r)).await;
+        let r = PlexProvider::connect(credential.clone(), identities()).await;
+        let _ = tx.send(Event::Connected(generation, r, credential)).await;
     })
+}
+fn keyring_request(
+    vault: &mpsc::Sender<vault::Request>,
+    state: &mut Value,
+    generation: &mut u64,
+    auth_generation: u64,
+    operation: vault::Operation,
+    action: &str,
+) -> Result<(), &'static str> {
+    let next = generation
+        .checked_add(1)
+        .ok_or("Keyring generation exhausted")?;
+    vault
+        .try_send(vault::Request {
+            generation: next,
+            auth_generation,
+            operation,
+        })
+        .map_err(|_| "Keyring worker is busy or unavailable; retry.")?;
+    *generation = next;
+    state["sign_in"]["keyring_action"] = json!(action);
+    state["sign_in"]["message"] = json!("Waiting for desktop keyring. Unlock it if prompted.");
+    Ok(())
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -166,9 +192,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proxy = proxy::Proxy::start().await?;
     let instance = uuid::Uuid::new_v4().to_string();
     let mut revision = 0_u64;
-    let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null});
+    let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
     let (updates, rx) = watch::channel(state.clone());
     let (tx, mut events) = mpsc::channel(64);
+    let vault = vault::start(tx.clone());
+    let mut vault_generation = 0_u64;
+    let mut current_credential: Option<Credential> = None;
     let permits = Arc::new(tokio::sync::Semaphore::new(16));
     let server_tx = tx.clone();
     let server = tokio::spawn(async move {
@@ -243,6 +272,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 state["error"] = Value::Null;
                 match v["op"].as_str().unwrap_or("") {
                     "quit" => break,
+                    "restore_signin" => {
+                        if provider.is_some() || !state["sign_in"]["keyring_action"].is_null() {
+                            state["error"] = json!(
+                                "Disconnect and wait for the current keyring action before restoring sign-in."
+                            );
+                        } else {
+                            if let Some(task) = auth_task.take() {
+                                task.abort();
+                            }
+                            auth_generation = auth_generation
+                                .checked_add(1)
+                                .ok_or("Generation exhausted")?;
+                            state["signin_url"] = Value::Null;
+                            state["status"] = json!("Restoring saved Plex sign-in");
+                            if let Err(error) = keyring_request(
+                                &vault,
+                                &mut state,
+                                &mut vault_generation,
+                                auth_generation,
+                                vault::Operation::Restore,
+                                "restore",
+                            ) {
+                                state["error"] = json!(error);
+                            }
+                        }
+                    }
+                    "save_signin" => {
+                        if !state["sign_in"]["keyring_action"].is_null() {
+                            state["error"] =
+                                json!("Wait for the current keyring action to finish.");
+                        } else if let Some(credential) = current_credential.clone() {
+                            if let Err(error) = keyring_request(
+                                &vault,
+                                &mut state,
+                                &mut vault_generation,
+                                auth_generation,
+                                vault::Operation::Save(credential),
+                                "save",
+                            ) {
+                                state["error"] = json!(error);
+                            }
+                        } else {
+                            state["error"] = json!("Connect Plex before saving sign-in.");
+                        }
+                    }
                     "auth_start" => {
                         if provider.is_some() {
                             state["error"] = json!("Disconnect before changing Plex accounts");
@@ -346,7 +420,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             player.send(Command::Seek(pos));
                         }
                     }
-                    "disconnect" => {
+                    "disconnect" | "forget_signin" => {
+                        let forget = v["op"] == "forget_signin";
                         for task in [browse_task.take(), prepare_task.take(), auth_task.take()]
                             .into_iter()
                             .flatten()
@@ -363,6 +438,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
                         provider = None;
+                        current_credential = None;
+                        state["sign_in"]["connected"] = json!(false);
+                        state["sign_in"]["can_save"] = json!(false);
                         desired_playing = false;
                         player.send(Command::Pause(true));
                         player.send(Command::Stop);
@@ -374,6 +452,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         state["signin_url"] = Value::Null;
                         state["intent"] = json!("paused");
                         state["status"] = json!("Disconnected");
+                        if forget
+                            && state["sign_in"]["keyring_action"] != "forget"
+                            && let Err(error) = keyring_request(
+                                &vault,
+                                &mut state,
+                                &mut vault_generation,
+                                auth_generation,
+                                vault::Operation::Forget,
+                                "forget",
+                            )
+                        {
+                            state["error"] = json!(error);
+                        }
                     }
                     _ => {}
                 }
@@ -418,7 +509,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => state["error"] = json!(e.to_string()),
             },
-            Event::Connected(g, r) if g == auth_generation => match r {
+            Event::Connected(g, r, credential) if g == auth_generation => match r {
                 Ok((p, ids)) => {
                     if save_identities(&ids).is_err() {
                         state["error"] = json!("Library identities could not be saved");
@@ -426,12 +517,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state["libraries"] = json!(p.libraries());
                     state["status"] = json!("Choose a music library");
                     provider = Some(Arc::new(p));
+                    current_credential = Some(credential);
+                    state["sign_in"]["connected"] = json!(true);
+                    state["sign_in"]["can_save"] = json!(true);
+                    if state["sign_in"]["saved"] != "present" {
+                        state["sign_in"]["message"] =
+                            json!("Connected for this session. Save sign-in to reconnect later.");
+                    }
                 }
                 Err(e) => {
                     state["status"] = json!("Plex connection failed");
                     state["error"] = json!(e.to_string());
                 }
             },
+            Event::Vault(reply) if reply.generation == vault_generation => {
+                state["sign_in"]["keyring_action"] = Value::Null;
+                match reply.result {
+                    Ok(vault::Outcome::Saved) => {
+                        state["sign_in"]["saved"] = json!("present");
+                        state["sign_in"]["message"] =
+                            json!("Plex sign-in saved in the desktop keyring.");
+                    }
+                    Ok(vault::Outcome::Forgotten) => {
+                        state["sign_in"]["saved"] = json!("missing");
+                        state["sign_in"]["message"] =
+                            json!("Qoda's saved Plex sign-in was removed.");
+                    }
+                    Ok(vault::Outcome::Restored(credential)) => {
+                        state["sign_in"]["saved"] = json!(if credential.is_some() {
+                            "present"
+                        } else {
+                            "missing"
+                        });
+                        if reply.auth_generation == auth_generation {
+                            if let Some(credential) = credential {
+                                state["status"] = json!("Connecting saved Plex account");
+                                state["sign_in"]["message"] =
+                                    json!("Saved sign-in restored. Playback stays paused.");
+                                auth_task = Some(connect(tx.clone(), auth_generation, credential));
+                            } else {
+                                state["status"] = json!("No saved Plex sign-in");
+                                state["sign_in"]["message"] =
+                                    json!("Connect Plex, then choose Save sign-in.");
+                            }
+                        } else {
+                            state["sign_in"]["message"] =
+                                json!("Saved sign-in checked; the restore request was cancelled.");
+                        }
+                    }
+                    Err(error) => {
+                        state["sign_in"]["saved"] = json!("unknown");
+                        state["error"] = json!(error.to_string());
+                        state["sign_in"]["message"] =
+                            json!("Keyring action did not complete; retry when it is available.");
+                    }
+                }
+            }
             Event::Page(g, r) if g == browse_generation => match r {
                 Ok(page) => {
                     state["page"] = json!(page);

@@ -6,9 +6,9 @@ A standalone music player in development for Omarchy, built with Quickshell/QML 
 
 The first working development slice has a Rust backend, Plex library browsing/search, a standalone Quickshell/QML window, and embedded libmpv playback controls. Live read-only checks reached five music libraries and verified catalog display, search, hide/show and UI restart. Native playback checks use synthetic audio with null output; real-music playback and the full release remain under development in [issue 21](https://github.com/42lizard/qoda-player/issues/21).
 
-Run `./tools/dev.py` to build and open it. On the original validation machine, `./tools/dev.py --use-validation-login` explicitly reuses the existing local sign-in for this session. Nothing autoplays. See [development instructions](docs/development.md) for dependencies, sign-in, controls, process ownership and current limitations.
+Run `./tools/dev.py` to build and open it. Use **Save sign-in** after connecting, then **Restore saved sign-in** on later launches. On the original validation machine, `./tools/dev.py --use-validation-login` can still explicitly reuse the validation sign-in. Nothing autoplays. See [development instructions](docs/development.md) for dependencies, sign-in, controls, process ownership and current limitations.
 
-The application currently provides single-track playback through Desktop/PipeWire with ReplayGain off. Saved sign-in, queue/playlist management, durable session restoration, gapless playback and fidelity output are still to come. Run `cargo test --workspace --locked` for the 18 automated checks.
+The application currently provides single-track playback through Desktop/PipeWire with ReplayGain off. Queue/playlist management, durable session restoration, gapless playback and fidelity output are still to come. Run `cargo test --workspace --locked` for the 22 automated checks.
 
 ## Agreed first-release scope
 

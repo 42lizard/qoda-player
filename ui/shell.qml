@@ -95,6 +95,12 @@ ShellRoot {
                 Button { text: "Hide"; onClicked: window.visible = false }
                 Button { text: "Quit"; onClicked: { root.send("quit"); Qt.quit(); } }
             }
+            RowLayout {
+                Button { text: "Restore saved sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
+                Button { text: "Save sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
+                Button { text: "Sign out & forget"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
+                Label { text: root.snapshot.sign_in ? root.snapshot.sign_in.message || "" : ""; color: "#acb8c8"; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+            }
             Label { text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: "#acb8c8"; textFormat: Text.PlainText }
             Label { visible: !!root.snapshot.error; text: root.snapshot.error || ""; color: "#f2a89b"; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
             RowLayout {
@@ -161,7 +167,7 @@ ShellRoot {
         target: "control"
         function show(): void { window.visible = true;  }
         function hide(): void { window.visible = false; }
-        function status(): string { return JSON.stringify({connected: socket.connected, instance: root.instance, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
+        function status(): string { return JSON.stringify({connected: socket.connected, instance: root.instance, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }
