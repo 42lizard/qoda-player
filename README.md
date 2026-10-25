@@ -33,6 +33,8 @@ Playback actions, shuffle/repeat, restoration, recovery, and transition edits ar
 
 Credential handling, SQLite persistence, cache budgets, checkpoint/retry defaults, and recovery are specified in [Define authentication, cache and durable-state policies](https://github.com/42lizard/qoda-player/issues/10). Live Plex compatibility validation remains a separate prerequisite for the final specification.
 
+[Live Plex observations](https://github.com/42lizard/qoda-player/issues/16) establish an owned-server baseline on PMS 1.43.5: explicit legacy browser authorization, catalog/search/artwork access, disposable-playlist CRUD, and original FLAC preparation/Range reads. The tested JWT path fails PMS authentication; shared permissions, reporting, recovery and the remaining acceptance cases are still unqualified, so this gate remains open.
+
 [Player-side audio measurements](https://github.com/42lizard/qoda-player/issues/13) record decoded-sample and transition evidence from a synthetic libmpv harness. Hardware/DAC fidelity and real-device gapless continuity remain unverified.
 
 The [fidelity and ReplayGain contract](docs/adr/0002-fidelity-and-gain-contract.md) selects desktop PipeWire playback by default, explicit direct ALSA fidelity output, and Auto ReplayGain with a high-precision per-file gain path. Native output and gain transitions require qualification before they receive a verified label.
