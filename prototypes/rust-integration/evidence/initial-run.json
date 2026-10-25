@@ -1,0 +1,22 @@
+{
+  "metrics": {
+    "command_ms": 1.6766579974500928,
+    "page_ms": [
+      50,
+      57,
+      51,
+      32,
+      44
+    ],
+    "combined_rss_mib": 338.21875,
+    "heartbeat_max_ms": 52
+  },
+  "failed": [
+    {
+      "name": "UI heartbeat interval budget 50ms",
+      "pass": false,
+      "detail": 52
+    }
+  ],
+  "note": "First completed run, before batched model update. Retained rather than discarded."
+}

@@ -1,0 +1,309 @@
+{
+  "fixture": {
+    "tracks": 100000,
+    "artists": 2000,
+    "tracks_per_album": 10,
+    "page": 100,
+    "page_cap": 200
+  },
+  "metrics": {
+    "command_ms": 0.18978200023411773,
+    "page_ms": [
+      21,
+      35,
+      30,
+      74,
+      49
+    ],
+    "combined_rss_mib": 338.0859375,
+    "heartbeat_max_ms": 38
+  },
+  "checks": [
+    {
+      "name": "private runtime and socket permissions",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "incompatible protocol rejected",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "fragmented and coalesced NDJSON frames",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "atomic snapshot subscription bootstrap",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "snapshot and racing updates have no revision gap",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "pending command then acknowledged authoritative update",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "QML lost acknowledgement becomes uncertain without replay",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "same-instance operation token prevents duplicate",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "concurrent stale revision rejected",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "lost reply resynchronized without replay",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "bounded catalog page from 100000 rows",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "oversized page request capped at 200 rows",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "cancelled old search cannot overwrite new results",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "superseded search work notices cancellation",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "name": "backend authenticated artwork fetch and QML decode",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "versioned local artwork URL invalidates image cache",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "presentation state contains no provider credentials",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "QML hidden while Rust libmpv keeps progressing",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "mpv pause events reach QML and position stops",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "MPRIS commands share backend authority and actual status",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "disconnected UI resnapshots missed queue edit",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "missed revision forces disconnect and fresh snapshot",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "UI process restart preserves backend and audio",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "backend restart changes epoch and never autoplays",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "old-epoch mutation rejected after restart",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "local command budget 250ms",
+      "pass": true,
+      "detail": 0.18978200023411773
+    },
+    {
+      "name": "catalog page budget 250ms",
+      "pass": true,
+      "detail": [
+        21,
+        35,
+        30,
+        74,
+        49
+      ]
+    },
+    {
+      "name": "UI heartbeat interval budget 50ms",
+      "pass": true,
+      "detail": 38
+    },
+    {
+      "name": "combined sampled RSS budget 512MiB",
+      "pass": true,
+      "detail": 338.0859375
+    },
+    {
+      "name": "graceful libmpv owner-thread teardown exits cleanly",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "name": "no QML runtime error",
+      "pass": true,
+      "detail": null
+    }
+  ],
+  "qml_state": {
+    "connected": true,
+    "instance": "637387-1792933011233327213",
+    "revision": 3,
+    "state": {
+      "instance": "637387-1792933011233327213",
+      "loaded": true,
+      "playing": false,
+      "position": 0,
+      "queue": [],
+      "revision": 3
+    },
+    "pending": 0,
+    "uncertain": 0,
+    "connections": 2,
+    "restarts": 1,
+    "gaps": 0,
+    "rows": 100,
+    "firstTrack": "fixture:track:9000",
+    "total": 1000,
+    "stalePages": 0,
+    "cancelledPages": 0,
+    "pageMs": 48,
+    "lastAckMs": 0,
+    "maxHeartbeatMs": 38,
+    "artVersion": 0,
+    "artStatus": 0,
+    "artWidth": 0,
+    "artworkUrl": "",
+    "journal": [
+      {
+        "kind": "snapshot",
+        "detail": 61,
+        "at": 1792933010383
+      },
+      {
+        "kind": "disconnected",
+        "detail": "no mutation replay",
+        "at": 1792933010815
+      },
+      {
+        "kind": "new-backend",
+        "detail": "restored paused",
+        "at": 1792933011236
+      },
+      {
+        "kind": "snapshot",
+        "detail": 0,
+        "at": 1792933011236
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933011612
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933011928
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933011992
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012068
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012138
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012215
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012303
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012392
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012506
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012614
+      },
+      {
+        "kind": "page",
+        "detail": 100,
+        "at": 1792933012716
+      }
+    ]
+  },
+  "artwork_requests": [
+    {
+      "path": "/art/1",
+      "authorized": true
+    },
+    {
+      "path": "/art/2",
+      "authorized": true
+    }
+  ],
+  "limits": [
+    "Synthetic loopback HTTP only; no Plex or TLS qualification",
+    "Null audio only; no fidelity or gapless claim",
+    "No durable queue/checkpoint implementation; crash fixture starts empty and paused",
+    "Minimal MPRIS subset only; no full compliance claim",
+    "IPC controls, not physical keyboard acceptance",
+    "One local run; sampled RSS double counts shared mappings and is not a leak proof"
+  ]
+}
