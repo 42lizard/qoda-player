@@ -58,8 +58,41 @@ A provider-supplied reference to optional artwork. It is distinct from a locally
 Optional information about an audio level adjustment, with its provenance and units retained when known. Missing gain is unknown, not a verified zero adjustment.
 
 **Queue**:
-The player's ordered listening session, including the current track and upcoming tracks. It is independent of saved playlists.
+The player's ordered current and upcoming listening entries. It is independent of saved playlists; playing an album or playlist copies its order into the listening session rather than following later edits to the saved collection.
 _Avoid_: Playlist
+
+**Queue entry**:
+One occurrence of a track in the listening queue, with its own identity and any selected media version. Repeated occurrences of the same track remain distinct.
+
+**Listening session**:
+The player's current collection of listening entries, their order, playback position, history, and shuffle/repeat state. Play now starts a new session; Stop and clear discards it.
+
+**Listening history**:
+The played entries of the current listening session, retained separately from the current and upcoming queue. It supports inspection and Previous navigation, and resets when a new session starts or the session is discarded.
+
+**Play now**:
+An explicit action that replaces the active listening queue with the chosen content and starts playback immediately.
+
+**Play next**:
+An explicit action that schedules content immediately after the current track. Repeated additions retain their request order and each selection's internal order.
+
+**Add to queue**:
+An explicit action that appends content to the end of the listening queue without deduplicating repeated tracks.
+
+**Clear upcoming**:
+An action that removes upcoming entries from the listening session while preserving the current entry and its playing or paused state.
+
+**Stop and clear**:
+An action that stops playback and discards the active listening session, including its queue and Previous history.
+
+**Shuffle**:
+A stable rearrangement of upcoming entries that leaves the current entry and listening history unchanged. Explicit Play next priority, appended content, and deliberate queue edits remain respected.
+
+**Repeat mode**:
+The session's automatic completion behavior: Off ends the queue, One repeats the current entry, and All cycles entries still belonging to the session. Explicit Next bypasses Repeat One, and removed entries do not return through repeat.
+
+**Playback intent**:
+Whether the user currently wants playback to proceed or remain paused/stopped. Buffering and recovery do not override a later pause, stop, or session replacement.
 
 **Desktop playback**:
 Listening that can coexist with audio from other applications.

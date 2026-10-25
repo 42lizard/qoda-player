@@ -27,6 +27,8 @@ Research notes live on separate `research/*` branches linked from their tickets.
 
 The selected interface direction is the album browser with a persistent queue, documented in [Choose library browsing and player interactions](https://github.com/42lizard/qoda-player/issues/6). Its throwaway comparison prototype stays on `prototype/library-interactions`; it is not production application code.
 
+Playback actions, shuffle/repeat, restoration, recovery, and transition edits are specified in [Define listening-session and queue behavior](https://github.com/42lizard/qoda-player/issues/7). The UI prototype's illustrative queue behavior is superseded by that contract.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
