@@ -18,7 +18,7 @@ import uuid
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def check():
+def check(unavailable=False):
     with tempfile.TemporaryDirectory(prefix="qoda-navigation-check-") as temporary:
         base = Path(temporary)
         original_runtime = os.environ["XDG_RUNTIME_DIR"]
@@ -48,12 +48,16 @@ def check():
             "shuffled": False, "repeat": "off", "route": occurrences * 34, "cursor": 101,
             "navigating": False, "recorded": True, "navigation_dropped": "0",
         }
+        if unavailable:
+            queue["unavailable"] = {occurrences[0]: "missing", occurrences[1]: "unsupported"}
         directory = base / "state/qoda"
         directory.mkdir(mode=0o700)
         database = directory / "session.sqlite3"
         with sqlite3.connect(database) as db:
             db.executescript("CREATE TABLE session(slot INTEGER PRIMARY KEY CHECK(slot=1),payload TEXT NOT NULL); PRAGMA application_id=1364149313; PRAGMA user_version=2;")
-            db.execute("INSERT INTO session VALUES(1,?)", [json.dumps({"format": 2, "queue": queue})])
+            if unavailable:
+                db.execute("PRAGMA user_version=3")
+            db.execute("INSERT INTO session VALUES(1,?)", [json.dumps({"format": 3 if unavailable else 2, "queue": queue})])
         database.chmod(0o600)
         process = ui = connection = stream = None
         state = None
@@ -126,6 +130,51 @@ def check():
                     connection.close(); connection = None
 
                 start()
+                if unavailable:
+                    assert len(state["queue"]["unavailable_entries"]) == 2
+                    before = state["queue"]
+                    command("retry_unavailable", occurrence=occurrences[0], **fences())
+                    until(lambda value: bool(value.get("error")))
+                    assert state["queue"] == before and state["intent"] == "paused"
+                    command("navigation_select", index="0", occurrence=occurrences[0], **fences())
+                    until(lambda value: value["queue"]["selected"] == occurrences[0])
+                    ui = subprocess.Popen(["quickshell", "--path", str(ROOT / "ui"), "--no-duplicate"], env=env, stdout=ui_log, stderr=ui_log)
+                    for _ in range(80):
+                        assert ui.poll() is None, "Unavailable UI exited"
+                        try:
+                            if json.loads(ipc("status"))["instance"] == state["instance"]: break
+                        except ValueError: pass
+                        time.sleep(.1)
+                    else: raise AssertionError("Unavailable UI did not connect")
+                    ipc("showUnavailable"); time.sleep(.2)
+                    info = json.loads(ipc("status"))
+                    assert info["unavailable"]["visible"] and info["unavailable"]["entries"] == 2
+                    assert not info["unavailable"]["canRetry"]
+                    command("queue_remove", occurrence=occurrences[1], **fences())
+                    until(lambda value: len(value["queue"]["unavailable_entries"]) == 1)
+                    assert state["intent"] == "paused"
+                    ipc("showCompact"); ipc("showFull")
+                    assert json.loads(ipc("status"))["unavailable"]["visible"]
+                    quit_backend(); ui.wait(timeout=5); assert ui.returncode == 0
+                    start()
+                    assert len(state["queue"]["unavailable_entries"]) == 1
+                    assert state["queue"]["selected_unavailable"] == "missing"
+                    old = fences()
+                    command("queue_remove", occurrence=occurrences[0], **fences())
+                    until(lambda value: not value["queue"]["unavailable_entries"])
+                    assert state["intent"] == "paused" and state["queue"]["selected"] == occurrences[2]
+                    before = state["queue"]
+                    command("retry_unavailable", occurrence=occurrences[0], **old)
+                    until(lambda value: bool(value.get("error")))
+                    assert state["queue"] == before
+                    command("stop_clear", **fences())
+                    until(lambda value: value["queue"]["membership_count"] == 0)
+                    quit_backend()
+                    ui_log.flush(); ui_log.seek(0)
+                    errors = [line for line in ui_log.read().splitlines() if any(word in line for word in ["TypeError", "ReferenceError", "Cannot assign", "Failed to load", "SyntaxError", "Required property", "Binding loop"])]
+                    assert not errors, errors
+                    print("Native unavailable rows remained inspectable offline, disabled Retry until sign-in, survived compact/full and paused restart, and supported identity-fenced removal without audio or Plex", flush=True)
+                    return
                 assert state["navigation"]["total"] == "102"
                 assert state["navigation"]["offset"] == "100"
                 assert len(state["navigation"]["entries"]) == 2
@@ -210,4 +259,7 @@ def check():
 
 
 if __name__ == "__main__":
-    check()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--unavailable", action="store_true", help="check persisted unavailable-entry inspection and removal")
+    check(parser.parse_args().unavailable)

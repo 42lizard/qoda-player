@@ -151,6 +151,20 @@ impl Controller {
         }));
         Ok(())
     }
+    pub fn unavailable_reply(
+        &self,
+        reply: &Reply,
+        queue: &Queue,
+        epochs: &Epochs,
+    ) -> Option<(OccurrenceId, crate::queue::Unavailable)> {
+        if !self.plan.as_ref().is_some_and(|p| p.key == reply.key)
+            || !self.matches(&reply.key, queue, epochs.current)
+        {
+            return None;
+        }
+        crate::queue::Unavailable::from_provider(reply.media.as_ref().err().copied()?)
+            .map(|reason| (reply.key.next, reason))
+    }
     pub async fn ready(
         &mut self,
         reply: Reply,
@@ -559,6 +573,29 @@ mod tests {
         }
         player.send(Command::Pause(true));
         player.barrier().await.unwrap();
+    }
+    #[tokio::test]
+    async fn only_current_individual_successor_failures_can_mark_an_occurrence() {
+        let provider = Provider::new();
+        let mut q = provider.queue();
+        let mut epochs = Epochs::default();
+        epochs.reset().unwrap();
+        let mut controller = Controller::default();
+        let (tx, mut rx) = mpsc::channel(4);
+        controller.schedule(&q, &mut epochs, provider, tx).unwrap();
+        let Some(crate::Event::Gapless(mut reply)) = rx.recv().await else {
+            panic!("No preparation reply")
+        };
+        reply.media = Err(ProviderError::Network);
+        assert!(controller.unavailable_reply(&reply, &q, &epochs).is_none());
+        reply.media = Err(ProviderError::MissingTrack);
+        let (id, reason) = controller.unavailable_reply(&reply, &q, &epochs).unwrap();
+        assert_eq!(id, q.pending()[0]);
+        assert_eq!(reason, crate::queue::Unavailable::Missing);
+        q.remove(id).unwrap();
+        assert!(controller.unavailable_reply(&reply, &q, &epochs).is_none());
+        controller.invalidate();
+        assert!(controller.unavailable_reply(&reply, &q, &epochs).is_none());
     }
     #[tokio::test]
     async fn stale_preparation_and_changed_successor_cannot_promote_an_old_native_binding() {

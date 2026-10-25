@@ -257,6 +257,44 @@ fn navigation_request(
         .map_err(|error| error.to_string())?;
     Ok((index, occurrence))
 }
+fn version_failure(error: &queue::Error, version: &str) -> Option<queue::Unavailable> {
+    (*error == queue::Error::Version && !version.is_empty() && version.len() <= 512)
+        .then_some(queue::Unavailable::VersionChanged)
+}
+fn preparation_failure(
+    queue: &mut queue::Queue,
+    reason: Option<queue::Unavailable>,
+    automatic: bool,
+    playing: bool,
+) -> Result<Option<qoda_provider::Track>, queue::Error> {
+    let Some(id) = queue.selected() else {
+        return Ok(None);
+    };
+    if let Some(reason) = reason {
+        queue.mark_unavailable(id, reason)?;
+        if automatic && playing {
+            return queue.advance();
+        }
+    }
+    Ok(None)
+}
+fn unavailable_request(
+    queue: &queue::Queue,
+    request: &Value,
+) -> Result<Option<OccurrenceId>, String> {
+    check_queue(queue, request).map_err(|error| error.to_string())?;
+    if request["op"] == "skip_unavailable" {
+        if queue.selected_unavailable() {
+            return Ok(None);
+        }
+    } else if request["op"] == "retry_unavailable"
+        && let Ok(id) = serde_json::from_value::<OccurrenceId>(request["occurrence"].clone())
+        && queue.is_unavailable(id)
+    {
+        return Ok(Some(id));
+    }
+    Err("That unavailable entry changed. Review the current session.".into())
+}
 fn guarded_queue_command(op: &str) -> bool {
     matches!(
         op,
@@ -268,6 +306,8 @@ fn guarded_queue_command(op: &str) -> bool {
             | "replay"
             | "previous"
             | "navigation_select"
+            | "retry_unavailable"
+            | "skip_unavailable"
             | "next"
             | "seek"
             | "stop"
@@ -298,6 +338,8 @@ fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
             | "replay"
             | "previous"
             | "navigation_select"
+            | "retry_unavailable"
+            | "skip_unavailable"
             | "next"
             | "seek"
             | "stop"
@@ -329,7 +371,12 @@ fn resume_selection(
     if audio.generation == generation && !audio.idle && audio.error.is_none() {
         return Ok(ResumePlan::Unpause);
     }
-    let track = if queue.ended() || queue.selected().is_none() {
+    let track = if queue.ended() && queue.selected_unavailable() {
+        queue
+            .selected()
+            .map(|id| queue.retry_unavailable(id))
+            .transpose()?
+    } else if queue.ended() || queue.selected().is_none() {
         queue.advance()?
     } else {
         queue
@@ -517,6 +564,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut gapless = gapless::Controller::default();
     state["gapless"] = json!(gapless.view);
     let mut desired_playing = false;
+    let mut automatic_preparation = None;
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut last_audio = player.status();
     let mut last_stream_failed = false;
@@ -683,6 +731,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Event::Request(request) = &event
             && request["instance"] == instance
+            && matches!(
+                request["op"].as_str(),
+                Some("retry_unavailable" | "skip_unavailable")
+            )
+            && let Err(error) = unavailable_request(&queue, request)
+        {
+            state["error"] = json!(error);
+            event = Event::Checkpoint;
+        }
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
             && guarded_queue_command(request["op"].as_str().unwrap_or(""))
             && (request.get("queue_session").is_none() || check_queue(&queue, request).is_ok())
         {
@@ -764,10 +823,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         let mut to_prepare = None;
+        let mut automatic_next = false;
         let mut force_save = false;
         let mut seeked = false;
         match event {
             Event::Gapless(reply) => {
+                let unavailable = gapless.unavailable_reply(&reply, &queue, &epochs);
                 if let Err(error) = gapless.ready(reply, &queue, &epochs, &player, &proxy).await {
                     desired_playing = false;
                     match player.barrier().await {
@@ -792,6 +853,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state["error"] = json!(error);
                     state["intent"] = json!("paused");
                     state["audio"] = Value::Null;
+                } else if let Some((id, reason)) = unavailable
+                    && let Err(error) = queue.mark_unavailable(id, reason)
+                {
+                    state["error"] = json!(error.to_string());
                 }
             }
             Event::DesktopLost(id)
@@ -872,6 +937,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 playlists.apply(reply, auth_generation);
             }
             Event::Advance(g) if g == epochs.current => {
+                automatic_next = true;
                 match queue.complete(presented_generation == Some(g)) {
                     Ok(Some(track)) => to_prepare = Some(track),
                     Ok(None) => {
@@ -1309,7 +1375,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "enqueue" | "play_next" | "queue_play" | "queue_move" | "queue_remove"
                     | "clear_upcoming" | "stop_clear" | "next" | "replay" | "previous"
-                    | "navigation_select" | "set_shuffle" | "set_repeat" => {
+                    | "navigation_select" | "retry_unavailable" | "skip_unavailable"
+                    | "set_shuffle" | "set_repeat" => {
                         if let Err(error) = check_queue(&queue, &v) {
                             state["error"] = json!(error.to_string());
                         } else {
@@ -1338,6 +1405,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         to_prepare =
                                             Some(queue.select(id).map_err(|e| e.to_string())?);
                                         desired_playing = true;
+                                    }
+                                    "retry_unavailable" | "skip_unavailable" => {
+                                        let id = unavailable_request(&queue, &v)?;
+                                        if provider.is_none() {
+                                            return Err("Restore Plex sign-in before retrying or continuing playback.".into());
+                                        }
+                                        to_prepare = if let Some(id) = id {
+                                            Some(
+                                                queue
+                                                    .retry_unavailable(id)
+                                                    .map_err(|error| error.to_string())?,
+                                            )
+                                        } else {
+                                            automatic_next = true;
+                                            queue.advance().map_err(|error| error.to_string())?
+                                        };
+                                        desired_playing = to_prepare.is_some();
+                                        if !desired_playing {
+                                            state["status"] = json!(
+                                                "No playable entries remain. Open Unavailable to retry or remove an entry."
+                                            );
+                                        }
                                     }
                                     "queue_move" => {
                                         let id = serde_json::from_value(v["occurrence"].clone())
@@ -1426,7 +1515,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             if v["op"] == "stop_clear"
                                 || (v["op"] == "queue_remove" && queue.selected().is_none())
-                                || (v["op"] == "next" && to_prepare.is_none())
+                                || (matches!(v["op"].as_str(), Some("next" | "skip_unavailable"))
+                                    && to_prepare.is_none())
                             {
                                 if let Some(task) = prepare_task.take() {
                                     task.abort();
@@ -1718,9 +1808,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::Media(g, r) if g == epochs.current => match r {
                 Ok(media) => {
                     if let Err(error) = queue.update_selected(media.track.clone(), &media.version) {
-                        state["error"] = json!(error.to_string());
-                        desired_playing = false;
-                        state["intent"] = json!("paused");
+                        let reason = version_failure(&error, &media.version);
+                        match preparation_failure(
+                            &mut queue,
+                            reason,
+                            automatic_preparation == Some(g),
+                            desired_playing,
+                        ) {
+                            Ok(next) => {
+                                state["error"] = if next.is_some() {
+                                    Value::Null
+                                } else {
+                                    json!(error.to_string())
+                                };
+                                to_prepare = next;
+                            }
+                            Err(failure) => state["error"] = json!(failure.to_string()),
+                        }
+                        automatic_next = to_prepare.is_some();
+                        desired_playing = automatic_next;
+                        state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
                     } else {
                         state["selection"] = json!(media.track);
                         let url = proxy.grant(media.stream).await;
@@ -1730,10 +1837,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(e) => {
-                    state["status"] = json!("Playback preparation failed");
-                    state["error"] = json!(e.to_string());
-                    desired_playing = false;
-                    state["intent"] = json!("paused");
+                    match preparation_failure(
+                        &mut queue,
+                        queue::Unavailable::from_provider(e),
+                        automatic_preparation == Some(g),
+                        desired_playing,
+                    ) {
+                        Ok(next) => {
+                            state["error"] = if next.is_some() {
+                                Value::Null
+                            } else {
+                                json!(e.to_string())
+                            };
+                            to_prepare = next;
+                        }
+                        Err(error) => state["error"] = json!(error.to_string()),
+                    }
+                    automatic_next = to_prepare.is_some();
+                    desired_playing = automatic_next;
+                    state["status"] = json!(if automatic_next {
+                        "Skipping unavailable entry"
+                    } else {
+                        "Playback preparation failed; review unavailable entries or retry"
+                    });
+                    state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
                 }
             },
             _ => continue,
@@ -1759,6 +1886,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tx.clone(),
             )
             .await?;
+            automatic_preparation = (automatic_next && desired_playing).then_some(epochs.current);
             state["selection"] = Value::Null;
             state["audio"] = Value::Null;
             state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
@@ -1888,6 +2016,106 @@ mod tests {
         q.replace(track.clone()).unwrap();
         q.enqueue(track, false).unwrap();
         q
+    }
+    #[test]
+    fn only_individual_failures_advance_automatic_playing_preparations() {
+        use qoda_provider::ProviderError;
+        for error in [
+            ProviderError::Network,
+            ProviderError::SignInRequired,
+            ProviderError::AccessDenied,
+            ProviderError::UnknownSource,
+            ProviderError::InvalidReply,
+        ] {
+            let mut q = queued_selection();
+            q.set_position(7.0).unwrap();
+            let before = serde_json::to_value(&q).unwrap();
+            assert!(
+                preparation_failure(&mut q, queue::Unavailable::from_provider(error), true, true)
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(serde_json::to_value(q).unwrap(), before);
+        }
+        for (automatic, playing) in [(false, true), (true, false)] {
+            let mut q = queued_selection();
+            let selected = q.selected();
+            q.set_position(7.0).unwrap();
+            assert!(
+                preparation_failure(
+                    &mut q,
+                    Some(queue::Unavailable::Missing),
+                    automatic,
+                    playing
+                )
+                .unwrap()
+                .is_none()
+            );
+            assert_eq!(q.selected(), selected);
+            assert_eq!(q.position(), 7.0);
+            assert!(q.selected_unavailable());
+        }
+        assert!(version_failure(&queue::Error::Version, "").is_none());
+        assert!(version_failure(&queue::Error::Version, &"x".repeat(513)).is_none());
+        assert_eq!(
+            version_failure(&queue::Error::Version, "valid-other-version"),
+            Some(queue::Unavailable::VersionChanged)
+        );
+        assert_eq!(
+            queue::Unavailable::from_provider(ProviderError::UnsupportedMedia),
+            Some(queue::Unavailable::Unsupported)
+        );
+    }
+    #[test]
+    fn all_unavailable_automatic_scans_terminate_even_in_repeat_modes() {
+        for repeat in [queue::Repeat::One, queue::Repeat::All] {
+            let track = queued_selection().snapshot().entries[0].track.clone();
+            let mut q = queue::Queue::default();
+            q.replace_many(vec![track; 500]).unwrap();
+            q.set_repeat(repeat).unwrap();
+            for index in 0..500 {
+                let next =
+                    preparation_failure(&mut q, Some(queue::Unavailable::Missing), true, true)
+                        .unwrap();
+                assert_eq!(next.is_some(), index < 499);
+            }
+            assert!(q.ended());
+            assert_eq!(q.snapshot().unavailable_entries.len(), 500);
+            assert!(q.navigation_page(None).entries.is_empty());
+            assert!(q.advance().unwrap().is_none());
+            let failed = q.selected();
+            assert!(matches!(
+                resume_selection(
+                    &mut q,
+                    &player::Status {
+                        idle: true,
+                        ..Default::default()
+                    },
+                    0,
+                    false
+                )
+                .unwrap(),
+                ResumePlan::Prepare(_)
+            ));
+            assert_eq!(q.selected(), failed);
+            assert!(!q.ended());
+            assert_eq!(q.snapshot().unavailable_entries.len(), 500);
+        }
+    }
+    #[test]
+    fn unavailable_actions_reject_stale_or_unmarked_rows_before_output_changes() {
+        let mut q = queued_selection();
+        let id = q.selected().unwrap();
+        let mut request = json!({"op":"retry_unavailable","occurrence":id,"queue_session":q.snapshot().session,"queue_revision":q.snapshot().revision});
+        assert!(unavailable_request(&q, &request).is_err());
+        q.mark_unavailable(id, queue::Unavailable::Missing).unwrap();
+        assert!(unavailable_request(&q, &request).is_err());
+        request["queue_revision"] = json!(q.snapshot().revision);
+        assert_eq!(unavailable_request(&q, &request).unwrap(), Some(id));
+        request["op"] = json!("skip_unavailable");
+        assert_eq!(unavailable_request(&q, &request).unwrap(), None);
+        assert!(guarded_queue_command("retry_unavailable"));
+        assert!(changes_current("skip_unavailable", &request, &q));
     }
     #[test]
     fn navigation_commands_require_current_session_revision_and_exact_route_identity() {

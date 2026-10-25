@@ -39,12 +39,29 @@ impl From<MembershipError> for Error {
         }
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unavailable {
+    Missing,
+    Unsupported,
+    VersionChanged,
+}
+impl Unavailable {
+    pub fn from_provider(error: qoda_provider::ProviderError) -> Option<Self> {
+        match error {
+            qoda_provider::ProviderError::MissingTrack => Some(Self::Missing),
+            qoda_provider::ProviderError::UnsupportedMedia => Some(Self::Unsupported),
+            _ => None,
+        }
+    }
+}
 #[derive(Clone, Serialize)]
 pub struct Row {
     pub id: OccurrenceId,
     pub track: Track,
     pub selected: bool,
     pub can_move: bool,
+    pub unavailable: Option<Unavailable>,
 }
 #[derive(Serialize)]
 pub struct Snapshot {
@@ -60,6 +77,8 @@ pub struct Snapshot {
     pub previous_available: bool,
     pub navigating: bool,
     pub navigation_dropped: Counter,
+    pub unavailable_entries: Vec<Row>,
+    pub selected_unavailable: Option<Unavailable>,
 }
 const NAVIGATION_PAGE_SIZE: usize = 50;
 #[derive(Serialize)]
@@ -99,6 +118,7 @@ pub struct Queue {
     navigating: bool,
     recorded: bool,
     navigation_dropped: Counter,
+    unavailable: HashMap<OccurrenceId, Unavailable>,
 }
 impl Default for Queue {
     fn default() -> Self {
@@ -120,6 +140,7 @@ impl Default for Queue {
             navigating: false,
             recorded: false,
             navigation_dropped: Counter::ZERO,
+            unavailable: HashMap::new(),
         }
     }
 }
@@ -175,6 +196,7 @@ impl Queue {
                 track: self.metadata[&id].clone(),
                 selected: Some(id) == self.selected,
                 can_move: Some(id) != self.selected && !forward.contains(&id),
+                unavailable: self.unavailable.get(&id).copied(),
             })
             .collect();
         Snapshot {
@@ -190,6 +212,21 @@ impl Queue {
             previous_available: self.selected.is_some(),
             navigating: self.navigating,
             navigation_dropped: self.navigation_dropped,
+            selected_unavailable: self
+                .selected
+                .and_then(|id| self.unavailable.get(&id).copied()),
+            unavailable_entries: self
+                .order
+                .iter()
+                .filter(|id| self.unavailable.contains_key(id))
+                .map(|id| Row {
+                    id: *id,
+                    track: self.metadata[id].clone(),
+                    selected: Some(*id) == self.selected,
+                    can_move: false,
+                    unavailable: self.unavailable.get(id).copied(),
+                })
+                .collect(),
         }
     }
     /// The Previous route is confirmed navigation state, not a complete listening archive.
@@ -361,7 +398,35 @@ impl Queue {
         Ok(id)
     }
     pub fn select(&mut self, id: OccurrenceId) -> Result<Track, Error> {
-        let track = self.visible_track(id)?;
+        self.visible_track(id)?;
+        self.select_member(id)
+    }
+    pub fn retry_unavailable(&mut self, id: OccurrenceId) -> Result<Track, Error> {
+        if !self.unavailable.contains_key(&id) {
+            return Err(Error::Missing);
+        }
+        self.select_member(id)
+    }
+    pub fn is_unavailable(&self, id: OccurrenceId) -> bool {
+        self.unavailable.contains_key(&id)
+    }
+    pub fn selected_unavailable(&self) -> bool {
+        self.selected
+            .is_some_and(|id| self.unavailable.contains_key(&id))
+    }
+    pub fn mark_unavailable(&mut self, id: OccurrenceId, reason: Unavailable) -> Result<(), Error> {
+        if !self.metadata.contains_key(&id) {
+            return Err(Error::Missing);
+        }
+        if self.unavailable.get(&id) != Some(&reason) {
+            let revision = self.next_revision()?;
+            self.unavailable.insert(id, reason);
+            self.revision = revision;
+        }
+        Ok(())
+    }
+    fn select_member(&mut self, id: OccurrenceId) -> Result<Track, Error> {
+        let track = self.metadata.get(&id).cloned().ok_or(Error::Missing)?;
         let revision = self.next_revision()?;
         self.traversed = self
             .order
@@ -450,9 +515,10 @@ impl Queue {
     pub fn advance(&mut self) -> Result<Option<Track>, Error> {
         if self.navigating
             && let Some(cursor) = self.cursor
-            && cursor + 1 < self.route.len()
+            && let Some(next) = (cursor + 1..self.route.len())
+                .find(|index| !self.unavailable.contains_key(&self.route[*index]))
         {
-            return self.navigate(cursor + 1).map(Some);
+            return self.navigate(next).map(Some);
         }
         // At the navigation frontier, resume ordinary pending order.
         if self.navigating {
@@ -461,8 +527,12 @@ impl Queue {
                 self.traversed.remove(&id);
             }
         }
-        if let Some(id) = self.ordinary_pending().first() {
-            return self.select(*id).map(Some);
+        if let Some(id) = self
+            .ordinary_pending()
+            .into_iter()
+            .find(|id| !self.unavailable.contains_key(id))
+        {
+            return self.select(id).map(Some);
         }
         if self.repeat == Repeat::All && !self.order.is_empty() {
             return self.restart_cycle();
@@ -476,12 +546,17 @@ impl Queue {
     pub fn complete(&mut self, presented: bool) -> Result<Option<Track>, Error> {
         if !presented
             && (self.repeat == Repeat::One
-                || self.repeat == Repeat::All && self.pending().is_empty())
+                || self.repeat == Repeat::All
+                    && self
+                        .pending()
+                        .iter()
+                        .all(|id| self.unavailable.contains_key(id)))
         {
             return Err(Error::Unconfirmed);
         }
         if self.repeat == Repeat::One
             && let Some(id) = self.selected
+            && !self.unavailable.contains_key(&id)
         {
             let track = self.metadata[&id].clone();
             let revision = self.next_revision()?;
@@ -501,7 +576,16 @@ impl Queue {
         self.advance()
     }
     fn restart_cycle(&mut self) -> Result<Option<Track>, Error> {
-        let Some(id) = self.order.first().copied() else {
+        let Some(id) = self
+            .order
+            .iter()
+            .copied()
+            .find(|id| !self.unavailable.contains_key(id))
+        else {
+            if !self.ended {
+                self.revision = self.next_revision()?;
+                self.ended = true;
+            }
             return Ok(None);
         };
         self.next_revision()?;
@@ -600,10 +684,14 @@ impl Queue {
         Ok(())
     }
     pub fn remove(&mut self, id: OccurrenceId) -> Result<bool, Error> {
-        self.visible_track(id)?;
+        if !self.unavailable.contains_key(&id) {
+            self.visible_track(id)?;
+        }
         let selected = Some(id) == self.selected;
         let successor = if selected {
-            self.pending().first().copied()
+            self.pending()
+                .into_iter()
+                .find(|id| !self.unavailable.contains_key(id))
         } else {
             None
         };
@@ -625,6 +713,7 @@ impl Queue {
         self.order.retain(|entry| *entry != id);
         self.traversed.remove(&id);
         self.metadata.remove(&id);
+        self.unavailable.remove(&id);
         self.versions.remove(&id);
         self.priority.retain(|entry| *entry != id);
         if selected {
@@ -673,6 +762,7 @@ impl Queue {
             return Err(Error::Version);
         }
         let revision = self.revision.checked_next().map_err(|_| Error::Counter)?;
+        self.unavailable.remove(&id);
         self.versions.insert(id, version.to_owned());
         self.metadata.insert(id, track);
         self.revision = revision;
@@ -700,6 +790,7 @@ impl Queue {
                 "navigating",
                 "recorded",
                 "navigation_dropped",
+                "unavailable",
             ] {
                 if fields.contains_key(key) {
                     return Err(<serde_json::Error as serde::de::Error>::custom(
@@ -741,6 +832,8 @@ impl<'de> Deserialize<'de> for Queue {
             navigating: bool,
             recorded: bool,
             navigation_dropped: Counter,
+            #[serde(default)]
+            unavailable: HashMap<OccurrenceId, Unavailable>,
         }
         let w = Wire::deserialize(d)?;
         let entries = w.membership.entries();
@@ -750,6 +843,7 @@ impl<'de> Deserialize<'de> for Queue {
             || w.metadata.len() != ids.len()
             || w.metadata.keys().any(|id| !ids.contains(id))
             || w.traversed.iter().any(|id| !ids.contains(id))
+            || w.unavailable.keys().any(|id| !ids.contains(id))
             || w.selected.is_some_and(|id| !ids.contains(&id))
         {
             return Err(invalid());
@@ -824,6 +918,7 @@ impl<'de> Deserialize<'de> for Queue {
             navigating: w.navigating,
             recorded: w.recorded,
             navigation_dropped: w.navigation_dropped,
+            unavailable: w.unavailable,
         })
     }
 }
@@ -851,6 +946,73 @@ mod tests {
     }
     fn observed(q: &mut Queue) {
         q.confirm_presented().unwrap();
+    }
+    #[test]
+    fn unavailable_occurrences_remain_inspectable_without_poisoning_duplicates_or_repeat() {
+        let mut q = Queue::default();
+        let duplicate = track("duplicate");
+        q.replace_many(vec![duplicate.clone(), duplicate, track("last")])
+            .unwrap();
+        let ids = q.order.clone();
+        q.mark_unavailable(ids[1], Unavailable::Missing).unwrap();
+        assert_eq!(q.snapshot().unavailable_entries.len(), 1);
+        q.advance().unwrap();
+        assert_eq!(q.selected(), Some(ids[2]));
+        assert_eq!(q.snapshot().membership_count, 3);
+        assert!(q.navigation_page(None).entries.is_empty());
+        q.set_repeat(Repeat::All).unwrap();
+        q.advance().unwrap();
+        assert_eq!(q.selected(), Some(ids[0]));
+        q.retry_unavailable(ids[1]).unwrap();
+        assert!(q.selected_unavailable());
+        q.update_selected(q.metadata[&ids[1]].clone(), "version-1")
+            .unwrap();
+        assert!(!q.selected_unavailable());
+        q.mark_unavailable(ids[1], Unavailable::Missing).unwrap();
+        q.advance().unwrap();
+        q.remove(ids[1]).unwrap();
+        assert!(q.snapshot().unavailable_entries.is_empty());
+        assert!(!q.order.contains(&ids[1]));
+    }
+    #[test]
+    fn failure_roundtrip_requires_member_identity_and_preserves_pinned_versions() {
+        let mut q = Queue::default();
+        q.replace(track("version")).unwrap();
+        let id = q.selected().unwrap();
+        let track = q.visible_track(id).unwrap();
+        q.update_selected(track.clone(), "v1").unwrap();
+        q.mark_unavailable(id, Unavailable::VersionChanged).unwrap();
+        let mut copy: Queue = serde_json::from_value(serde_json::to_value(&q).unwrap()).unwrap();
+        copy.retry_unavailable(id).unwrap();
+        assert_eq!(
+            copy.update_selected(track.clone(), "v2").unwrap_err(),
+            Error::Version
+        );
+        assert!(copy.selected_unavailable());
+        copy.update_selected(track, "v1").unwrap();
+        assert!(!copy.selected_unavailable());
+        let mut invalid = serde_json::to_value(&q).unwrap();
+        invalid["unavailable"][uuid::Uuid::new_v4().to_string()] = serde_json::json!("missing");
+        assert!(serde_json::from_value::<Queue>(invalid).is_err());
+        let mut legacy = serde_json::to_value(q).unwrap();
+        legacy.as_object_mut().unwrap().remove("unavailable");
+        assert!(
+            serde_json::from_value::<Queue>(legacy)
+                .unwrap()
+                .snapshot()
+                .unavailable_entries
+                .is_empty()
+        );
+    }
+    #[test]
+    fn unavailable_future_does_not_bypass_unconfirmed_repeat_guard() {
+        let mut q = Queue::default();
+        q.replace_many(vec![track("tiny"), track("missing")])
+            .unwrap();
+        q.mark_unavailable(q.order[1], Unavailable::Missing)
+            .unwrap();
+        q.set_repeat(Repeat::All).unwrap();
+        assert_eq!(q.complete(false).unwrap_err(), Error::Unconfirmed);
     }
     #[test]
     fn navigation_inspector_excludes_unconfirmed_and_skipped_selections() {
