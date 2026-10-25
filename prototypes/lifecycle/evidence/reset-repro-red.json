@@ -1,0 +1,5 @@
+{
+  "command": "reset-failed after explicit stop",
+  "returncode": 1,
+  "stderr": "Failed to reset failed state of unit <study-unit>-backend.service: Unit <study-unit>-backend.service not loaded.\n"
+}

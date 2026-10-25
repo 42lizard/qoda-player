@@ -464,6 +464,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    // This record precedes the session actor: without a current-PID record,
+    // this process has not accepted a mutable session command. An old socket or
+    // old readiness record must never turn startup cancellation into save failure.
+    let pending_ready = dir.join("ready.next");
+    std::fs::write(
+        &pending_ready,
+        json!({"pid":std::process::id(),"instance":instance}).to_string(),
+    )?;
+    std::fs::rename(pending_ready, dir.join("ready.json"))?;
     println!("{}", json!({"ready":true,"instance":instance,"rows":count}));
     let mut subscribers: Vec<Out> = Vec::new();
     let mut queue = restored["queue"].as_array().cloned().unwrap_or_default();
@@ -492,7 +501,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Msg::Command(req, reply) => {
                 let op = req["op"].as_str().unwrap_or("");
                 let key = req["operationId"].as_str().map(str::to_owned);
-                let result = if req.get("instance").is_some() && req["instance"] != instance {
+                let result = if dir.join("quitting").exists()
+                    && !matches!(op, "snapshot" | "pause" | "checkpoint" | "shutdown")
+                {
+                    json!({"error":"shutdown-in-progress"})
+                } else if req.get("instance").is_some() && req["instance"] != instance {
                     json!({"error":"stale-instance"})
                 } else if let Some(old) = key.as_ref().and_then(|k| seen.get(k)) {
                     old.clone()
@@ -660,6 +673,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let _ = audio.send(vec!["destroy".into()]);
     thread.join().unwrap();
+    std::fs::write(
+        dir.join("owner-exit.json"),
+        json!({"pid":std::process::id(),"joined":true}).to_string(),
+    )?;
     std::fs::remove_file(socket)?;
     Ok(())
 }

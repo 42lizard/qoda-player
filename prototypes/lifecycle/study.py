@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded lifecycle qualification. All integration names and files are disposable."""
 import concurrent.futures
+import argparse
 import hashlib
 import json
 import os
@@ -116,7 +117,7 @@ class Study:
             'QODA_MANAGER_BUS':self.config['managerBus'],'QODA_STUDY_HOME':str(root),'QODA_STUDY_LAUNCHER':str(root/'prefix/lib/qoda-player/controller.py'),
             'QODA_PROTO_RUNTIME':str(root/'runtime'),'QODA_PROTO_ROWS':'100',
             'QODA_STUDY_DB':str(root/'data/qoda/session.sqlite3'),
-            'XDG_CONFIG_HOME':str(root/'config'),'XDG_DATA_HOME':str(root/'data'),'XDG_STATE_HOME':str(root/'state'),'XDG_CACHE_HOME':str(root/'cache')})
+            'XDG_DATA_DIRS':str(root/'prefix/share')+':/usr/local/share:/usr/share','XDG_CONFIG_HOME':str(root/'config'),'XDG_DATA_HOME':str(root/'data'),'XDG_STATE_HOME':str(root/'state'),'XDG_CACHE_HOME':str(root/'cache')})
         atomic(root/'study.json',self.config)
         with wave.open(str(root/'runtime/fixture.wav'),'wb') as w:
             w.setparams((2,2,48000,0,'NONE','not compressed'));w.writeframes(b'\0'*4*48000*120)
@@ -195,6 +196,7 @@ class Study:
         instance=self.state()['instance'];before=self.state()['position'];os.kill(ui_pid,signal.SIGKILL)
         wait(lambda:self.props('ui')['ActiveState']=='failed');time.sleep(.3)
         self.check('UI crash leaves backend playing and does not auto-restart',self.state()['instance']==instance and self.state()['position']>before and int(self.props('ui')['MainPID'])==0)
+        self.qoda('hide');self.check('hide does not recreate a missing UI while backend plays',int(self.props('ui')['MainPID'])==0 and self.state()['instance']==instance and self.state()['playing'])
         self.qoda('show');self.check('targeted launch recreates UI and resynchronizes',self.ui()['state']['instance']==instance and self.ui()['state']['queue']==self.state()['queue'])
         self.rpc('checkpoint');before=self.state()['position'];os.kill(backend_pid,signal.SIGKILL)
         recovered=wait(lambda:(s if s['instance']!=instance and s['loaded'] else None) if (s:=self.state()) else None)
@@ -247,9 +249,15 @@ class Study:
         except RuntimeError:pass
         self.switch('0.1.0-study');self.qoda('show')
         self.check('failed activation retains recoverable old release',self.state()['release']=='0.1.0-study' and len(self.state()['queue'])==1)
+        exiting_pid=int(self.props('backend')['MainPID'])
         self.buscall('call',BUS,obj,rootif,'Quit');wait(lambda:not c.active('backend') and not c.active('ui'))
         self.check('MPRIS Quit routes shutdown outside backend cgroup',not c.active('backend'))
+        joined=json.loads((self.root/'runtime/owner-exit.json').read_text())
+        self.check('orderly Quit joins the libmpv owner before service stop',joined['joined'] and joined['pid']==exiting_pid)
         # Login/logout uses only a disposable target, never the real desktop session.
+        suppressed=json.loads(self.qoda('login-start').stdout)
+        self.check('Quit suppresses optional login startup for current session',suppressed.get('suppressedByQuit') and not c.active('backend') and not c.active('ui'))
+        self.config['graphicalSession']='fixture-session-2';atomic(self.root/'study.json',self.config)
         self.qoda('login-start');self.check('optional login fixture starts backend hidden and paused',c.active('backend') and not c.active('ui') and not self.state()['playing'])
         self.qoda('show');self.rpc('play');wait(lambda:self.state()['playing']);self.rpc('checkpoint')
         self.ctl('stop',self.tag+'-session.target');wait(lambda:not c.active('backend') and not c.active('ui'))
@@ -260,9 +268,9 @@ class Study:
         props=self.props('backend');time.sleep(2.2)
         self.check('incompatible schema fails without restart loop',q.returncode!=0 and props['Result']=='exit-code' and self.props('backend')['NRestarts']=='0')
         db=sqlite3.connect(self.root/'data/qoda/session.sqlite3');db.execute('PRAGMA user_version=1');db.commit();db.close()
-        self.ctl('reset-failed',c.unit('backend'));self.qoda('show')
+        c.reset_failed('backend');self.qoda('show')
         # Exhaust the actual 3/60 start limit with crashes, then require explicit reset/retry.
-        self.ctl('stop',c.unit('backend'));self.ctl('reset-failed',c.unit('backend'));self.ctl('start',c.unit('backend'));wait(lambda:self.state()['loaded'])
+        self.ctl('stop',c.unit('backend'));c.reset_failed('backend');self.ctl('start',c.unit('backend'));wait(lambda:self.state()['loaded'])
         crashes=0
         for _ in range(3):
             pid=int(self.props('backend')['MainPID']);os.kill(pid,signal.SIGKILL);crashes+=1
@@ -270,10 +278,15 @@ class Study:
             if self.props('backend')['Result']=='start-limit-hit':break
             wait(lambda:self.state()['loaded'])
         self.check('backend failures hit actual three-starts-per-minute limit',self.props('backend')['Result']=='start-limit-hit',{'crashes':crashes,'properties':self.props('backend')})
-        self.ctl('reset-failed',c.unit('backend'));self.qoda('show')
+        self.qoda('retry')
         self.check('explicit rate-limit reset recovers paused',not self.state()['playing'])
+        self.run_startup_race()
+        self.save_manifest()
+
+    def run_startup_race(self):
+        c=self.controller()
         # Quit during a deliberately slow startup: visibility requests cannot resurrect it.
-        self.qoda('quit');self.ctl('reset-failed',c.unit('backend'))
+        self.qoda('quit');c.reset_failed('backend')
         self.config['serviceEnv']['QODA_STUDY_DELAY']='1500';atomic(self.root/'study.json',self.config)
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             launch=pool.submit(self.qoda,'show',False);time.sleep(.15)
@@ -281,9 +294,8 @@ class Study:
             racing=pool.submit(self.qoda,'compact',False)
             outcomes=[launch.result(),quitjob.result(),racing.result()]
         time.sleep(2.3)
-        self.check('Quit during startup supersedes concurrent activation',outcomes[1].returncode==0 and not c.active('backend') and not c.active('ui'),[{'returncode':x.returncode,'stderr':x.stderr} for x in outcomes])
+        self.check('Quit during startup supersedes concurrent activation',outcomes[1].returncode==0 and json.loads(outcomes[1].stdout)['startupCancelled'] and not c.active('backend') and not c.active('ui'),[{'returncode':x.returncode,'stderr':x.stderr} for x in outcomes])
         self.config['serviceEnv'].pop('QODA_STUDY_DELAY');atomic(self.root/'study.json',self.config)
-        self.save_manifest()
 
     def cleanup(self):
         if self.config:
@@ -306,25 +318,28 @@ class Study:
 
 
 def main():
+    parser=argparse.ArgumentParser();parser.add_argument('--case',choices=['all','startup-race'],default='all');args=parser.parse_args()
     EVIDENCE.mkdir(exist_ok=True)
     env=dict(os.environ,CARGO_TARGET_DIR=str(TARGET))
     subprocess.run(['cargo','build','--release','--locked','--manifest-path',str(HERE/'Cargo.toml')],env=env,check=True)
     study=Study();error=None;retained=[]
     print('Study root: '+str(study.root),flush=True)
     try:
-        study.setup();study.run_checks()
+        study.setup()
+        if args.case=='startup-race':study.run_startup_race()
+        else:study.run_checks()
     except KeyboardInterrupt:
         error={'type':'Interrupted','message':'Study interrupted; acceptance incomplete'}
     except Exception as e:
-        error={'type':type(e).__name__,'message':str(e)}
+        error={'type':type(e).__name__,'message':str(e),'stderr':getattr(e,'stderr',None)}
         print('ERROR '+str(error),flush=True)
     finally:
         # Keep synthetic local logs for diagnosis; publish redacted summaries only.
         try:retained=study.cleanup()
         except Exception as e:retained=['cleanup-error:'+str(e)]
-        result=study.redact({'checks':study.results,'error':error,'retainedOwnedFiles':retained,'privateRun':str(study.root),'binarySha256':digest(BINARY)})
+        result=study.redact({'scope':args.case,'checks':study.results,'error':error,'retainedOwnedFiles':retained,'privateRun':str(study.root),'binarySha256':digest(BINARY)})
         atomic(EVIDENCE/('run-'+str(time.time_ns())+'.json'),result)
-        atomic(EVIDENCE/'results.json',result)
+        atomic(EVIDENCE/('results.json' if args.case=='all' else 'startup-race.json'),result)
         print(json.dumps({'passed':sum(x['pass'] for x in study.results),'total':len(study.results),'error':error,'retained':retained}),flush=True)
     return 1 if error or any(not r['pass'] for r in study.results) or retained else 0
 

@@ -6,6 +6,7 @@ import QtQuick.Controls as C
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.Mpris
 import Quickshell.Wayland
 ShellRoot {
  id: root
@@ -14,6 +15,7 @@ ShellRoot {
  property string lastForm: "full"
  property bool compatible: false
  property var state: ({playing:false,queue:[],release:""})
+ property double loadedAt: Date.now()
  property int seq: 0
  property var events: []
  onFormChanged:events=events.concat([{event:"form",value:form}]).slice(-30)
@@ -37,7 +39,8 @@ ShellRoot {
  Timer {interval:200;repeat:true;running:true;onTriggered:if(!socket.connected)socket.connected=true}
  IpcHandler {
   target:"lifecycle"
-  function snapshot():string{return JSON.stringify({connected:socket.connected,compatible:root.compatible,release:root.release,form:root.form,lastForm:root.lastForm,shellId:Quickshell.shellId,appId:Quickshell.appId,events:root.events,state:root.state,pid:Quickshell.processId});}
+  function snapshot():string{return JSON.stringify({connected:socket.connected,compatible:root.compatible,release:root.release,form:root.form,lastForm:root.lastForm,shellId:Quickshell.shellId,appId:Quickshell.appId,mediaPlayers:Mpris.players.values.map(p=>({name:p.dbusName,identity:p.identity,desktopEntry:p.desktopEntry})),loadedAt:root.loadedAt,events:root.events,iconAvailable:Quickshell.hasThemeIcon("qoda-player"),state:root.state,pid:Quickshell.processId});}
+  function media(action:string,name:string):bool{let player=Mpris.players.values.find(p=>p.dbusName===name);if(!player)return false;if(action==="play")player.play();else if(action==="pause")player.pause();else return false;return true;}
   function present(action:string):string{if(root.compatible)root.activation(action);return JSON.stringify({requested:action,compatible:root.compatible,form:root.form,events:root.events});}
  }
  FloatingWindow {

@@ -1,0 +1,14 @@
+{
+  "scope": "two clean offline locked builds, same absolute build root and installed toolchain",
+  "sha256": [
+    "82fe98be0b3275b94d971f6d75accd499a6df8cfe7a17c235c4474326b217956",
+    "82fe98be0b3275b94d971f6d75accd499a6df8cfe7a17c235c4474326b217956"
+  ],
+  "seconds": [
+    375.303,
+    380.69
+  ],
+  "identical": true,
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Arch Linux rust 1:1.99.1-1)"
+}

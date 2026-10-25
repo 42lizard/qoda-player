@@ -1,0 +1,31 @@
+{
+  "scope": "existing real session bus; window registration/render/hide/show/exit only",
+  "pass": true,
+  "error": null,
+  "transitions": [
+    {
+      "appId": "qoda-player",
+      "visible": true,
+      "mapped": true
+    },
+    {
+      "appId": "qoda-player",
+      "visible": false,
+      "mapped": false
+    },
+    {
+      "appId": "qoda-player",
+      "visible": true,
+      "mapped": true
+    }
+  ],
+  "hostPortalProcessesUnchanged": true,
+  "newHyprlandPortalCoredumps": 0,
+  "warnings": [
+    "  WARN qt.qpa.services: Failed to register with host portal QDBusError(\"org.freedesktop.portal.Error.Failed\", \"Could not register app ID: Connection already associated with an application ID\")"
+  ],
+  "limits": [
+    "No file chooser, screencast, document export or other portal feature requested",
+    "Real credentials and unrelated windows not captured"
+  ]
+}

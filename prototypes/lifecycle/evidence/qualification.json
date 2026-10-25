@@ -1,0 +1,46 @@
+{
+  "build": {
+    "scope": "two clean offline locked builds, same absolute build root and installed toolchain",
+    "sha256": [
+      "82fe98be0b3275b94d971f6d75accd499a6df8cfe7a17c235c4474326b217956",
+      "82fe98be0b3275b94d971f6d75accd499a6df8cfe7a17c235c4474326b217956"
+    ],
+    "seconds": [
+      375.303,
+      380.69
+    ],
+    "identical": true,
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)",
+    "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Arch Linux rust 1:1.99.1-1)"
+  },
+  "scopes": [
+    {
+      "scope": "all",
+      "passed": 43,
+      "total": 43,
+      "error": null,
+      "retainedOwnedFiles": []
+    },
+    {
+      "scope": "extended",
+      "passed": 33,
+      "total": 33,
+      "error": null,
+      "retainedOwnedFiles": []
+    }
+  ],
+  "status": "scoped-checks-passed",
+  "hostPortalSmoke": {
+    "pass": true,
+    "warningRetained": true,
+    "newHyprlandPortalCoredumps": 0
+  },
+  "verificationCommands": [
+    "python3 prototypes/lifecycle/qualify.py",
+    "QODA_BUILD_TARGET=.scratch/lifecycle-clean-build python3 prototypes/lifecycle/extended.py",
+    "python3 prototypes/lifecycle/host_portal_smoke.py"
+  ],
+  "notes": [
+    "Extended scope repeated after making SQLite connection closure explicit before backup restoration. No extra build/core rerun needed for this Python-only adjustment."
+  ]
+}
