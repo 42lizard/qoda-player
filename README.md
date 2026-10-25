@@ -19,6 +19,8 @@ Planning. No playable application exists yet. The current effort will produce an
 
 The player will use a modular music-provider layer for authentication, catalog metadata, and API access. Local storage is a separate responsibility. See [GLOSSARY.md](GLOSSARY.md) for the agreed language.
 
+The selected architecture is an [independent Rust/Cargo backend with embedded libmpv](docs/adr/0001-independent-rust-backend.md), connected to the Quickshell/QML UI through a versioned local socket interface. The backend owns the session and desktop media controls, allowing playback to continue while the UI reloads or restarts.
+
 ## Planning workflow
 
 The canonical map is [Find the way to the first Plex release specification](https://github.com/42lizard/qoda-player/issues/1). It carries the `wayfinder:map` label. Its child decision tickets use `wayfinder:research`, `wayfinder:grilling`, `wayfinder:prototype`, or `wayfinder:task`; native sub-issues and blocking relationships define the frontier.
