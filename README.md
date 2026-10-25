@@ -37,6 +37,8 @@ Credential handling, SQLite persistence, cache budgets, checkpoint/retry default
 
 The [fidelity and ReplayGain contract](docs/adr/0002-fidelity-and-gain-contract.md) selects desktop PipeWire playback by default, explicit direct ALSA fidelity output, and Auto ReplayGain with a high-precision per-file gain path. Native output and gain transitions require qualification before they receive a verified label.
 
+[Native Quickshell surface observations](https://github.com/42lizard/qoda-player/issues/14) establish tiled/full and compact-panel behavior through application IPC on the measured single-monitor setup. Physical keyboard dispatch, multi-output behavior, and scale changes require separate acceptance checks.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
