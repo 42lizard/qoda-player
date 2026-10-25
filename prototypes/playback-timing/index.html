@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Qoda · playback timing model</title>
+<style>body{margin:0;background:#101a17;color:#e1eae3;font:16px/1.5 system-ui}main{max-width:1160px;margin:auto;padding:30px}h1{font-size:30px;margin:0}h2{font-size:19px;margin:0 0 12px}p{max-width:900px;color:#b7c7bd}a{color:#c1e49e}.panel{background:#1a2922;border:1px solid #34483b;border-radius:12px;padding:20px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.label{color:#9db4a5;font-size:13px}.value{font-size:21px;margin:4px 0 13px}.badge{color:#e7c990}button{font:inherit;background:#25382c;color:#e6eee5;border:1px solid #506449;border-radius:7px;padding:8px 13px;cursor:pointer;margin:4px}button.selected,button.primary{background:#bfe19f;color:#172117}button:disabled{opacity:.4;cursor:default}.tabs{display:flex;flex-wrap:wrap}ol,ul{padding-left:23px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:18px}pre{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;color:#b9cbbd}small{color:#a8beb0}.log{max-height:260px;overflow:auto}#steps button{display:block;text-align:left;width:100%;margin:7px 0}@media(max-width:750px){.grid,.columns{grid-template-columns:1fr}}</style>
+<main><small>QODA / THROWAWAY LOGIC PROTOTYPE · no audio, accounts or storage</small><h1>When is the next track current?</h1><p>This model separates preparation, the file mpv is decoding, and nominal presentation. It asks how queue edits, Previous history and Plex reports should behave when audio is buffered. The clock is an output-delay estimate, not proof of sound at a speaker. Controls below simulate the proposed contract; native measurements are recorded separately.</p>
+<div class="panel grid"><div><div class="label">Current presentation</div><div id="current" class="value"></div><div class="label">Selected / decoding</div><div id="engine" class="value"></div></div><div><div class="label">Intent · transport</div><div id="transport" class="value"></div><div class="label">Clock confidence</div><div id="confidence" class="badge"></div></div><div><div class="label">Queue membership</div><div id="queue" class="value"></div><div class="label">Confirmed visits · Previous decision</div><div id="history"></div></div></div>
+<div class="panel"><h2>Explore freely</h2><div id="free"></div><small>Each click is a model action. A removal that needs a flush stays pending until the barrier is acknowledged.</small></div>
+<div class="panel"><h2>Guided cases</h2><div id="tabs" class="tabs"></div><p id="description"></p><div id="steps"></div></div>
+<div class="columns"><div class="panel"><h2>Mock reporting sink</h2><p><small>Only confirmed nominal presentation produces reports. No request is sent to Plex; no manual scrobble is generated.</small></p><ol id="reports" class="log"></ol></div><div class="panel"><h2>Changes and rejected events</h2><ol id="log" class="log"></ol></div></div>
+<details class="panel"><summary>Full model state</summary><pre id="raw"></pre></details><p><a href="CONTRACT.md">Adapter contract and limitations</a> · <a href="evidence/summary.json">Measurement summary</a>. This is decision evidence, not production player code.</p></main>
+<script id="model">
+// Portable, pure state module. No DOM, timers, network, native calls or persistence.
+const QodaTiming=(()=>{
+const clone=x=>JSON.parse(JSON.stringify(x));
+const plus=x=>(BigInt(x)+1n).toString();
+function initial(){return {epoch:'1',intentGen:'0',revision:'0',clockSeq:'0',wall:0,intent:'paused',transport:'idle',quality:'unavailable',outputFailure:false,queue:['A','B','C'],durations:{A:1500,B:800,C:300},gain:{A:'A:track:-6',B:'B:track:-12',C:'C:off'},prepared:{},visits:{},ledger:[],engine:null,selected:'A',current:null,lastConfirmed:null,history:[],reports:[],log:[],pendingEdit:null,seekPending:false,lastSample:null,unconfirmed:[],listeningMs:0};}
+function reduce(input,action){let s=clone(input),a=clone(action);s.wall=a.at??s.wall+100;const note=t=>s.log.push(t),report=(kind,v=s.current)=>{if(v)s.reports.push({kind,visit:v.visit,occurrence:v.occ,positionMs:Math.round(v.pos),quality:'nominal'});};
+const unknown=reason=>{s.quality='unknown';s.transport=s.intent==='playing'?'transitioning':'paused';note(reason);};
+const archive=()=>{if(s.current&&!s.history.includes(s.current.visit))s.history.push(s.current.visit);};
+switch(a.type){
+case 'fixture':if(a.durations)s.durations=clone(a.durations);if(a.queue)s.queue=clone(a.queue);break;
+case 'play':s.intent='playing';s.intentGen=plus(s.intentGen);s.transport='preparing';note('Play requested; preparation is not listening.');break;
+case 'pause':s.intent='paused';s.intentGen=plus(s.intentGen);s.transport='pausing';note('Pause requested; stale preparation may not resume.');break;
+case 'pause-ack':s.transport='paused';report('paused');break;
+case 'prepare':{
+ if((a.gen??s.intentGen)!==s.intentGen||!s.queue.includes(a.occ)||(a.gain??s.gain[a.occ])!==s.gain[a.occ]){note('Ignored stale preparation / mismatched gain.');break;}
+ s.prepared[a.occ]={gain:s.gain[a.occ],gen:s.intentGen};note('Prepared '+a.occ+' with its immutable gain binding.');break;}
+case 'decode':{
+ if(!s.queue.includes(a.occ)||!s.prepared[a.occ]){note('Decoder selection has no valid preparation.');break;}
+ const visit=a.visit??a.occ+'1';s.visits[visit]??={occ:a.occ,gain:s.gain[a.occ]};if(!s.ledger.some(v=>v.visit===visit))s.ledger.push({visit,occ:a.occ,duration:s.durations[a.occ],exact:a.exact!==false,gain:s.gain[a.occ],origin:a.origin??0,eof:false});
+ s.engine=visit;s.selected=a.occ;s.transport=s.intent==='playing'?'buffering':'paused';note('mpv selected '+visit+'; current presentation is unchanged.');break;}
+case 'eof':{const v=s.ledger.find(v=>v.visit===(a.visit??s.engine));if(v)v.eof=true;note('Decoder EOF is not an output drain.');break;}
+case 'clock':{
+ if(s.outputFailure){note('Failed output needs a new render epoch.');break;}
+ if((a.epoch??s.epoch)!==s.epoch){note('Ignored old output epoch.');break;}
+ const seq=a.seq??plus(s.clockSeq);
+ if(BigInt(seq)<=BigInt(s.clockSeq)){note('Ignored duplicate / reordered clock sample.');break;}
+ if(BigInt(seq)!==BigInt(s.clockSeq)+1n){s.clockSeq=seq;unknown('Clock sequence gap: await owner snapshot.');s.needsSync=true;break;}
+ s.clockSeq=seq;if(s.needsSync){note('Waiting for authoritative snapshot.');break;}
+ let i=s.ledger.findIndex(v=>v.visit===(a.visit??s.engine));
+ if(i<0||a.pts==null||a.coherent===false||a.stale||a.cachePause||a.seeking){unknown('Presentation clock unavailable, stale or inconsistent.');s.lastSample=null;break;}
+ if(a.gain&&a.gain!==s.ledger[i].gain){note('Ignored mismatched per-file gain binding.');break;}
+ let pos=a.pts-s.ledger[i].origin;
+ while(pos<0&&i>0){i--;if(!s.ledger[i].exact){i=-1;break;}pos+=s.ledger[i].duration-s.ledger[i].origin;}
+ if(i<0||pos<0){unknown('Negative clock cannot be mapped without exact predecessor spans.');s.lastSample=null;break;}
+ const v=s.ledger[i];pos+=v.origin;
+ if(v.exact&&pos>v.duration){unknown('Clock is outside its validated media span.');break;}
+ if(a.paused&&(s.current?.visit!==v.visit)){unknown('Paused preparation is not a new listening visit.');break;}
+ if(pos<=0&&!s.current){s.quality='waiting-for-progress';break;}
+ const changed=s.current?.visit!==v.visit;
+ if(changed){
+  if(s.current){report(s.ledger.find(x=>x.visit===s.current.visit)?.eof?'nominal-complete':'stopped');archive();}
+  const previous=s.ledger.slice(0,i).filter(x=>!s.history.includes(x.visit));s.unconfirmed=[...new Set(s.unconfirmed.concat(previous.map(x=>x.visit)))];
+  s.current={visit:v.visit,occ:v.occ,pos};report('nominal-start');
+ }else s.current.pos=pos;
+ const previous=s.lastSample;
+ if(previous&&previous.visit===v.visit&&previous.epoch===s.epoch&&!a.paused){const elapsed=s.wall-previous.wall,delta=pos-previous.pos;if(elapsed>=0&&elapsed<=100&&delta>=0&&delta<=elapsed+20)s.listeningMs+=Math.min(elapsed,delta);}
+ s.lastSample={visit:v.visit,pos,wall:s.wall,epoch:s.epoch};s.lastConfirmed=clone(s.current);s.quality='nominal';s.transport=s.pendingEdit?'editing':a.paused?'paused':s.intent==='playing'?'playing':'pausing';
+ if(s.seekPending){report('seek-confirmed');s.seekPending=false;}else if(!changed&&!a.paused)report('playing-position');
+ note('Nominal cursor: '+v.visit+' at '+Math.round(pos)+' ms.');break;}
+case 'sync':s.needsSync=false;s.clockSeq=a.seq??s.clockSeq;s.lastSample=null;note('Fresh owner snapshot; wait for a coherent clock witness.');break;
+case 'remove':{
+ if(!s.queue.includes(a.occ)){note('Already removed.');break;}
+ if(a.untouched&&!s.ledger.some(v=>v.occ===a.occ)){
+  s.queue=s.queue.filter(x=>x!==a.occ);delete s.prepared[a.occ];s.revision=plus(s.revision);note('Removed untouched future '+a.occ+' after native acknowledgement.');break;
+ }
+ s.pendingEdit={occ:a.occ};s.transport='editing';note('Removal pending: freeze, sample, flush and rebuild before acknowledging.');break;}
+case 'flush-ack':{
+ if(!s.pendingEdit){note('No pending edit.');break;}
+ const removed=s.pendingEdit.occ,uncertain=s.quality!=='nominal'||(removed!==s.current?.occ&&a.retractable!==true),next=s.queue.slice(s.queue.indexOf(removed)+1).find(x=>x!==removed)??null;s.epoch=plus(s.epoch);s.clockSeq='0';s.revision=plus(s.revision);s.intentGen=plus(s.intentGen);
+ s.queue=s.queue.filter(x=>x!==removed);delete s.prepared[removed];
+ if(s.current?.occ===removed){report('stopped');archive();s.current=null;s.selected=next;note('Removed confirmed current; advance and preserve intent.');}
+ else if(s.current){s.selected=s.current.occ;note('Removed buffered future; recover current at the sampled / last confirmed position.');}
+ else{s.selected=s.queue[0]??null;}
+ if(uncertain){s.intent='paused';note('Earlier presentation is uncertain; removed future output, paused for review.');}
+ s.ledger=[];s.engine=null;s.outputFailure=false;s.pendingEdit=null;s.lastSample=null;s.needsSync=false;s.quality='waiting-for-new-epoch';s.transport=s.intent==='playing'?'preparing':'paused';break;}
+case 'seek':s.outputFailure=false;s.epoch=plus(s.epoch);s.intentGen=plus(s.intentGen);s.clockSeq='0';s.ledger=[];s.engine=null;s.lastSample=null;s.quality='waiting-for-new-epoch';s.transport='seeking';s.seekPending=true;note('Seek discards old accepted buffers; visit identity and history stay unchanged.');break;
+case 'drain':{
+ if(a.healthy===false||s.outputFailure){s.outputFailure=true;unknown('Drain/output failure: no completion report.');s.intent='paused';break;}
+ if(s.current&&!s.needsSync&&s.ledger.at(-1)?.visit===s.current.visit&&s.ledger.find(v=>v.visit===s.current.visit)?.eof){report('nominal-complete');archive();}
+ else {if(s.current){report('stopped');archive();}note('No confirmed per-visit completion; reporting is incomplete.');}
+ s.unconfirmed=[...new Set(s.unconfirmed.concat(s.ledger.filter(v=>!s.history.includes(v.visit)).map(v=>v.visit)))];
+ s.current=null;s.intent='stopped';s.transport='ended';s.quality=s.unconfirmed.length?'drained-with-unconfirmed-visits':'nominal-drain';note('Nominal end of queue; no implicit autoplay.');break;}
+case 'stop':report('stopped');s.epoch=plus(s.epoch);s.intentGen=plus(s.intentGen);s.current=null;s.engine=null;s.ledger=[];s.transport='stopped';s.intent='stopped';s.clockSeq='0';s.lastSample=null;s.quality='unavailable';s.queue=[];s.history=[];note('Stop discards pending output; never report natural completion.');break;
+case 'stall':s.outputFailure=true;unknown('Clock stopped advancing: pause/error, retain recovery state.');s.intent='paused';s.intentGen=plus(s.intentGen);s.lastSample=null;break;
+}
+return s;}
+const step=(label,...actions)=>({label,actions});
+const begin=[{type:'play'},{type:'prepare',occ:'A'},{type:'prepare',occ:'B'},{type:'prepare',occ:'C'},{type:'decode',occ:'A'}];
+function previous(s){
+ if(s.quality!=='nominal')return 'Pause/recover: position or boundary is unconfirmed';
+ if(s.current?.pos>3000)return 'Restart '+s.current.occ+' at zero';
+ const eligible=s.history.filter(v=>s.queue.includes(s.visits[v]?.occ));
+ return eligible.length?'Previous eligible '+eligible.at(-1):'Restart '+(s.current?.occ??s.selected??'none');
+}
+const cases=[
+{name:'Long transition',description:'A is confirmed. B is decoded early, but its negative nominal clock still belongs to A. Only B’s positive position commits B.',steps:[step('Start A',...begin,{type:'clock',pts:100}),step('Decode B; A still has a tail',{type:'eof',visit:'A1'},{type:'decode',occ:'B'},{type:'clock',pts:-150}),step('B reaches nominal presentation',{type:'clock',pts:30})]},
+{name:'Short exact spans',description:'Exact predecessor lengths can map a negative clock across multiple short files. A provider duration hint must not be treated as exact.',steps:[step('Decode A, B and C',{type:'fixture',durations:{A:250,B:300,C:200}},...begin,{type:'eof',visit:'A1'},{type:'decode',occ:'B'},{type:'eof',visit:'B1'},{type:'decode',occ:'C'}),step('Clock points back into A',{type:'clock',pts:-350}),step('Clock points into B',{type:'clock',pts:-100}),step('C begins nominally',{type:'clock',pts:20})]},
+{name:'Unknown length',description:'If the predecessor length is only estimated, the model refuses to invent a current entry or send its reports.',steps:[step('Prepare an unqualified duration',{type:'play'},{type:'prepare',occ:'A'},{type:'prepare',occ:'B'},{type:'decode',occ:'A',exact:false},{type:'decode',occ:'B'}),step('Negative B clock cannot identify A',{type:'clock',pts:-100}),step('Positive B clock reacquires presentation',{type:'clock',pts:25})]},
+{name:'No clock for tiny files',description:'The measured public property can be unavailable for an entire short chain. Keep reporting/history explicitly incomplete; decoding and accepted bytes do not prove individual listening.',steps:[step('Decode the entire chain',{type:'fixture',durations:{A:25,B:30,C:20}},...begin,{type:'eof',visit:'A1'},{type:'decode',occ:'B'},{type:'eof',visit:'B1'},{type:'decode',occ:'C'},{type:'eof',visit:'C1'}),step('No reliable clock',{type:'clock',pts:null}),step('Only whole-chain nominal drain is known',{type:'drain'})]},
+{name:'Early removal',description:'An untouched future occurrence can be removed without restarting the current entry, after native acknowledgement.',steps:[step('Confirm A',...begin,{type:'clock',pts:100}),step('Remove untouched B',{type:'remove',occ:'B',untouched:true}),step('A continues',{type:'clock',pts:200})]},
+{name:'Buffered B removal',description:'B is already decoded/accepted but still future at the declared nominal boundary. Wait for the flush barrier, remove B and recover A. A short gap/replay is preferred to removed future audio.',steps:[step('A is current; B is buffered',...begin,{type:'clock',pts:1200},{type:'eof',visit:'A1'},{type:'decode',occ:'B'},{type:'clock',pts:-60}),step('Request B removal',{type:'remove',occ:'B'}),step('Freeze/flush/rebuild acknowledged',{type:'flush-ack',retractable:true}),step('New attempt, same A visit and gain',{type:'prepare',occ:'A'},{type:'decode',occ:'A',visit:'A1',origin:1440},{type:'clock',pts:1450}),step('Reject old B output',{type:'clock',visit:'B1',epoch:'1',pts:10})]},
+{name:'Late B removal',description:'If the barrier finds B already nominally current, apply current-removal rules. Keep the real transition in history.',steps:[step('Confirm B',...begin,{type:'clock',pts:1400},{type:'eof',visit:'A1'},{type:'decode',occ:'B'},{type:'clock',pts:40}),step('Remove current B',{type:'remove',occ:'B'},{type:'flush-ack',retractable:true}),step('Select C without inventing prior playback',{type:'prepare',occ:'C'},{type:'decode',occ:'C'},{type:'clock',pts:25})]},
+{name:'Unqualified downstream reset',description:'A nominal clock does not certify retractability beyond the app. Without a qualified flush boundary, remove future membership but keep earlier presentation uncertain and pause; do not promise that B was never played.',steps:[step('B is buffered behind confirmed A',...begin,{type:'clock',pts:1200},{type:'eof',visit:'A1'},{type:'decode',occ:'B'},{type:'clock',pts:-60}),step('Request removal',{type:'remove',occ:'B'}),step('Reset acknowledged without downstream proof',{type:'flush-ack',retractable:false})]},
+{name:'Uncertain edit',description:'An ambiguous boundary cannot be labelled “never played.” Flush all affected future output, retain uncertainty and pause for review.',steps:[step('Lose presentation certainty',...begin,{type:'clock',pts:1200},{type:'decode',occ:'B'},{type:'clock',pts:null}),step('Remove B with explicit uncertainty',{type:'remove',occ:'B'},{type:'flush-ack',retractable:true})]},
+{name:'Seek discards buffers',description:'Seek creates a new output epoch, not a new visit. Old output is rejected. The position jump is not counted as time listened.',steps:[step('Confirm A',...begin,{type:'clock',pts:100},{type:'clock',pts:200}),step('Seek to a later position',{type:'seek'}),step('Old buffered output arrives late',{type:'clock',epoch:'1',pts:250}),step('New seek result confirms actual position',{type:'prepare',occ:'A'},{type:'decode',occ:'A',visit:'A1',origin:1000},{type:'clock',pts:1010})]},
+{name:'Pause during preparation',description:'Pause invalidates resume authority. A delayed preparation cannot start audio. Already-rendered clock evidence is separate from resume intent.',steps:[step('Confirm A',...begin,{type:'clock',pts:100}),step('Pause acknowledged',{type:'pause'},{type:'pause-ack'}),step('Old preparation returns',{type:'prepare',occ:'B',gen:'1'}),step('Paused clock does not add listening',{type:'clock',pts:100,paused:true})]},
+{name:'Repeat is a new visit',description:'Repeat uses the same queue occurrence but a new visit and mpv entry identity. Seek/rebuild stays in the same visit. This prevents duplicate or stale reporting.',steps:[step('A visit one',...begin,{type:'clock',pts:1400},{type:'eof',visit:'A1'}),step('Prepare repeat visit',{type:'decode',occ:'A',visit:'A2'},{type:'clock',pts:-80}),step('Visit two begins',{type:'clock',pts:25})]},
+{name:'Previous uses presentation',description:'Previous uses A’s nominal position, not B’s reset decoder position. The existing three-second rule and removed-entry eligibility still belong to Session.',steps:[step('A is near its end',{type:'fixture',durations:{A:6000,B:800,C:300}},...begin,{type:'clock',pts:5800}),step('Decoder B still points back into A',{type:'eof',visit:'A1'},{type:'decode',occ:'B'},{type:'clock',pts:-100})]},
+{name:'Natural drain',description:'EOF alone does not stop current presentation. Only a healthy nominal drain completes a confirmed visit. Stop/error does not manufacture completion.',steps:[step('Current C',{type:'fixture',queue:['C']},{type:'play'},{type:'prepare',occ:'C'},{type:'decode',occ:'C'},{type:'clock',pts:50}),step('Decoder reaches EOF; public clock vanishes',{type:'eof',visit:'C1'},{type:'clock',pts:null}),step('Output nominal drain',{type:'drain'})]},
+{name:'Delayed events / gain',description:'Reject an old epoch or a gain binding for another prepared visit. A sequence gap requests a fresh owner snapshot.',steps:[step('Confirm A',...begin,{type:'clock',pts:100}),step('Wrong gain and duplicate sample',{type:'clock',pts:150,gain:'B:track:-12'},{type:'clock',pts:200,seq:'1'}),step('Detect delivery gap',{type:'clock',pts:300,seq:'9'}),step('Resynchronize and reacquire',{type:'sync',seq:'9'},{type:'clock',pts:320,seq:'10'})]},
+{name:'Stalled output',description:'The native series retained a start-stall attempt. A static clock must not be advanced by wall time, and accepted frames are not proof of presentation.',steps:[step('Prepare output',...begin,{type:'clock',pts:10}),step('Clock becomes stale',{type:'clock',pts:10,stale:true}),step('Bounded recovery pauses with an error',{type:'stall'})]}
+];return {initial,reduce,cases,previous};})();
+if(typeof module!=='undefined')module.exports=QodaTiming;
+</script>
+<script>
+let state=QodaTiming.initial(),selectedCase=0,nextStep=0;
+const $=id=>document.getElementById(id),escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function act(actions){for(const action of actions)state=QodaTiming.reduce(state,action);render();}
+function select(index){selectedCase=index;nextStep=0;state=QodaTiming.initial();render();}
+function render(){
+ $('current').textContent=state.quality!=='nominal'?'Unconfirmed · last known '+(state.lastConfirmed?.visit??'none'):state.current?state.current.visit+' · '+Math.round(state.current.pos)+' ms':'None confirmed';
+ $('engine').textContent=(state.selected??'none')+' / '+(state.engine??'none');$('transport').textContent=state.intent+' · '+state.transport;$('confidence').textContent=state.quality+' · output epoch '+state.epoch+' · '+Math.round(state.listeningMs)+' ms credited nominal progress';
+ $('queue').textContent=state.queue.join(' → ')||'Empty';$('history').textContent=(state.history.join(' → ')||'None')+(state.unconfirmed.length?' · unconfirmed: '+state.unconfirmed.join(', '):'')+' · '+QodaTiming.previous(state);
+ $('tabs').innerHTML=QodaTiming.cases.map((c,i)=>`<button class="${i===selectedCase?'selected':''}" onclick="select(${i})">${escape(c.name)}</button>`).join('');
+ const c=QodaTiming.cases[selectedCase];$('description').textContent=c.description;
+ $('steps').innerHTML=c.steps.map((s,i)=>`<button ${i!==nextStep?'disabled':''} class="${i===nextStep?'primary':''}" onclick="runStep(${i})">${i+1}. ${escape(s.label)} ${i<nextStep?'✓':''}</button>`).join('')+`<button onclick="select(${selectedCase})">Restart case</button>`;
+ $('reports').innerHTML=state.reports.map(r=>`<li>${escape(r.kind)} · ${escape(r.visit)} · ${r.positionMs} ms · nominal</li>`).join('')||'<li>No reports</li>';
+ $('log').innerHTML=state.log.map(t=>`<li>${escape(t)}</li>`).join('');$('raw').textContent=JSON.stringify(state,null,2);
+}
+function runStep(i){if(i!==nextStep)return;act(QodaTiming.cases[selectedCase].steps[i].actions);nextStep++;render();}
+const free=[['Play',{type:'play'}],['Prepare A',{type:'prepare',occ:'A'}],['Prepare B',{type:'prepare',occ:'B'}],['Decode A',{type:'decode',occ:'A'}],['Decode B',{type:'decode',occ:'B'}],['A clock +100 ms',{type:'clock',visit:'A1',pts:100}],['B clock −100 ms',{type:'clock',visit:'B1',pts:-100}],['B clock +40 ms',{type:'clock',visit:'B1',pts:40}],['Pause',{type:'pause'}],['Pause acknowledged',{type:'pause-ack'}],['Remove B',{type:'remove',occ:'B'}],['Qualified flush acknowledged',{type:'flush-ack',retractable:true}],['Clock unavailable',{type:'clock',pts:null}],['Seek',{type:'seek'}],['Decoder EOF',{type:'eof'}],['Nominal drain',{type:'drain'}],['Stop and clear',{type:'stop'}]];
+$('free').innerHTML=free.map((f,i)=>`<button onclick="act([free[${i}][1]])">${escape(f[0])}</button>`).join('')+'<button onclick="state=QodaTiming.initial();render()">Reset</button>';render();
+</script></html>

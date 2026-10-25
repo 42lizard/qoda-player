@@ -1,0 +1,6 @@
+mpv 1:0.41.0-6
+libpipewire 1:1.6.9-1
+pipewire 1:1.6.9-1
+alsa-lib 1.2.16.1-1
+rust 1:1.99.1-1
+python 3.14.8-1

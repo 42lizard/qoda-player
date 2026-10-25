@@ -1,0 +1,8 @@
+# Retained limits and unsuccessful attempts
+
+- Initial ALSA runs were busy after PipeWire. Those cases have no native PCM/clock qualification. Later ordering/preflight waited for normal release; no service, mixer or routing default was changed.
+- One later native short-start attempt accepted 4,800 frames and stalled with a static negative clock until the bounded six-second measurement deadline. It is not a healthy playback/continuity result. The model makes absent/stale progress explicit and chooses bounded pause/recovery.
+- The first early-edit observer expected three natural ends after removing one of three files. Both remaining files ended normally, but the observer waited to its deadline. Corrected early runs have two ends and no timeout; original traces are retained.
+- One previous-tail reconstruction starts at frame 62,207 rather than the rounded request 62,208. The requested-offset comparison is false. Its complete post-drop PCM exactly matches source A from the observed offset followed by source C. This is a recovery quantization observation, not generic sample-exact seeking.
+- Two isolated Brave headless render attempts timed out and were stopped. No screenshot/visual review pass is claimed. The model and UI scripts were evaluated, the exact guided steps replayed, and the self-contained file was opened in the existing Brave session for review. No preview server was started.
+- The public JSON companions sample clocks/delay snapshots; gzip companions preserve the complete captures used by the summary. Summary comparisons are synthetic waveform/clock evidence, not a production Rust adapter or live Plex reporting.

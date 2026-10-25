@@ -1,0 +1,5861 @@
+[
+  {
+    "name": "Long transition",
+    "description": "A is confirmed. B is decoded early, but its negative nominal clock still belongs to A. Only B’s positive position commits B.",
+    "steps": [
+      {
+        "label": "Start A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 600,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Decode B; A still has a tail",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 900,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1350
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1350
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1350,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1350 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1350,
+            "wall": 900,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "B reaches nominal presentation",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "3",
+          "wall": 1000,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 30
+          },
+          "lastConfirmed": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 30
+          },
+          "history": [
+            "A1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1350,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1350,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 30,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1350 ms.",
+            "Nominal cursor: B1 at 30 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "B1",
+            "pos": 30,
+            "wall": 1000,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Short exact spans",
+    "description": "Exact predecessor lengths can map a negative clock across multiple short files. A provider duration hint must not be treated as exact.",
+    "steps": [
+      {
+        "label": "Decode A, B and C",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "0",
+          "wall": 1000,
+          "intent": "playing",
+          "transport": "buffering",
+          "quality": "unavailable",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 250,
+            "B": 300,
+            "C": 200
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 250,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 300,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 200,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": null,
+          "lastConfirmed": null,
+          "history": [],
+          "reports": [],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected C1; current presentation is unchanged."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Clock points back into A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 1100,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 250,
+            "B": 300,
+            "C": 200
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 250,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 300,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 200,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 200 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 200,
+            "wall": 1100,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Clock points into B",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 1200,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 250,
+            "B": 300,
+            "C": 200
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 250,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 300,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 200,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 200
+          },
+          "lastConfirmed": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 200
+          },
+          "history": [
+            "A1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 200 ms.",
+            "Nominal cursor: B1 at 200 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "B1",
+            "pos": 200,
+            "wall": 1200,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "C begins nominally",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "3",
+          "wall": 1300,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 250,
+            "B": 300,
+            "C": 200
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 250,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 300,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 200,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 20
+          },
+          "lastConfirmed": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 20
+          },
+          "history": [
+            "A1",
+            "B1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "C1",
+              "occurrence": "C",
+              "positionMs": 20,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 200 ms.",
+            "Nominal cursor: B1 at 200 ms.",
+            "Nominal cursor: C1 at 20 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "C1",
+            "pos": 20,
+            "wall": 1300,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Unknown length",
+    "description": "If the predecessor length is only estimated, the model refuses to invent a current entry or send its reports.",
+    "steps": [
+      {
+        "label": "Prepare an unqualified duration",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "0",
+          "wall": 500,
+          "intent": "playing",
+          "transport": "buffering",
+          "quality": "unavailable",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": false,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": null,
+          "lastConfirmed": null,
+          "history": [],
+          "reports": [],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "mpv selected B1; current presentation is unchanged."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Negative B clock cannot identify A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 600,
+          "intent": "playing",
+          "transport": "transitioning",
+          "quality": "unknown",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": false,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": null,
+          "lastConfirmed": null,
+          "history": [],
+          "reports": [],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Negative clock cannot be mapped without exact predecessor spans."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Positive B clock reacquires presentation",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 700,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": false,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 25
+          },
+          "lastConfirmed": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 25
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 25,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Negative clock cannot be mapped without exact predecessor spans.",
+            "Nominal cursor: B1 at 25 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "B1",
+            "pos": 25,
+            "wall": 700,
+            "epoch": "1"
+          },
+          "unconfirmed": [
+            "A1"
+          ],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "No clock for tiny files",
+    "description": "The measured public property can be unavailable for an entire short chain. Keep reporting/history explicitly incomplete; decoding and accepted bytes do not prove individual listening.",
+    "steps": [
+      {
+        "label": "Decode the entire chain",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "0",
+          "wall": 1100,
+          "intent": "playing",
+          "transport": "buffering",
+          "quality": "unavailable",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 25,
+            "B": 30,
+            "C": 20
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 25,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 30,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 20,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": true
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": null,
+          "lastConfirmed": null,
+          "history": [],
+          "reports": [],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "No reliable clock",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 1200,
+          "intent": "playing",
+          "transport": "transitioning",
+          "quality": "unknown",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 25,
+            "B": 30,
+            "C": 20
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 25,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 30,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 20,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": true
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": null,
+          "lastConfirmed": null,
+          "history": [],
+          "reports": [],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "Presentation clock unavailable, stale or inconsistent."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Only whole-chain nominal drain is known",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 1300,
+          "intent": "stopped",
+          "transport": "ended",
+          "quality": "drained-with-unconfirmed-visits",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 25,
+            "B": 30,
+            "C": 20
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 25,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 30,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 20,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": true
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": null,
+          "lastConfirmed": null,
+          "history": [],
+          "reports": [],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Decoder EOF is not an output drain.",
+            "Presentation clock unavailable, stale or inconsistent.",
+            "No confirmed per-visit completion; reporting is incomplete.",
+            "Nominal end of queue; no implicit autoplay."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [
+            "A1",
+            "B1",
+            "C1"
+          ],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Early removal",
+    "description": "An untouched future occurrence can be removed without restarting the current entry, after native acknowledgement.",
+    "steps": [
+      {
+        "label": "Confirm A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 600,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Remove untouched B",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "1",
+          "clockSeq": "1",
+          "wall": 700,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Removed untouched future B after native acknowledgement."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "A continues",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "1",
+          "clockSeq": "2",
+          "wall": 800,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Removed untouched future B after native acknowledgement.",
+            "Nominal cursor: A1 at 200 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 200,
+            "wall": 800,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Buffered B removal",
+    "description": "B is already decoded/accepted but still future at the declared nominal boundary. Wait for the flush barrier, remove B and recover A. A short gap/replay is preferred to removed future audio.",
+    "steps": [
+      {
+        "label": "A is current; B is buffered",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 900,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1440,
+            "wall": 900,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Request B removal",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 1000,
+          "intent": "playing",
+          "transport": "editing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging."
+          ],
+          "pendingEdit": {
+            "occ": "B"
+          },
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1440,
+            "wall": 900,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Freeze/flush/rebuild acknowledged",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "1",
+          "clockSeq": "0",
+          "wall": 1100,
+          "intent": "playing",
+          "transport": "preparing",
+          "quality": "waiting-for-new-epoch",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [],
+          "engine": null,
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging.",
+            "Removed buffered future; recover current at the sampled / last confirmed position."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      },
+      {
+        "label": "New attempt, same A visit and gain",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "1",
+          "clockSeq": "1",
+          "wall": 1400,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "2"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 1440,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1450
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1450
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1450,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging.",
+            "Removed buffered future; recover current at the sampled / last confirmed position.",
+            "Prepared A with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1450 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1450,
+            "wall": 1400,
+            "epoch": "2"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      },
+      {
+        "label": "Reject old B output",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "1",
+          "clockSeq": "1",
+          "wall": 1500,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "2"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 1440,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1450
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1450
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1450,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging.",
+            "Removed buffered future; recover current at the sampled / last confirmed position.",
+            "Prepared A with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1450 ms.",
+            "Ignored old output epoch."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1450,
+            "wall": 1400,
+            "epoch": "2"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "Late B removal",
+    "description": "If the barrier finds B already nominally current, apply current-removal rules. Keep the real transition in history.",
+    "steps": [
+      {
+        "label": "Confirm B",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 900,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 40
+          },
+          "lastConfirmed": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 40
+          },
+          "history": [
+            "A1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 40,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1400 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: B1 at 40 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "B1",
+            "pos": 40,
+            "wall": 900,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Remove current B",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "1",
+          "clockSeq": "0",
+          "wall": 1100,
+          "intent": "playing",
+          "transport": "preparing",
+          "quality": "waiting-for-new-epoch",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [],
+          "engine": null,
+          "selected": "C",
+          "current": null,
+          "lastConfirmed": {
+            "visit": "B1",
+            "occ": "B",
+            "pos": 40
+          },
+          "history": [
+            "A1",
+            "B1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 40,
+              "quality": "nominal"
+            },
+            {
+              "kind": "stopped",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 40,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1400 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: B1 at 40 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging.",
+            "Removed confirmed current; advance and preserve intent."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      },
+      {
+        "label": "Select C without inventing prior playback",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "1",
+          "clockSeq": "1",
+          "wall": 1400,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "2"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            },
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 300,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 25
+          },
+          "lastConfirmed": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 25
+          },
+          "history": [
+            "A1",
+            "B1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 40,
+              "quality": "nominal"
+            },
+            {
+              "kind": "stopped",
+              "visit": "B1",
+              "occurrence": "B",
+              "positionMs": 40,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "C1",
+              "occurrence": "C",
+              "positionMs": 25,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1400 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: B1 at 40 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging.",
+            "Removed confirmed current; advance and preserve intent.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Nominal cursor: C1 at 25 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "C1",
+            "pos": 25,
+            "wall": 1400,
+            "epoch": "2"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "Unqualified downstream reset",
+    "description": "A nominal clock does not certify retractability beyond the app. Without a qualified flush boundary, remove future membership but keep earlier presentation uncertain and pause; do not promise that B was never played.",
+    "steps": [
+      {
+        "label": "B is buffered behind confirmed A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 900,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1440,
+            "wall": 900,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Request removal",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 1000,
+          "intent": "playing",
+          "transport": "editing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging."
+          ],
+          "pendingEdit": {
+            "occ": "B"
+          },
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1440,
+            "wall": 900,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Reset acknowledged without downstream proof",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "1",
+          "clockSeq": "0",
+          "wall": 1100,
+          "intent": "paused",
+          "transport": "paused",
+          "quality": "waiting-for-new-epoch",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [],
+          "engine": null,
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1440
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1440,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1440 ms.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging.",
+            "Removed buffered future; recover current at the sampled / last confirmed position.",
+            "Earlier presentation is uncertain; removed future output, paused for review."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "Uncertain edit",
+    "description": "An ambiguous boundary cannot be labelled “never played.” Flush all affected future output, retain uncertainty and pause for review.",
+    "steps": [
+      {
+        "label": "Lose presentation certainty",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 800,
+          "intent": "playing",
+          "transport": "transitioning",
+          "quality": "unknown",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1200
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1200
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Presentation clock unavailable, stale or inconsistent."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Remove B with explicit uncertainty",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "1",
+          "clockSeq": "0",
+          "wall": 1000,
+          "intent": "paused",
+          "transport": "paused",
+          "quality": "waiting-for-new-epoch",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [],
+          "engine": null,
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1200
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1200
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1200 ms.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Presentation clock unavailable, stale or inconsistent.",
+            "Removal pending: freeze, sample, flush and rebuild before acknowledging.",
+            "Removed buffered future; recover current at the sampled / last confirmed position.",
+            "Earlier presentation is uncertain; removed future output, paused for review."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "Seek discards buffers",
+    "description": "Seek creates a new output epoch, not a new visit. Old output is rejected. The position jump is not counted as time listened.",
+    "steps": [
+      {
+        "label": "Confirm A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 700,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Nominal cursor: A1 at 200 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 200,
+            "wall": 700,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 100
+        }
+      },
+      {
+        "label": "Seek to a later position",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "0",
+          "clockSeq": "0",
+          "wall": 800,
+          "intent": "playing",
+          "transport": "seeking",
+          "quality": "waiting-for-new-epoch",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [],
+          "engine": null,
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Nominal cursor: A1 at 200 ms.",
+            "Seek discards old accepted buffers; visit identity and history stay unchanged."
+          ],
+          "pendingEdit": null,
+          "seekPending": true,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 100
+        }
+      },
+      {
+        "label": "Old buffered output arrives late",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "0",
+          "clockSeq": "0",
+          "wall": 900,
+          "intent": "playing",
+          "transport": "seeking",
+          "quality": "waiting-for-new-epoch",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [],
+          "engine": null,
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 200
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Nominal cursor: A1 at 200 ms.",
+            "Seek discards old accepted buffers; visit identity and history stay unchanged.",
+            "Ignored old output epoch."
+          ],
+          "pendingEdit": null,
+          "seekPending": true,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 100
+        }
+      },
+      {
+        "label": "New seek result confirms actual position",
+        "state": {
+          "epoch": "2",
+          "intentGen": "2",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 1200,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "2"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 1000,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1010
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1010
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 200,
+              "quality": "nominal"
+            },
+            {
+              "kind": "seek-confirmed",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1010,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Nominal cursor: A1 at 200 ms.",
+            "Seek discards old accepted buffers; visit identity and history stay unchanged.",
+            "Ignored old output epoch.",
+            "Prepared A with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1010 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1010,
+            "wall": 1200,
+            "epoch": "2"
+          },
+          "unconfirmed": [],
+          "listeningMs": 100
+        }
+      }
+    ]
+  },
+  {
+    "name": "Pause during preparation",
+    "description": "Pause invalidates resume authority. A delayed preparation cannot start audio. Already-rendered clock evidence is separate from resume intent.",
+    "steps": [
+      {
+        "label": "Confirm A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 600,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Pause acknowledged",
+        "state": {
+          "epoch": "1",
+          "intentGen": "2",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 800,
+          "intent": "paused",
+          "transport": "paused",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "paused",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Pause requested; stale preparation may not resume."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Old preparation returns",
+        "state": {
+          "epoch": "1",
+          "intentGen": "2",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 900,
+          "intent": "paused",
+          "transport": "paused",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "paused",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Pause requested; stale preparation may not resume.",
+            "Ignored stale preparation / mismatched gain."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Paused clock does not add listening",
+        "state": {
+          "epoch": "1",
+          "intentGen": "2",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 1000,
+          "intent": "paused",
+          "transport": "paused",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "paused",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Pause requested; stale preparation may not resume.",
+            "Ignored stale preparation / mismatched gain.",
+            "Nominal cursor: A1 at 100 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 1000,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Repeat is a new visit",
+    "description": "Repeat uses the same queue occurrence but a new visit and mpv entry identity. Seek/rebuild stays in the same visit. This prevents duplicate or stale reporting.",
+    "steps": [
+      {
+        "label": "A visit one",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 700,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1400
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1400
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1400 ms.",
+            "Decoder EOF is not an output drain."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1400,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Prepare repeat visit",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 900,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "A2": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "A2",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A2",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1420
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 1420
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1420,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1400 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected A2; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1420 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 1420,
+            "wall": 900,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Visit two begins",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "3",
+          "wall": 1000,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "A2": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "A2",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A2",
+          "selected": "A",
+          "current": {
+            "visit": "A2",
+            "occ": "A",
+            "pos": 25
+          },
+          "lastConfirmed": {
+            "visit": "A2",
+            "occ": "A",
+            "pos": 25
+          },
+          "history": [
+            "A1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1400,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1420,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 1420,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-start",
+              "visit": "A2",
+              "occurrence": "A",
+              "positionMs": 25,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1400 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected A2; current presentation is unchanged.",
+            "Nominal cursor: A1 at 1420 ms.",
+            "Nominal cursor: A2 at 25 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A2",
+            "pos": 25,
+            "wall": 1000,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Previous uses presentation",
+    "description": "Previous uses A’s nominal position, not B’s reset decoder position. The existing three-second rule and removed-entry eligibility still belong to Session.",
+    "steps": [
+      {
+        "label": "A is near its end",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 700,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 6000,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 6000,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 5800
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 5800
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 5800,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 5800 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 5800,
+            "wall": 700,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Decoder B still points back into A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 1000,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 6000,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            },
+            "B1": {
+              "occ": "B",
+              "gain": "B:track:-12"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 6000,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": true
+            },
+            {
+              "visit": "B1",
+              "occ": "B",
+              "duration": 800,
+              "exact": true,
+              "gain": "B:track:-12",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "B1",
+          "selected": "B",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 5900
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 5900
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 5800,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 5900,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 5800 ms.",
+            "Decoder EOF is not an output drain.",
+            "mpv selected B1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 5900 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 5900,
+            "wall": 1000,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Natural drain",
+    "description": "EOF alone does not stop current presentation. Only a healthy nominal drain completes a confirmed visit. Stop/error does not manufacture completion.",
+    "steps": [
+      {
+        "label": "Current C",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 500,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 300,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 50
+          },
+          "lastConfirmed": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 50
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "C1",
+              "occurrence": "C",
+              "positionMs": 50,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Nominal cursor: C1 at 50 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "C1",
+            "pos": 50,
+            "wall": 500,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Decoder reaches EOF; public clock vanishes",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 700,
+          "intent": "playing",
+          "transport": "transitioning",
+          "quality": "unknown",
+          "outputFailure": false,
+          "queue": [
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 300,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": true
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 50
+          },
+          "lastConfirmed": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 50
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "C1",
+              "occurrence": "C",
+              "positionMs": 50,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Nominal cursor: C1 at 50 ms.",
+            "Decoder EOF is not an output drain.",
+            "Presentation clock unavailable, stale or inconsistent."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Output nominal drain",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 800,
+          "intent": "stopped",
+          "transport": "ended",
+          "quality": "nominal-drain",
+          "outputFailure": false,
+          "queue": [
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "C1": {
+              "occ": "C",
+              "gain": "C:off"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "C1",
+              "occ": "C",
+              "duration": 300,
+              "exact": true,
+              "gain": "C:off",
+              "origin": 0,
+              "eof": true
+            }
+          ],
+          "engine": "C1",
+          "selected": "C",
+          "current": null,
+          "lastConfirmed": {
+            "visit": "C1",
+            "occ": "C",
+            "pos": 50
+          },
+          "history": [
+            "C1"
+          ],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "C1",
+              "occurrence": "C",
+              "positionMs": 50,
+              "quality": "nominal"
+            },
+            {
+              "kind": "nominal-complete",
+              "visit": "C1",
+              "occurrence": "C",
+              "positionMs": 50,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected C1; current presentation is unchanged.",
+            "Nominal cursor: C1 at 50 ms.",
+            "Decoder EOF is not an output drain.",
+            "Presentation clock unavailable, stale or inconsistent.",
+            "Nominal end of queue; no implicit autoplay."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  },
+  {
+    "name": "Delayed events / gain",
+    "description": "Reject an old epoch or a gain binding for another prepared visit. A sequence gap requests a fresh owner snapshot.",
+    "steps": [
+      {
+        "label": "Confirm A",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 600,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Wrong gain and duplicate sample",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 800,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Ignored mismatched per-file gain binding.",
+            "Ignored duplicate / reordered clock sample."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Detect delivery gap",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "9",
+          "wall": 900,
+          "intent": "playing",
+          "transport": "transitioning",
+          "quality": "unknown",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 100
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Ignored mismatched per-file gain binding.",
+            "Ignored duplicate / reordered clock sample.",
+            "Clock sequence gap: await owner snapshot."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 100,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": true
+        }
+      },
+      {
+        "label": "Resynchronize and reacquire",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "10",
+          "wall": 1100,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 320
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 320
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 100,
+              "quality": "nominal"
+            },
+            {
+              "kind": "playing-position",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 320,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 100 ms.",
+            "Ignored mismatched per-file gain binding.",
+            "Ignored duplicate / reordered clock sample.",
+            "Clock sequence gap: await owner snapshot.",
+            "Fresh owner snapshot; wait for a coherent clock witness.",
+            "Nominal cursor: A1 at 320 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 320,
+            "wall": 1100,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0,
+          "needsSync": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "Stalled output",
+    "description": "The native series retained a start-stall attempt. A static clock must not be advanced by wall time, and accepted frames are not proof of presentation.",
+    "steps": [
+      {
+        "label": "Prepare output",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "1",
+          "wall": 600,
+          "intent": "playing",
+          "transport": "playing",
+          "quality": "nominal",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 10
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 10
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 10,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 10 ms."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": {
+            "visit": "A1",
+            "pos": 10,
+            "wall": 600,
+            "epoch": "1"
+          },
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Clock becomes stale",
+        "state": {
+          "epoch": "1",
+          "intentGen": "1",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 700,
+          "intent": "playing",
+          "transport": "transitioning",
+          "quality": "unknown",
+          "outputFailure": false,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 10
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 10
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 10,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 10 ms.",
+            "Presentation clock unavailable, stale or inconsistent."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      },
+      {
+        "label": "Bounded recovery pauses with an error",
+        "state": {
+          "epoch": "1",
+          "intentGen": "2",
+          "revision": "0",
+          "clockSeq": "2",
+          "wall": 800,
+          "intent": "paused",
+          "transport": "transitioning",
+          "quality": "unknown",
+          "outputFailure": true,
+          "queue": [
+            "A",
+            "B",
+            "C"
+          ],
+          "durations": {
+            "A": 1500,
+            "B": 800,
+            "C": 300
+          },
+          "gain": {
+            "A": "A:track:-6",
+            "B": "B:track:-12",
+            "C": "C:off"
+          },
+          "prepared": {
+            "A": {
+              "gain": "A:track:-6",
+              "gen": "1"
+            },
+            "B": {
+              "gain": "B:track:-12",
+              "gen": "1"
+            },
+            "C": {
+              "gain": "C:off",
+              "gen": "1"
+            }
+          },
+          "visits": {
+            "A1": {
+              "occ": "A",
+              "gain": "A:track:-6"
+            }
+          },
+          "ledger": [
+            {
+              "visit": "A1",
+              "occ": "A",
+              "duration": 1500,
+              "exact": true,
+              "gain": "A:track:-6",
+              "origin": 0,
+              "eof": false
+            }
+          ],
+          "engine": "A1",
+          "selected": "A",
+          "current": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 10
+          },
+          "lastConfirmed": {
+            "visit": "A1",
+            "occ": "A",
+            "pos": 10
+          },
+          "history": [],
+          "reports": [
+            {
+              "kind": "nominal-start",
+              "visit": "A1",
+              "occurrence": "A",
+              "positionMs": 10,
+              "quality": "nominal"
+            }
+          ],
+          "log": [
+            "Play requested; preparation is not listening.",
+            "Prepared A with its immutable gain binding.",
+            "Prepared B with its immutable gain binding.",
+            "Prepared C with its immutable gain binding.",
+            "mpv selected A1; current presentation is unchanged.",
+            "Nominal cursor: A1 at 10 ms.",
+            "Presentation clock unavailable, stale or inconsistent.",
+            "Clock stopped advancing: pause/error, retain recovery state."
+          ],
+          "pendingEdit": null,
+          "seekPending": false,
+          "lastSample": null,
+          "unconfirmed": [],
+          "listeningMs": 0
+        }
+      }
+    ]
+  }
+]

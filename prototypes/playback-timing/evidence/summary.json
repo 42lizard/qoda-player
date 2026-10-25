@@ -1,0 +1,538 @@
+{
+  "boundary": "Nominal mpv output-delay clock plus scoped ALSA status/accepted-write observations; no physical audibility/DAC claim",
+  "clockCases": [
+    {
+      "mode": "alsa",
+      "case": "short",
+      "artifact": "clock-traces.json",
+      "timeout": true,
+      "naturalEnds": 1,
+      "negativeClockSamples": 1512,
+      "entriesWithPositiveClock": [],
+      "entriesStarted": 2,
+      "acceptedFrames": 4800,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "fullSubmittedPayloadExact": false
+    },
+    {
+      "mode": "alsa",
+      "case": "tiny",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 3,
+      "entriesWithPositiveClock": [],
+      "entriesStarted": 3,
+      "acceptedFrames": 3600,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "fullSubmittedPayloadExact": true
+    },
+    {
+      "mode": "alsa",
+      "case": "long",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 107,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3,
+      "acceptedFrames": 96000,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "fullSubmittedPayloadExact": true
+    },
+    {
+      "mode": "alsa",
+      "case": "drained",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 0,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3,
+      "acceptedFrames": 36000,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        },
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        },
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "fullSubmittedPayloadExact": true
+    },
+    {
+      "mode": "alsa",
+      "case": "pause-tail",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 52,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3,
+      "acceptedFrames": 36000,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "fullSubmittedPayloadExact": true
+    },
+    {
+      "mode": "null",
+      "case": "short",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 104,
+      "entriesWithPositiveClock": [],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "null",
+      "case": "tiny",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 1,
+      "entriesWithPositiveClock": [],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "null",
+      "case": "long",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 149,
+      "entriesWithPositiveClock": [
+        1
+      ],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "null",
+      "case": "drained",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 0,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "null",
+      "case": "pause-tail",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 44,
+      "entriesWithPositiveClock": [],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "pipewire",
+      "case": "short",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 140,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "pipewire",
+      "case": "tiny",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 0,
+      "entriesWithPositiveClock": [],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "pipewire",
+      "case": "long",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 126,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "pipewire",
+      "case": "drained",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 53,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "pipewire",
+      "case": "pause-tail",
+      "artifact": "clock-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 237,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3
+    }
+  ],
+  "editExecutions": [
+    {
+      "mode": "alsa",
+      "case": "early",
+      "artifact": "edit-traces.json",
+      "timeout": true,
+      "naturalEnds": 2,
+      "negativeClockSamples": 60,
+      "entriesWithPositiveClock": [
+        1,
+        3
+      ],
+      "entriesStarted": 2,
+      "acceptedFrames": 86400,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "submittedAThenCExact": true
+    },
+    {
+      "mode": "alsa",
+      "case": "buffered-remove",
+      "artifact": "edit-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 50,
+      "entriesWithPositiveClock": [
+        1,
+        5
+      ],
+      "entriesStarted": 4,
+      "acceptedFrames": 91393,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "observedRecoverySourceFrame": 62207,
+      "requestedRoundedRecoveryFrame": 62208,
+      "recoveryQuantizationFrames": -1,
+      "postDropPayloadExactAtObservedSourceFrame": true,
+      "recoveryPositionMs": 1296.0,
+      "removedBBeforeNominalCurrent": true,
+      "acceptedBFramesBeforeBarrier": 0,
+      "reportedPresentedCursorBeforeBarrier": 62736,
+      "previousAEndFrame": 72000,
+      "flushLatencyMs": 2.084462,
+      "postFirstDropFrames": 24193,
+      "expectedPostDropFrames": 24192,
+      "postDropPayloadExact": false
+    },
+    {
+      "mode": "alsa",
+      "case": "late-remove",
+      "artifact": "edit-traces.json",
+      "timeout": false,
+      "naturalEnds": 2,
+      "negativeClockSamples": 55,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        4
+      ],
+      "entriesStarted": 3,
+      "acceptedFrames": 92400,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "confirmedBPositionMs": 43.0,
+      "postFirstDropFrames": 14400,
+      "expectedPostDropFrames": 14400,
+      "postDropPayloadExact": true
+    },
+    {
+      "mode": "alsa",
+      "case": "seek",
+      "artifact": "edit-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 97,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3,
+      "acceptedFrames": 110400,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "postFirstDropFrames": 100800,
+      "expectedPostDropFrames": 100800,
+      "postDropPayloadExact": true
+    },
+    {
+      "mode": "pipewire",
+      "case": "early",
+      "artifact": "edit-traces.json",
+      "timeout": true,
+      "naturalEnds": 2,
+      "negativeClockSamples": 75,
+      "entriesWithPositiveClock": [
+        1,
+        3
+      ],
+      "entriesStarted": 2
+    },
+    {
+      "mode": "pipewire",
+      "case": "buffered-remove",
+      "artifact": "edit-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 71,
+      "entriesWithPositiveClock": [
+        1,
+        4,
+        5
+      ],
+      "entriesStarted": 4
+    },
+    {
+      "mode": "pipewire",
+      "case": "late-remove",
+      "artifact": "edit-traces.json",
+      "timeout": false,
+      "naturalEnds": 2,
+      "negativeClockSamples": 90,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        4
+      ],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "pipewire",
+      "case": "seek",
+      "artifact": "edit-traces.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 119,
+      "entriesWithPositiveClock": [
+        1,
+        2,
+        3
+      ],
+      "entriesStarted": 3
+    },
+    {
+      "mode": "alsa",
+      "case": "early",
+      "artifact": "corrected-edits.json",
+      "timeout": false,
+      "naturalEnds": 2,
+      "negativeClockSamples": 57,
+      "entriesWithPositiveClock": [
+        1,
+        3
+      ],
+      "entriesStarted": 2,
+      "acceptedFrames": 86400,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "submittedAThenCExact": true
+    },
+    {
+      "mode": "alsa",
+      "case": "accepted-remove",
+      "artifact": "corrected-edits.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 45,
+      "entriesWithPositiveClock": [
+        1,
+        5
+      ],
+      "entriesStarted": 4,
+      "acceptedFrames": 90336,
+      "negotiated": [
+        {
+          "pcm_type": 0,
+          "format": "S16_LE",
+          "rate": 48000,
+          "channels": 2,
+          "valid_bits": 16,
+          "access": 3
+        }
+      ],
+      "observedRecoverySourceFrame": 69264,
+      "requestedRoundedRecoveryFrame": 69264,
+      "recoveryQuantizationFrames": 0,
+      "postDropPayloadExactAtObservedSourceFrame": true,
+      "recoveryPositionMs": 1443.0,
+      "removedBBeforeNominalCurrent": true,
+      "acceptedBFramesBeforeBarrier": 1200,
+      "reportedPresentedCursorBeforeBarrier": 69264,
+      "previousAEndFrame": 72000,
+      "flushLatencyMs": 1.788131,
+      "postFirstDropFrames": 17136,
+      "expectedPostDropFrames": 17136,
+      "postDropPayloadExact": true
+    },
+    {
+      "mode": "pipewire",
+      "case": "early",
+      "artifact": "corrected-edits.json",
+      "timeout": false,
+      "naturalEnds": 2,
+      "negativeClockSamples": 74,
+      "entriesWithPositiveClock": [
+        1,
+        3
+      ],
+      "entriesStarted": 2
+    },
+    {
+      "mode": "pipewire",
+      "case": "accepted-remove",
+      "artifact": "corrected-edits.json",
+      "timeout": false,
+      "naturalEnds": 3,
+      "negativeClockSamples": 94,
+      "entriesWithPositiveClock": [
+        1,
+        5
+      ],
+      "entriesStarted": 4
+    }
+  ],
+  "findings": [
+    "Engine playlist/file events can lead nominal presentation; negative audio-pts is useful evidence, not a value to clamp to zero.",
+    "Positive public clock witnesses can be absent for an entire tiny-file chain. Exact predecessor spans can map a negative witness, but cannot create a missing clock.",
+    "One native short-start attempt stalled after accepting 4800 frames and was bounded by the observer timeout; this is not a successful continuity case.",
+    "The early-edit observer originally expected three ends after removing one of three files; its wait timed out after two normal ends. Corrected early runs are retained separately.",
+    "Accepted future B frames can be discarded before the nominal boundary; the post-drop payload comparison is distinct from the old accepted stream.",
+    "An earlier rebuild started one sample before the rounded checkpoint. Its strict requested-offset comparison remains false; the exact suffix at the observed source offset is retained separately, not called sample-exact seeking.",
+    "All reports in the portable model are mock semantics, not live Plex requests or verified scrobbles."
+  ]
+}
