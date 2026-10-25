@@ -1,0 +1,33 @@
+{
+  "fixture_only": true,
+  "results": [
+    {
+      "iteration": 1,
+      "store_exit": 0,
+      "lookup_exit": 0,
+      "exact_match": false,
+      "elapsed_ms": 110.2
+    },
+    {
+      "iteration": 2,
+      "store_exit": 0,
+      "lookup_exit": 0,
+      "exact_match": true,
+      "elapsed_ms": 110.49
+    },
+    {
+      "iteration": 3,
+      "store_exit": 0,
+      "lookup_exit": 0,
+      "exact_match": true,
+      "elapsed_ms": 115.07
+    },
+    {
+      "iteration": 4,
+      "store_exit": 0,
+      "lookup_exit": 0,
+      "exact_match": true,
+      "elapsed_ms": 169.46
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "scope": "single owned server, read-only music metadata and bounded artwork prefix; no mutations, timeline or music bytes",
+  "observations": [
+    {
+      "name": "Explicit legacy credential selection",
+      "credential_shape": "opaque"
+    },
+    {
+      "name": "Secure PMS credential comparison",
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "relay": false,
+      "tls_certificate_verified": true,
+      "attempts": [
+        {
+          "credential_kind": "account-legacy",
+          "http_status": 200,
+          "credential_shape": "opaque"
+        },
+        {
+          "credential_kind": "resource-issued",
+          "http_status": 200,
+          "credential_shape": "opaque"
+        }
+      ]
+    },
+    {
+      "name": "Library route/version-header response",
+      "route": "/library/sections",
+      "requested_api_version": "0.0",
+      "http_status": 200,
+      "music_libraries": 5,
+      "negotiated_api_version_proven": false
+    },
+    {
+      "name": "Library route/version-header response",
+      "route": "/library/sections/all",
+      "requested_api_version": "1.0.0",
+      "http_status": 200,
+      "music_libraries": 5,
+      "negotiated_api_version_proven": false
+    },
+    {
+      "name": "Library route/version-header response",
+      "route": "/library/sections/all",
+      "requested_api_version": "1.2.3",
+      "http_status": 200,
+      "music_libraries": 5,
+      "negotiated_api_version_proven": false
+    },
+    {
+      "name": "Bounded track page",
+      "requested_offset": 0,
+      "requested_size": 5,
+      "http_status": 200,
+      "rows": 5,
+      "returned_offset": "0",
+      "total": "250026",
+      "track_attributes": [
+        "addedAt",
+        "duration",
+        "grandparentGuid",
+        "grandparentKey",
+        "grandparentRatingKey",
+        "grandparentThumb",
+        "grandparentTitle",
+        "guid",
+        "index",
+        "key",
+        "musicAnalysisVersion",
+        "parentGuid",
+        "parentIndex",
+        "parentKey",
+        "parentRatingKey",
+        "parentStudio",
+        "parentThumb",
+        "parentTitle",
+        "parentYear",
+        "ratingCount",
+        "ratingKey",
+        "summary",
+        "thumb",
+        "title",
+        "titleSort",
+        "type",
+        "updatedAt"
+      ],
+      "nested_elements": [
+        "Image",
+        "Media",
+        "Part",
+        "Track"
+      ]
+    },
+    {
+      "name": "Bounded track page",
+      "requested_offset": 5,
+      "requested_size": 5,
+      "http_status": 200,
+      "rows": 5,
+      "returned_offset": "5",
+      "total": "250026",
+      "track_attributes": [
+        "addedAt",
+        "duration",
+        "grandparentGuid",
+        "grandparentKey",
+        "grandparentRatingKey",
+        "grandparentThumb",
+        "grandparentTitle",
+        "guid",
+        "index",
+        "key",
+        "musicAnalysisVersion",
+        "parentGuid",
+        "parentIndex",
+        "parentKey",
+        "parentRatingKey",
+        "parentThumb",
+        "parentTitle",
+        "parentYear",
+        "ratingKey",
+        "summary",
+        "thumb",
+        "title",
+        "titleSort",
+        "type"
+      ],
+      "nested_elements": [
+        "Image",
+        "Media",
+        "Part",
+        "Track"
+      ]
+    },
+    {
+      "name": "Adjacent track-page identities",
+      "non_overlapping": true,
+      "bounded": true,
+      "counts": [
+        5,
+        5
+      ]
+    },
+    {
+      "name": "Track detail and optional gain fields",
+      "http_status": 200,
+      "gain_related_fields": [
+        "albumGain",
+        "albumPeak",
+        "canNormalizeLoudness",
+        "gain",
+        "loudness",
+        "peak"
+      ],
+      "units_proven": false,
+      "provenance_proven": false,
+      "has_media": true,
+      "has_part": true
+    },
+    {
+      "name": "Music search",
+      "http_status": 200,
+      "hub_types": [
+        "actor",
+        "album",
+        "artist",
+        "autotag",
+        "collection",
+        "director",
+        "episode",
+        "genre",
+        "movie",
+        "photo",
+        "photoalbum",
+        "place",
+        "playlist",
+        "shared",
+        "show",
+        "tag",
+        "track"
+      ],
+      "track_rows": 2,
+      "query_exported": false
+    },
+    {
+      "name": "Authenticated artwork prefix",
+      "http_status": 200,
+      "bytes_retained": 128,
+      "content_type": "image/jpeg",
+      "etag_present": false,
+      "last_modified_present": false
+    },
+    {
+      "name": "Audio playlist read-only discovery",
+      "http_status": 200,
+      "rows": 5,
+      "smart_flags_present": true,
+      "smart_rows": 5,
+      "mutations_performed": false
+    }
+  ],
+  "untested": [
+    "playlist CRUD/reorder/duplicate occurrences",
+    "smart/read-only permission fixture",
+    "shared-server permission loss",
+    "original media decision/Range/reconnect",
+    "playback reporting",
+    "actual expiration/revocation",
+    "locked-keyring UX and cleanup races",
+    "gain units and provenance"
+  ]
+}

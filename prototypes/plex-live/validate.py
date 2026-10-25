@@ -4,6 +4,7 @@ No playlist mutation, playback reporting, media downloads or desktop changes.
 """
 import base64,datetime,http.server,json,os,pathlib,secrets,subprocess,threading,time,urllib.parse,uuid,xml.etree.ElementTree as ET
 import requests
+from credential import store as store_envelope
 HERE=pathlib.Path(__file__).resolve().parent
 CLOUD='https://clients.plex.tv'
 def b64(data):return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
@@ -65,15 +66,11 @@ class Probe:
    self.status.update(phase='needs-attention',message='The validation step stopped safely; see the redacted observation record. No error payload or credential was logged.')
    self.observe('Harness stopped','unverified',error_class=type(e).__name__)
  def store_credential(self):
-  blob=json.dumps({'client':self.client,'kid':self.kid,'key':self.key.decode(),'token':self.token})
-  attrs=['application','qoda-plex-validation','run',self.client]
-  p=subprocess.run(['secret-tool','store','--label=Qoda disposable Plex validation',*attrs],input=blob,text=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
-  if p.returncode==0:
-   got=subprocess.run(['secret-tool','lookup',*attrs],text=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15)
-   self.observe('Own Secret Service credential round trip','pass' if got.stdout.rstrip('\n')==blob else 'fail')
-   self.status['credentialMode']='keyring'
-  else:
-   self.status['credentialMode']='session-only';self.observe('Own Secret Service credential storage','unavailable-session-only',returncode=p.returncode)
+  value={'client':self.client,'kid':self.kid,'key':self.key.decode(),'token':self.token}
+  saved=store_envelope(value)
+  self.observe('Own Secret Service versioned credential round trip','pass' if saved else 'fail')
+  self.status['credentialMode']='keyring' if saved else 'session-only'
+
  def renew(self):
   r=self.request('GET',CLOUD+'/api/v2/auth/nonce',headers=self.headers)
   if r.status_code!=200:self.observe('Nonce request','fail',http_status=r.status_code);return

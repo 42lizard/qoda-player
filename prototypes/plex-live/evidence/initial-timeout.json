@@ -1,0 +1,7 @@
+{
+  "operation": "first bounded media probe",
+  "outcome": "unverified",
+  "error_class": "ReadTimeout",
+  "stage": "not captured in initial runner; before selected representation was reported",
+  "follow_up": "Added safe stage labels and bounded read retries; the later FLAC decision/range observations are recorded separately. The initial failure is not counted as a pass."
+}

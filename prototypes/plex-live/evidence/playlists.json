@@ -1,0 +1,93 @@
+{
+  "scope": "fresh UUID namespace; mutation guard uses only IDs returned by this run; no pre-existing playlist targeted",
+  "observations": [
+    {
+      "name": "Create disposable plain playlist",
+      "http_status": 200
+    },
+    {
+      "name": "Read fresh fixture entries",
+      "rows": 2,
+      "has_occurrence_ids": true
+    },
+    {
+      "name": "Rename own fixture",
+      "http_status": 200,
+      "title_verified": true
+    },
+    {
+      "name": "Append distinct track to own fixture",
+      "http_status": 200,
+      "order_preserved": true,
+      "rows": 3
+    },
+    {
+      "name": "Add duplicate occurrence to own fixture",
+      "http_status": 200,
+      "rows": 3,
+      "duplicate_occurrences": 1,
+      "distinct_occurrence_ids": false
+    },
+    {
+      "name": "Reorder occurrence in own fixture",
+      "http_status": 200,
+      "moved_to_front": true,
+      "same_occurrence_membership": true
+    },
+    {
+      "name": "Remove occurrence from own fixture",
+      "http_status": 200,
+      "removed_only_requested_occurrence": true,
+      "remaining_same_track_occurrences": 0
+    },
+    {
+      "name": "Create disposable plain playlist",
+      "http_status": 200
+    },
+    {
+      "name": "Duplicate source URI at creation",
+      "rows": 2,
+      "same_track_occurrences": 1,
+      "distinct_occurrence_ids": false
+    },
+    {
+      "name": "Create disposable smart playlist",
+      "http_status": 200
+    },
+    {
+      "name": "Own smart playlist metadata",
+      "smart_flag": "1",
+      "bounded_rows": 2
+    },
+    {
+      "name": "Direct edit response on own smart fixture",
+      "http_status": 400,
+      "smart_flag_after": "1",
+      "permission_loss_tested": false
+    },
+    {
+      "name": "Delete and verify own plain fixture",
+      "delete_http_status": 204,
+      "verify_http_status": 404,
+      "removed": true
+    },
+    {
+      "name": "Delete and verify own plain fixture",
+      "delete_http_status": 204,
+      "verify_http_status": 404,
+      "removed": true
+    },
+    {
+      "name": "Delete and verify own smart fixture",
+      "delete_http_status": 204,
+      "verify_http_status": 404,
+      "removed": true
+    }
+  ],
+  "remaining_fixture_count": 0,
+  "limits": [
+    "No blind retries of mutation calls",
+    "No shared-account permission-loss test",
+    "A changed smart fixture response is not a blanket read-only permission guarantee"
+  ]
+}

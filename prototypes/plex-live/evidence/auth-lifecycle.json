@@ -1,0 +1,56 @@
+{
+  "observations": [
+    {
+      "name": "Expired signed device-JWT exchange",
+      "http_status": 422,
+      "rejected": true,
+      "actual_seven_day_account_token_expiry_tested": false
+    },
+    {
+      "name": "Fresh signed device-JWT exchange",
+      "http_status": 200
+    },
+    {
+      "name": "Immediate identical nonce/JWT replay",
+      "http_status": 422,
+      "rejected": true
+    },
+    {
+      "name": "Exact own JWT test-device selection",
+      "matched_count": 1
+    },
+    {
+      "name": "Remove only own JWT test device",
+      "http_status": 200
+    },
+    {
+      "name": "Device retirement verified",
+      "own_jwt_device_absent": true,
+      "working_legacy_device_present": true
+    },
+    {
+      "name": "Previously issued JWT after device removal",
+      "http_status": 401,
+      "immediate_rejection": true
+    },
+    {
+      "name": "JWT renewal after own-device retirement",
+      "http_status": 422,
+      "renewal_rejected": true
+    },
+    {
+      "name": "Retired own JWT credential local cleanup",
+      "no_secret_returned": true
+    },
+    {
+      "name": "Working legacy authorization retained",
+      "http_status": 200
+    }
+  ],
+  "scope": "Only the explicitly matched fresh JWT validation device; no server or pre-existing device targeted",
+  "limits": [
+    "A signed expired device JWT is not an observed seven-day account-token expiry",
+    "Immediate results are observations, not a universal provider revocation guarantee",
+    "Working compatibility credential is intentionally retained for further authorized validation"
+  ]
+}

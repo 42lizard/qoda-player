@@ -1,0 +1,33 @@
+{
+  "scope": "Only fresh returned queue/playlist IDs; no playback/timeline call; no existing object targeted",
+  "observations": [
+    {
+      "name": "Create own temporary source queue",
+      "http_status": 200,
+      "rows": 2
+    },
+    {
+      "name": "Append duplicate to own source queue",
+      "http_status": 200,
+      "same_track_occurrences": 2,
+      "distinct_queue_occurrences": true
+    },
+    {
+      "name": "Create disposable playlist from own repeated queue",
+      "http_status": 200,
+      "rows": 2,
+      "same_track_occurrences": 1,
+      "distinct_playlist_occurrences": false
+    },
+    {
+      "name": "Remove only own queue-import playlist",
+      "removed": true
+    },
+    {
+      "name": "Clear only own temporary source queue",
+      "http_status": 200,
+      "empty": false
+    }
+  ],
+  "remaining_fixture_playlist_count": 0
+}

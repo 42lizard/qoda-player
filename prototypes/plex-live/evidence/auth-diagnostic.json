@@ -1,0 +1,99 @@
+{
+  "observations": [
+    {
+      "name": "Selected endpoint identity",
+      "matches_authorized_server": true,
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "http_status": 200
+    },
+    {
+      "name": "JWT shape/timing",
+      "source": "stored-account",
+      "claim_names": [
+        "aud",
+        "exp",
+        "iat",
+        "iss",
+        "nonce",
+        "thumbprint",
+        "user"
+      ],
+      "expiry_in_seconds": 604369,
+      "issued_offset_seconds": -431,
+      "pms_http_date_skew_seconds": 0,
+      "same_token_as_account": true
+    },
+    {
+      "name": "JWT shape/timing",
+      "source": "resource",
+      "claim_names": [
+        "aud",
+        "exp",
+        "iat",
+        "iss",
+        "nonce",
+        "thumbprint",
+        "user"
+      ],
+      "expiry_in_seconds": 604369,
+      "issued_offset_seconds": -431,
+      "pms_http_date_skew_seconds": 0,
+      "same_token_as_account": true
+    },
+    {
+      "name": "Renewal with documented user-claim scope",
+      "http_status": 200,
+      "jwt_received": true
+    },
+    {
+      "name": "Restored private key signed successful renewal",
+      "credential_round_trip": true
+    },
+    {
+      "name": "PMS auth/version comparison",
+      "source": "stored-minimal-scope",
+      "requested_api_version": "omitted",
+      "http_status": 401
+    },
+    {
+      "name": "PMS auth/version comparison",
+      "source": "stored-minimal-scope",
+      "requested_api_version": "1.0.0",
+      "http_status": 401
+    },
+    {
+      "name": "PMS auth/version comparison",
+      "source": "stored-minimal-scope",
+      "requested_api_version": "1.2.3",
+      "http_status": 401
+    },
+    {
+      "name": "PMS auth/version comparison",
+      "source": "documented-scope",
+      "requested_api_version": "omitted",
+      "http_status": 401
+    },
+    {
+      "name": "PMS auth/version comparison",
+      "source": "documented-scope",
+      "requested_api_version": "1.0.0",
+      "http_status": 401
+    },
+    {
+      "name": "PMS auth/version comparison",
+      "source": "documented-scope",
+      "requested_api_version": "1.2.3",
+      "http_status": 401
+    },
+    {
+      "name": "New documented-scope token cloud access",
+      "http_status": 200
+    }
+  ],
+  "hypotheses": [
+    "user-claim scope",
+    "API header negotiation",
+    "server-side JWT support despite valid token and matching endpoint"
+  ],
+  "scope": "read-only authorization differential; no legacy sign-in, server mutation or timeline"
+}

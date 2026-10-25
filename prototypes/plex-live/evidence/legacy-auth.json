@@ -1,0 +1,24 @@
+{
+  "phase": "read-only-probe-complete",
+  "observations": [
+    {
+      "name": "Legacy PIN creation",
+      "http_status": 201
+    },
+    {
+      "name": "Legacy browser exchange and own keyring round trip",
+      "token_shape": "opaque",
+      "keyring_verified": true
+    },
+    {
+      "name": "Read-only probe process",
+      "exit_code": 0
+    }
+  ],
+  "recorded_utc": "2026-10-25T13:20:40.219040+00:00",
+  "scope": "own dedicated legacy-PIN test device only; no playlist/timeline/music-file actions",
+  "limits": [
+    "No legacy token expiry or automatic renewal assumed",
+    "This is a separate explicitly selected authentication experiment; not silently substituted for the rejected JWT"
+  ]
+}

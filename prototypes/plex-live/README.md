@@ -1,50 +1,73 @@
-# Disposable live Plex validation harness
+# Live Plex validation — bounded owned-server evidence
 
-**Work in progress. The live validation ticket remains open.** This is planning evidence, not the production Plex backend or a completed compatibility matrix.
+**Throwaway validation, not the production Plex backend. The live acceptance ticket remains open.**
 
-The initial live probe successfully created a device-key PIN (HTTP 201). Browser authorization has not yet completed in the captured record, so no PMS version, library, account renewal, playlist capability, or audio-media compatibility has been accepted.
+Tested PMS: **1.43.5.11029-6bf8af3f0**, one explicitly authorized owned server. Server/library names, addresses, identifiers, titles, raw responses, PINs, keys and tokens are excluded from the public artifacts. The human completed both browser authorizations; their standing acceptance of recommended defaults selected the sole owned server and newly created UUID-named disposable fixtures. No pre-existing playlist or remote queue was a mutation target. No playback-history/timeline report or audible playback was sent.
 
-## Run
+## Outcomes
+
+| Path | Observed result | Boundary |
+| --- | --- | --- |
+| Ed25519 JWK PIN + device JWT | Browser exchange and nonce renewal 200; cloud discovery 200 | Cloud authentication works |
+| JWT against this PMS | 401 with account/resource JWT, minimal/documented claims and omitted/explicit API headers | JWT-only PMS access is not qualified here |
+| Separate legacy browser PIN | Opaque token stored and verified in its own keyring item; PMS and resource access 200 | Explicit compatibility experiment, no silent token substitution |
+| Discovery/catalog | Five music libraries; adjacent requested five-track pages with correct offsets and no overlap | First library sampled; not a whole-catalog scan |
+| Search/artwork | Music search returns tracks; authenticated JPEG prefix 200 | No real artwork-change/conditional-invalidation proof; sampled response had no ETag/Last-Modified |
+| Plain playlist | Create, read, rename, append distinct track, reorder occurrence, remove occurrence, delete verified | Only fresh UUID test objects; all fixture playlists removed |
+| Duplicate playlist creation | Existing-track append, repeated-ID create URI and repeated-queue import each collapsed duplicates | Do not infer a new occurrence from HTTP 200; actual duplicate playlist-entry operations remain unverified |
+| Smart fixture | Metadata flagged smart; attempted plain-item URI edit returned 400 | Not a general permission-loss/read-only-account test; smart PUT can edit rules |
+| Original preparation | `Generic` profile changed the decision response from 400 to 200, `mdeDecisionCode=1000`, `directplay` | Selected stereo FLAC only; not a universal client-profile guarantee |
+| Range/seek primitive | 206 for bounded start/later ranges; a fresh connection returned the same later bytes | In-memory bytes only; not a simulated network-drop or real-time handoff test |
+| Gain metadata | `gain`, `peak`, `albumGain`, `albumPeak`, loudness-related fields present | Units/provenance unverified; no tag found in bounded prefix does not establish tag absence |
+| Own JWT lifecycle | Expired signed device JWT and identical nonce replay rejected 422; own device removal verified; issued JWT then 401 and renewal 422 | Retired only the fresh JWT test device; actual seven-day account-token expiry not waited out |
+| Credential cleanup | Retired JWT item absent; its helper stopped; separate working legacy item retained | No unrelated device/keyring entry touched |
+| Keyring encoding | Old JSON envelope was observed with invalid literal PEM control characters; versioned ASCII envelope verified, restored private key renewed successfully; six fixture round trips matched | Base64 is serialization, not encryption; root text-transformation cause is not assigned to a vendor |
+| Isolated locked keyring | Private bus/temp XDG collection rejected locked access with `IsLocked`; real desktop keyring stayed unlocked | Headless unlock attempt returned 0 but did not unlock; failure retained, actual unlock UI/session-only integration unverified |
+
+Full observations are in `evidence/*.json`. Initial failures are preserved. This is a compatibility record, not an all-pass suite or universal support claim. API-header response success is distinguished from proof of every negotiated-version semantic.
+
+## Run / reuse
+
+Requirements: Python 3 (`requests`, `dbus` for private-keyring fixtures), OpenSSL Ed25519, `secret-tool`, Secret Service, Brave, and `ffprobe` for the optional bounded media-prefix tag observation. No application install or desktop configuration change is needed.
 
 ```sh
+# Fresh recommended JWK/JWT browser experiment (known PMS failure on this stack):
 python3 prototypes/plex-live/validate.py
+
+# Fresh explicitly labeled compatibility browser experiment:
+python3 prototypes/plex-live/compatibility.py
+
+# Reuse the retained, authorized compatibility credential for read-only checks:
+python3 prototypes/plex-live/read_probe.py --legacy
 ```
 
-Requirements: Python 3 with `requests`, OpenSSL with Ed25519 support, Linux `memfd_create`, `secret-tool` and an available Secret Service, and Brave. A fresh device key is generated in memory; a fresh PIN is requested from Plex's documented clients service. The script opens Plex's authorization page in Brave and prints a **local validator URL only**, never the PIN, device JWT, private key or account token.
+The browser helpers print a loopback status URL and provide an **Open Plex sign-in** link. Sign in directly with Plex; no password, token or code is pasted into chat or the terminal. A fresh launch registers a fresh test client, so reuse the retained credential for subsequent reads instead of needlessly signing in again.
 
-1. In Brave, complete the **Qoda Plex Validator** authorization directly with Plex. No password/code/token is copied into chat or the terminal.
-2. Return to the printed local page and choose **one authorized server**. Server names, addresses, identifiers and raw responses remain local/in memory. No server is automatically selected.
-3. Review the bounded read-only observations. This scope reads music metadata and a small artwork response prefix; it does not transfer music files, edit playlists, change server settings or report playback/history.
+Credentials live only in memory and dedicated keyring items (`application=qoda-plex-validation` or `application=qoda-plex-legacy-validation`, plus their per-run identity). The codec stores a versioned Base64 envelope inside Secret Service and verifies the returned bytes. No plaintext credential file, GitHub secret or `.env` value is created. Auth/key material is never a command-line argument or diagnostic output. The separate retired JWT item has been cleared; the compatibility item is deliberately retained for continued authorized work.
 
-Authorized credentials are stored in a dedicated Secret Service item identified by `application=qoda-plex-validation` and a fresh per-run identifier. No unrelated application's keyring entry is read. If storage is unavailable, the narrow harness records session-only mode; actual fallback/unlock acceptance remains unverified. Do not copy this minimal behavior as the production sign-in UX.
+The initial helpers are limited diagnostic surfaces, not accepted production unlock/sign-out UX. Their complete failure/race/persistence matrix remains required. Remote revocation is distinct from local cleanup; `auth_lifecycle.py` is a one-shot test against its own stored JWT device and was completed before clearing that device's local item. Do not expect it to re-run after retirement without a fresh test-device authorization.
 
-Use the local **Clear local validation credentials** action after checks finish; it deletes this run's local item and clears its in-memory account references. Cleanup races, keyring failure and stale-work invalidation have not been qualified in this minimal harness, so this action is not accepted production sign-out behavior. Remote device revocation is separate: remove **Qoda Plex Validator** in Plex Authorized Devices. Ctrl+C stops the local helper; it does not silently revoke the device or promise deletion of a previously stored keyring item. No plaintext credential file is used.
+Other scripts perform bounded experiments:
 
-## Deliberately narrow first pass
+- `auth_diagnostic.py`: private-key restoration, documented-claim renewal, server identity/timing and header/scope comparisons. Retired JWT credential is now intentionally absent.
+- `playlist_probe.py`: explicitly designated **new** UUID fixture playlists only, guarded by returned IDs and expected names. No automatic mutation retry. Cleanup manifests are private runtime files; all playlists from the observed runs were deleted and checked as missing.
+- `duplicate_queue_probe.py`: new temporary queue only; verifies queue duplicates and tries importing them into its own disposable playlist. The imported playlist was deleted. **Clearing that temporary queue returned 200 but its follow-up read still showed contents; empty-state cleanup is unverified.** No existing queue was cleared. Future runs retain the returned own queue ID in a private runtime manifest if cleanup verification fails; never guess/sweep other queue IDs. A Plex play queue is not Qoda's authoritative local queue.
+- `media_probe.py`: selected original decision and bounded in-memory FLAC Range requests, then a bounded-prefix tag probe. No media file is saved or playback reported. The initial timeout and 400 decision are recorded; profile comparison isolated the successful request.
+- `isolated_keyring.py`: fictional data on its own private DBus and temporary XDG directories; never locks/stops the desktop keyring. Both the locked-access success and headless-unlock failure are retained.
 
-- Fresh Ed25519 JWK PIN creation, signed-device-JWT polling and completed browser exchange when actually authorized.
-- Own-item Secret Service round trip and immediate nonce-based renewal when authorized.
-- Account resource discovery; human selection of one owned/shared server.
-- Advertised certificate-verified HTTPS endpoints, trying direct before relay. No HTTP opt-in, insecure certificate bypass or silent legacy-token fallback is enabled.
-- PMS identity; representative music-library pages (at most two libraries, two requested five-track pages each), schema field names and optional gain-related field presence only.
-- A bounded authenticated artwork prefix request. No raw personal fixture or artwork is exported.
+## Remaining acceptance gates
 
-The metadata candidate requests API `1.2.3`; a response failure on an older server does not establish that version's capabilities or authorize inventing compatibility. The current first-party reference says API `1.2.3` is supported in PMS >= 1.43.4, whereas an omitted header requests legacy `0.0`. Requested version, document version and observed server version must be distinguished in the final matrix.
+No shared-server/access-loss fixture is available in this authorized account. No existing track was designated for history-altering timeline/scrobble tests. Do not modify sharing, other users, real listening history or library files to manufacture a pass.
 
-No seven-day expiry wait, remote revocation, shared-permission changes, controlled smart/read-only fixture, disposable playlist CRUD/reorder/duplicates, original-media preparation/Range/reconnect, playback reporting, analyzed/unanalyzed gain provenance, or full locked-keyring/sign-out matrix has been exercised by the initial pass. Those cases remain requirements of the open live-validation ticket, not implied passes. Playlist mutation requires a separately designated disposable playlist scope; this harness contains no mutation code.
+Still required: shared/restricted/read-only permission changes; playback reporting on a controlled track; actual outage/failover/drop recovery; real artwork replacement/invalidation; broader formats/album ordering/metadata cases; actual account-token expiry behavior; complete keyring unlock/session-only/sign-out races and durable cleanup; verified Plex gain units/provenance or deliberate non-use; actual duplicate playlist-entry behavior if supported; and the temporary-queue cleanup discrepancy. These remain explicit in the open ticket and final specification gate.
 
-## Safe evidence
+The practical first-release candidate from this setup is **explicit legacy browser authorization**, original playback with a valid client profile, source-scoped occurrence IDs, refresh/reconcile after playlist edits, and embedded/verified-only ReplayGain. This is input to the final contract; it does not silently replace the accepted provider/storage/fidelity policies or imply universal compatibility.
 
-`evidence/progress.json` exports a whitelist of operation names/outcomes, HTTP status, schemas/counts and tested public version strings. It does not export account/server/library names or identifiers, addresses, raw bodies, tokens, keys, PINs or signed URLs. The running helper updates that file as work proceeds; committed snapshots must be reviewed before publishing. Public comments must describe pending access honestly.
+## References
 
-`evidence/preflight.json` records separate non-account checks: the default keyring was unlocked; a unique fictional marker was stored, retrieved and deleted from its own item; an isolated subprocess with an unreachable bus failed without returning a secret. The actual desktop keyring was never locked/stopped. These checks do not establish real account credential storage, locked-keyring UX, or session-only fallback correctness.
+- [Plex PMS reference](https://developer.plex.tv/pms/): JWK/JWT flow, nonce, playlist/play-queue routes, occurrence IDs and playback decisions. Reference document 1.2.3, reviewed 2026-10-25.
+- [Plex resource discovery](https://support.plex.tv/articles/206721658-using-plex-tv-resources-information-to-troubleshoot-app-connections/).
+- [Secret Service specification](https://specifications.freedesktop.org/secret-service/latest/).
+- [Python-PlexAPI source](https://github.com/pkkid/python-plexapi/blob/master/plexapi/myplex.py): community reference-client device-selection/removal route, not a Plex support guarantee. Only this harness's exact non-server device was targeted in the observed removal.
 
-An ephemeral two-stage local sign-in helper may be generated for the human, but is not committed: browser sign-in and server selection produce no `.env` values, CI secrets or chat credentials. No setup wizard can replace actual browser authorization.
-
-## Primary references
-
-- [Plex Media Server reference](https://developer.plex.tv/pms/): Ed25519 JWK PIN flow, device JWT headers/claims, nonce renewal and API version negotiation. Reference reviewed 2026-10-25; document version 1.2.3.
-- [Plex resource discovery](https://support.plex.tv/articles/206721658-using-plex-tv-resources-information-to-troubleshoot-app-connections/): advertised connections are candidates, not proof of reachability.
-- [Secret Service specification](https://specifications.freedesktop.org/secret-service/latest/): credential storage service; only this harness's own item is used.
-
-Canonical task: [Verify live Plex authentication and server contracts](https://github.com/42lizard/qoda-player/issues/16). The final specification stays blocked until actual supported scope and the missing measurements are resolved.
+Canonical task: [Verify live Plex authentication and server contracts](https://github.com/42lizard/qoda-player/issues/16). This ticket and its final-specification blocking relationship remain open.

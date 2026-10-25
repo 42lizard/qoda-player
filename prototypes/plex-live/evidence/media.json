@@ -1,0 +1,75 @@
+{
+  "scope": "one track; bounded in-memory bytes only; no timeline/scrobble, audible playback or raw media artifact",
+  "observations": [
+    {
+      "name": "Selected original representation",
+      "container": "flac",
+      "audio_codec": "flac",
+      "channels": "2",
+      "part_size_known": true,
+      "metadata_not_exported": true
+    },
+    {
+      "name": "Explicit original playback decision",
+      "http_status": 200,
+      "decision_codes": {
+        "mdeDecisionCode": "1000"
+      },
+      "decisions": [
+        {
+          "decision": "directplay"
+        }
+      ],
+      "transcoded_stream_requested": false
+    },
+    {
+      "name": "Original-media bounded Range request",
+      "requested_offset": 0,
+      "http_status": 206,
+      "bytes_retained": 65536,
+      "range_start_matches": true,
+      "server_honors_range": true,
+      "original_content_type": "audio/flac"
+    },
+    {
+      "name": "Original-media bounded Range request",
+      "requested_offset": 131072,
+      "http_status": 206,
+      "bytes_retained": 128,
+      "range_start_matches": true,
+      "server_honors_range": true,
+      "original_content_type": "audio/flac"
+    },
+    {
+      "name": "Original-media bounded Range request",
+      "requested_offset": 131072,
+      "http_status": 206,
+      "bytes_retained": 128,
+      "range_start_matches": true,
+      "server_honors_range": true,
+      "original_content_type": "audio/flac"
+    },
+    {
+      "name": "Fresh-connection range reconnect",
+      "same_range_bytes_match": true,
+      "bytes_compared": 128,
+      "network_drop_simulated": false
+    },
+    {
+      "name": "Embedded ReplayGain tags in bounded prefix",
+      "tag_names": [],
+      "gain_unit_suffix_db": {},
+      "prefix_bound_bytes": 65536,
+      "absence_not_proven": true,
+      "values_exported": false,
+      "plex_field_provenance_proven": false
+    }
+  ],
+  "limits": [
+    "No real-time gapless or DAC claim",
+    "Fresh-connection repeated Range is not a real network-drop recovery test",
+    "No server progress/history report sent",
+    "No universal media version/format claim",
+    "Gain field presence is not verified provenance or unit mapping"
+  ]
+}

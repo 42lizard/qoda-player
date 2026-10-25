@@ -1,11 +1,49 @@
 {
-  "recorded_utc": "2026-10-25T13:10:49.372620+00:00",
-  "phase": "awaiting-browser-sign-in",
+  "recorded_utc": "2026-10-25T13:12:33.979615+00:00",
+  "phase": "needs-attention",
   "observations": [
     {
       "name": "Plex JWT PIN creation",
       "outcome": "pass",
       "http_status": 201
+    },
+    {
+      "name": "Browser authorization and device-JWT PIN exchange",
+      "outcome": "pass",
+      "token_shape": "jwt"
+    },
+    {
+      "name": "Own Secret Service credential round trip",
+      "outcome": "fail"
+    },
+    {
+      "name": "Immediate nonce-based JWT renewal",
+      "outcome": "pass",
+      "http_status": 200
+    },
+    {
+      "name": "Own Secret Service credential round trip",
+      "outcome": "pass"
+    },
+    {
+      "name": "Account resource discovery",
+      "outcome": "pass",
+      "http_status": 200
+    },
+    {
+      "name": "Selected server secure endpoint",
+      "outcome": "unverified",
+      "owned": true,
+      "attempts": [
+        {
+          "relay": false,
+          "http_status": 401
+        },
+        {
+          "relay": false,
+          "http_status": 401
+        }
+      ]
     }
   ],
   "untested": [

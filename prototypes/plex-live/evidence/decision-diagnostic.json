@@ -1,0 +1,85 @@
+{
+  "observations": [
+    {
+      "name": "baseline",
+      "http_status": 400,
+      "error_hints": {
+        "profile": false,
+        "session": false,
+        "protocol": false,
+        "parameter": false,
+        "path": false
+      },
+      "root_tag": "html",
+      "attribute_names": [],
+      "decision_codes": {},
+      "decisions": []
+    },
+    {
+      "name": "api-1.2.3",
+      "http_status": 400,
+      "error_hints": {
+        "profile": false,
+        "session": false,
+        "protocol": false,
+        "parameter": false,
+        "path": false
+      },
+      "root_tag": "html",
+      "attribute_names": [],
+      "decision_codes": {},
+      "decisions": []
+    },
+    {
+      "name": "platform-Linux",
+      "http_status": 400,
+      "error_hints": {
+        "profile": false,
+        "session": false,
+        "protocol": false,
+        "parameter": false,
+        "path": false
+      },
+      "root_tag": "html",
+      "attribute_names": [],
+      "decision_codes": {},
+      "decisions": []
+    },
+    {
+      "name": "profile-Generic",
+      "http_status": 200,
+      "error_hints": {
+        "profile": false,
+        "session": true,
+        "protocol": false,
+        "parameter": false,
+        "path": false
+      },
+      "root_tag": "MediaContainer",
+      "attribute_names": [
+        "allowSync",
+        "identifier",
+        "librarySectionID",
+        "librarySectionTitle",
+        "librarySectionUUID",
+        "mdeDecisionCode",
+        "mdeDecisionText",
+        "mediaTagPrefix",
+        "mediaTagVersion",
+        "resourceSession",
+        "size"
+      ],
+      "decision_codes": {},
+      "decisions": [
+        {
+          "decision": "directplay"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "Diagnostic error categories only; no private response text exported",
+    "Each variation changes one header or query parameter",
+    "No transcoded stream or timeline requested"
+  ]
+}

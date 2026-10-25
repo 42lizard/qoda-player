@@ -1,0 +1,61 @@
+{
+  "scope": "single owned server, read-only music metadata and bounded artwork prefix; no mutations, timeline or music bytes",
+  "observations": [
+    {
+      "name": "Recovered own credential and versioned envelope round trip",
+      "legacy_control_repair_needed": true,
+      "restored_private_key_valid": true,
+      "verified_round_trip": true
+    },
+    {
+      "name": "Secure PMS credential comparison",
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "relay": false,
+      "tls_certificate_verified": true,
+      "attempts": [
+        {
+          "credential_kind": "account-jwt",
+          "http_status": 401,
+          "credential_shape": "jwt"
+        },
+        {
+          "credential_kind": "resource-issued",
+          "http_status": 401,
+          "credential_shape": "jwt"
+        }
+      ]
+    },
+    {
+      "name": "Secure PMS credential comparison",
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "relay": false,
+      "tls_certificate_verified": true,
+      "attempts": [
+        {
+          "credential_kind": "account-jwt",
+          "http_status": 401,
+          "credential_shape": "jwt"
+        },
+        {
+          "credential_kind": "resource-issued",
+          "http_status": 401,
+          "credential_shape": "jwt"
+        }
+      ]
+    },
+    {
+      "name": "PMS access",
+      "result": "unverified"
+    }
+  ],
+  "untested": [
+    "playlist CRUD/reorder/duplicate occurrences",
+    "smart/read-only permission fixture",
+    "shared-server permission loss",
+    "original media decision/Range/reconnect",
+    "playback reporting",
+    "actual expiration/revocation",
+    "locked-keyring UX and cleanup races",
+    "gain units and provenance"
+  ]
+}

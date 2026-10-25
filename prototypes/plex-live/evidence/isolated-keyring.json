@@ -1,0 +1,26 @@
+{
+  "observations": [
+    {
+      "name": "Private service fixture store/read",
+      "pass": true
+    },
+    {
+      "name": "Private locked collection rejects secret access",
+      "pass": true,
+      "error_name": "org.freedesktop.Secret.Error.IsLocked"
+    },
+    {
+      "name": "Private unlock restores old stored value; session-only choice did not persist",
+      "pass": false,
+      "unlock_exit": 0,
+      "collection_locked_after": true,
+      "old_marker_restored": false,
+      "lookup_exit": 1
+    }
+  ],
+  "limits": [
+    "Synthetic private-bus mechanism fixture, not production UI/session-only integration",
+    "Actual desktop collection was never locked or stopped",
+    "No account credentials used"
+  ]
+}
