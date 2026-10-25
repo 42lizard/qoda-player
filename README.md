@@ -39,6 +39,8 @@ The [fidelity and ReplayGain contract](docs/adr/0002-fidelity-and-gain-contract.
 
 [Native Quickshell surface observations](https://github.com/42lizard/qoda-player/issues/14) establish tiled/full and compact-panel behavior through application IPC on the measured single-monitor setup. Physical keyboard dispatch, multi-output behavior, and scale changes require separate acceptance checks.
 
+The [desktop lifecycle and distribution contract](https://github.com/42lizard/qoda-player/issues/11) selects on-demand user services, targeted launch/toggle commands, explicit Quit, paused crash recovery, and versioned source installs under a user prefix. Installation, desktop identity, upgrade and rollback behavior require separate qualification; no production package or desktop integration has been installed.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -85,6 +85,12 @@ An action that removes upcoming entries from the listening session while preserv
 **Stop and clear**:
 An action that stops playback and discards the active listening session, including its queue and Previous history.
 
+**Hide**:
+An action that removes the interface from view while playback and the listening session continue. Closing the player window hides it.
+
+**Quit**:
+An action that stops playback and exits the player while retaining the listening session for a later paused restoration.
+
 **Shuffle**:
 A stable rearrangement of upcoming entries that leaves the current entry and listening history unchanged. Explicit Play next priority, appended content, and deliberate queue edits remain respected.
 
