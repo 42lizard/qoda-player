@@ -1,0 +1,26 @@
+{
+  "observations": [
+    {
+      "name": "Default Secret Service collection state",
+      "outcome": "observed",
+      "locked": false
+    },
+    {
+      "name": "Own non-account Secret Service fixture round trip",
+      "outcome": "pass"
+    },
+    {
+      "name": "Own non-account fixture cleanup",
+      "outcome": "pass"
+    },
+    {
+      "name": "Unavailable Secret Service bus fixture",
+      "outcome": "pass",
+      "returncode": 1,
+      "scope": "isolated environment variable for this subprocess only; no user keyring locked/stopped"
+    }
+  ],
+  "limits": [
+    "These are synthetic storage/service-access checks, not actual account-token storage or locked-keyring fallback acceptance"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "recorded_utc": "2026-10-25T13:03:55.822575+00:00",
+  "phase": "awaiting-browser-sign-in",
+  "observations": [
+    {
+      "name": "Plex JWT PIN creation",
+      "outcome": "pass",
+      "http_status": 201
+    }
+  ],
+  "untested": [
+    "account/server authorization",
+    "renewal and expiry/revocation",
+    "shared access/permission loss",
+    "playlist mutations and duplicate entries",
+    "original media/range seeking/reconnect",
+    "playback reporting",
+    "gain/peak provenance",
+    "locked/unavailable keyring and session-only behavior"
+  ],
+  "limits": [
+    "No universal compatibility claim",
+    "No playlist mutation, playback reporting or media transfer performed by this harness",
+    "Only certificate-verified HTTPS server connections are attempted",
+    "Private response bodies remain in memory; exports contain schema/counts only"
+  ]
+}
