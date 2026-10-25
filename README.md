@@ -25,6 +25,8 @@ The canonical map is [Find the way to the first Plex release specification](http
 
 Research notes live on separate `research/*` branches linked from their tickets. These branches are planning evidence, are not merged, and have no pull requests.
 
+The selected interface direction is the album browser with a persistent queue, documented in [Choose library browsing and player interactions](https://github.com/42lizard/qoda-player/issues/6). Its throwaway comparison prototype stays on `prototype/library-interactions`; it is not production application code.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
