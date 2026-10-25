@@ -32,6 +32,42 @@ pub struct CatalogPage {
     pub has_more: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AlbumRef {
+    pub source: SourceId,
+    pub key: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Album {
+    pub reference: AlbumRef,
+    pub title: String,
+    pub artist: String,
+    pub year: Option<u32>,
+    pub track_count: Option<Counter>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AlbumPage {
+    pub source: SourceId,
+    pub offset: Counter,
+    pub query: String,
+    pub albums: Vec<Album>,
+    pub has_more: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AlbumTrack {
+    pub track: Track,
+    pub disc: u32,
+    pub number: u32,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AlbumSnapshot {
+    pub album: Album,
+    pub revision: String,
+    pub tracks: Vec<AlbumTrack>,
+    /// Bounded JPEG data URI; never an upstream URL or credential.
+    pub artwork: Option<String>,
+    pub artwork_unavailable: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlaylistRef {
     pub source: SourceId,
     pub key: String,
@@ -132,7 +168,7 @@ impl std::fmt::Display for ProviderError {
             Self::UnsupportedMedia => "This media version is not supported.",
             Self::InvalidCredential => "The saved sign-in could not be read.",
             Self::InvalidRange => "The requested media range is invalid.",
-            Self::Unsupported=>"This provider does not support this playlist action.",
+            Self::Unsupported=>"This provider does not support this action.",
             Self::PlaylistChanged=>"The playlist changed. Refresh and review its contents before editing again.",
             Self::UncertainMutation=>"The playlist edit may have reached Plex. Refresh and inspect the result before making another edit; the request was not retried.",
             Self::ReadOnly=>"This playlist is read-only in Qoda. Smart playlists cannot be edited here.",
@@ -143,6 +179,17 @@ impl std::fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 pub trait MusicProvider: Send + Sync {
+    fn albums(
+        &self,
+        _source: SourceId,
+        _offset: u64,
+        _query: String,
+    ) -> ProviderFuture<'_, AlbumPage> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
+    fn album(&self, _reference: AlbumRef) -> ProviderFuture<'_, AlbumSnapshot> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
     fn playlists(&self, _source: SourceId, _offset: u64) -> ProviderFuture<'_, PlaylistPage> {
         Box::pin(async { Err(ProviderError::Unsupported) })
     }

@@ -1,0 +1,313 @@
+//! Cancellable album browsing; account and request generations fence late reads.
+use qoda_core::{Counter, SourceId};
+use qoda_provider::{AlbumPage, AlbumRef, AlbumSnapshot, MusicProvider, ProviderError, Track};
+use serde::Serialize;
+use serde_json::Value;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+
+#[derive(Default, Serialize)]
+pub struct View {
+    pub page: Option<AlbumPage>,
+    pub selected: Option<AlbumSnapshot>,
+    pub busy: bool,
+    pub message: String,
+}
+pub struct Reply {
+    auth: u64,
+    generation: u64,
+    result: Result<Update, ProviderError>,
+}
+enum Update {
+    Page(AlbumPage),
+    Open(AlbumSnapshot),
+}
+#[derive(Default)]
+pub struct Controller {
+    pub view: View,
+    generation: u64,
+    source: Option<SourceId>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+impl Controller {
+    pub fn invalidate(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+        self.generation = self.generation.saturating_add(1);
+        self.view = View::default();
+        self.source = None;
+    }
+    pub fn source_changed(&mut self, source: SourceId) {
+        if self.source.is_some_and(|current| current != source) {
+            self.invalidate();
+        }
+    }
+    pub fn command(
+        &mut self,
+        request: &Value,
+        provider: Arc<dyn MusicProvider>,
+        auth: u64,
+        events: mpsc::Sender<crate::Event>,
+    ) -> Result<(), String> {
+        enum Action {
+            Page(SourceId, u64, String),
+            Open(AlbumRef),
+        }
+        let action = match request["op"].as_str() {
+            Some("album_list") => {
+                let source = serde_json::from_value(request["source"].clone())
+                    .map_err(|_| ProviderError::UnknownSource.to_string())?;
+                let offset = serde_json::from_value::<Counter>(request["offset"].clone())
+                    .map_err(|_| "Invalid album page.")?
+                    .get();
+                let query: String = request["query"]
+                    .as_str()
+                    .unwrap_or("")
+                    .chars()
+                    .take(512)
+                    .collect();
+                Action::Page(source, offset, query)
+            }
+            Some("album_open") => {
+                let reference: AlbumRef = serde_json::from_value(request["reference"].clone())
+                    .map_err(|_| "Choose an album.")?;
+                if !self
+                    .view
+                    .page
+                    .as_ref()
+                    .is_some_and(|p| p.albums.iter().any(|a| a.reference == reference))
+                {
+                    return Err(
+                        "That album is no longer on the displayed page. Browse again.".into(),
+                    );
+                }
+                Action::Open(reference)
+            }
+            _ => return Err("Unknown album action.".into()),
+        };
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or("Album generation exhausted")?;
+        self.generation = generation;
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+        self.source = Some(match &action {
+            Action::Page(source, ..) => *source,
+            Action::Open(reference) => reference.source,
+        });
+        self.view.selected = None;
+        self.view.busy = true;
+        self.view.message = "Loading albums…".into();
+        if matches!(action, Action::Page(..)) {
+            self.view.page = None;
+        }
+        self.task = Some(tokio::spawn(async move {
+            let work = async {
+                match action {
+                    Action::Page(source, offset, query) => provider
+                        .albums(source, offset, query)
+                        .await
+                        .map(Update::Page),
+                    Action::Open(reference) => provider.album(reference).await.map(Update::Open),
+                }
+            };
+            let result = tokio::time::timeout(std::time::Duration::from_secs(45), work)
+                .await
+                .unwrap_or(Err(ProviderError::Network));
+            let _ = events
+                .send(crate::Event::Albums(Reply {
+                    auth,
+                    generation,
+                    result,
+                }))
+                .await;
+        }));
+        Ok(())
+    }
+    pub fn apply(&mut self, reply: Reply, auth: u64) {
+        if reply.auth != auth || reply.generation != self.generation {
+            return;
+        }
+        self.task = None;
+        self.view.busy = false;
+        match reply.result {
+            Ok(Update::Page(page)) => {
+                self.view.message = if page.albums.is_empty() {
+                    "No albums found."
+                } else {
+                    "Choose an album to view its tracks and cover."
+                }
+                .into();
+                self.view.page = Some(page);
+            }
+            Ok(Update::Open(snapshot)) => {
+                self.view.message = if snapshot.artwork_unavailable {
+                    "Album loaded. Cover unavailable."
+                } else {
+                    "Album loaded. Queue copies are independent of the library."
+                }
+                .into();
+                self.view.selected = Some(snapshot);
+            }
+            Err(error) => {
+                self.view.message = error.to_string();
+            }
+        }
+    }
+    pub fn tracks(&self, request: &Value) -> Result<Vec<Track>, String> {
+        let reference: AlbumRef = serde_json::from_value(request["reference"].clone())
+            .map_err(|_| "Choose a loaded album.")?;
+        let snapshot = self
+            .view
+            .selected
+            .as_ref()
+            .filter(|s| {
+                s.album.reference == reference
+                    && Some(s.revision.as_str()) == request["expected_revision"].as_str()
+            })
+            .ok_or("This album view changed. Open the album again.")?;
+        if self.view.busy {
+            return Err("Wait for the album to finish loading.".into());
+        }
+        let start = if let Some(key) = request["track_key"].as_str() {
+            snapshot
+                .tracks
+                .iter()
+                .position(|t| String::from(t.track.reference.key.clone()) == key)
+                .ok_or("This album track is no longer displayed.")?
+        } else {
+            0
+        };
+        Ok(snapshot.tracks[start..]
+            .iter()
+            .map(|t| t.track.clone())
+            .collect())
+    }
+    pub fn track(&self, reference: &qoda_core::TrackRef) -> Option<Track> {
+        if self.view.busy {
+            return None;
+        }
+        self.view
+            .selected
+            .as_ref()?
+            .tracks
+            .iter()
+            .find(|t| &t.track.reference == reference)
+            .map(|t| t.track.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qoda_provider::{Album, AlbumTrack};
+    use serde_json::json;
+    fn snapshot() -> AlbumSnapshot {
+        let source = SourceId::new();
+        AlbumSnapshot {
+            album: Album {
+                reference: AlbumRef {
+                    source,
+                    key: "10".into(),
+                },
+                title: "Album".into(),
+                artist: "Artist".into(),
+                year: None,
+                track_count: Some(Counter::new(2)),
+            },
+            revision: "snapshot-a".into(),
+            tracks: ["1", "2"]
+                .into_iter()
+                .map(|key| AlbumTrack {
+                    track: Track {
+                        reference: qoda_core::TrackRef {
+                            source,
+                            key: key.to_owned().try_into().unwrap(),
+                        },
+                        title: key.into(),
+                        artist: "Artist".into(),
+                        album: "Album".into(),
+                        duration_ms: None,
+                    },
+                    disc: 1,
+                    number: key.parse().unwrap(),
+                })
+                .collect(),
+            artwork: None,
+            artwork_unavailable: true,
+        }
+    }
+    #[test]
+    fn queue_copy_is_fenced_by_loaded_album_revision_and_requested_start_track() {
+        let snapshot = snapshot();
+        let mut request =
+            json!({"reference":snapshot.album.reference,"expected_revision":snapshot.revision});
+        let mut c = Controller::default();
+        c.view.selected = Some(snapshot);
+        assert_eq!(c.tracks(&request).unwrap().len(), 2);
+        request["track_key"] = json!("2");
+        assert_eq!(c.tracks(&request).unwrap().len(), 1);
+        request["track_key"] = json!("missing");
+        assert!(c.tracks(&request).is_err());
+        request["track_key"] = Value::Null;
+        request["expected_revision"] = json!("older");
+        assert!(c.tracks(&request).is_err());
+        request["expected_revision"] = json!("snapshot-a");
+        c.view.busy = true;
+        assert!(c.tracks(&request).is_err());
+        c.invalidate();
+        assert!(c.tracks(&request).is_err());
+    }
+    #[test]
+    fn old_account_or_superseded_album_reads_cannot_repopulate_current_view() {
+        let mut c = Controller {
+            generation: 3,
+            ..Controller::default()
+        };
+        c.apply(
+            Reply {
+                auth: 1,
+                generation: 3,
+                result: Ok(Update::Open(snapshot())),
+            },
+            2,
+        );
+        c.apply(
+            Reply {
+                auth: 2,
+                generation: 2,
+                result: Ok(Update::Open(snapshot())),
+            },
+            2,
+        );
+        assert!(c.view.selected.is_none());
+        c.apply(
+            Reply {
+                auth: 2,
+                generation: 3,
+                result: Ok(Update::Open(snapshot())),
+            },
+            2,
+        );
+        assert!(c.view.selected.is_some());
+        c.invalidate();
+        c.apply(
+            Reply {
+                auth: 2,
+                generation: 3,
+                result: Ok(Update::Open(snapshot())),
+            },
+            2,
+        );
+        assert!(c.view.selected.is_none());
+        c.source = Some(SourceId::new());
+        c.view.busy = true;
+        let generation = c.generation;
+        c.source_changed(SourceId::new());
+        assert!(!c.view.busy && c.source.is_none());
+        assert!(c.generation > generation);
+    }
+}

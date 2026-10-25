@@ -1,3 +1,4 @@
+mod albums;
 mod playlists;
 use crate::*;
 use futures_util::StreamExt;
@@ -412,6 +413,17 @@ fn parse_track(node: Node<'_, '_>, source: SourceId) -> Result<Track, ProviderEr
     })
 }
 impl MusicProvider for PlexProvider {
+    fn albums(
+        &self,
+        source: SourceId,
+        offset: u64,
+        query: String,
+    ) -> ProviderFuture<'_, AlbumPage> {
+        Box::pin(self.album_list(source, offset, query))
+    }
+    fn album(&self, reference: AlbumRef) -> ProviderFuture<'_, AlbumSnapshot> {
+        Box::pin(self.album_snapshot(reference))
+    }
     fn playlists(&self, source: SourceId, offset: u64) -> ProviderFuture<'_, PlaylistPage> {
         Box::pin(self.playlist_list(source, offset))
     }

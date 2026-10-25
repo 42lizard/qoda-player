@@ -1,3 +1,4 @@
+mod albums;
 mod player;
 mod playlists;
 mod proxy;
@@ -27,6 +28,7 @@ enum Event {
     Stored(storage::Reply),
     Checkpoint,
     Playlists(playlists::Reply),
+    Albums(albums::Reply),
     Connected(
         u64,
         Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
@@ -165,7 +167,11 @@ async fn prepare_track(
     }));
     Ok(())
 }
-fn catalog_track(state: &Value, request: &Value) -> Result<qoda_provider::Track, &'static str> {
+fn catalog_track(
+    state: &Value,
+    albums: &albums::Controller,
+    request: &Value,
+) -> Result<qoda_provider::Track, &'static str> {
     let reference = serde_json::from_value::<TrackRef>(
         json!({"source":request["source"],"key":request["key"]}),
     )
@@ -176,6 +182,7 @@ fn catalog_track(state: &Value, request: &Value) -> Result<qoda_provider::Track,
         .flatten()
         .filter_map(|v| serde_json::from_value::<qoda_provider::Track>(v.clone()).ok())
         .find(|t| t.reference == reference)
+        .or_else(|| albums.track(&reference))
         .ok_or("That track is no longer on the displayed page. Browse again.")
 }
 fn check_queue(queue: &queue::Queue, request: &Value) -> Result<(), queue::Error> {
@@ -284,6 +291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut handled_end = None;
     let mut playlists = playlists::Controller::default();
+    let mut albums = albums::Controller::default();
     let mut presented_generation = None;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
     let (tx, mut events) = mpsc::channel(64);
@@ -300,6 +308,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     state["queue"] = json!(queue.snapshot());
     state["playlists"] = json!(playlists.view);
+    state["albums"] = json!(albums.view);
     state["account_epoch"] = json!("0");
     if queue.snapshot().membership_count > 0 {
         state["status"] = json!("Session restored paused. Restore Plex sign-in to resume.");
@@ -395,6 +404,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             Event::Checkpoint => {}
+            Event::Albums(reply) => {
+                albums.apply(reply, auth_generation);
+            }
             Event::Playlists(reply) => {
                 playlists.apply(reply, auth_generation);
             }
@@ -548,11 +560,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state["error"] = json!(error);
                         }
                     }
+                    "album_list" | "album_open" => {
+                        if let Some(provider) = provider.clone() {
+                            if let Err(error) =
+                                albums.command(&v, provider, auth_generation, tx.clone())
+                            {
+                                state["error"] = json!(error);
+                            }
+                        } else {
+                            state["error"] = json!("Connect Plex before browsing albums.");
+                        }
+                    }
+                    "album_play" | "album_enqueue" => {
+                        let result: Result<(), String> = (|| {
+                            check_queue(&queue, &v).map_err(|e| e.to_string())?;
+                            let tracks = albums.tracks(&v)?;
+                            if provider.is_none() {
+                                return Err("Connect Plex before queueing an album.".into());
+                            }
+                            if v["op"] == "album_play" {
+                                to_prepare =
+                                    queue.replace_many(tracks).map_err(|e| e.to_string())?;
+                                desired_playing = true;
+                            } else {
+                                queue.enqueue_many(tracks).map_err(|e| e.to_string())?;
+                            }
+                            Ok(())
+                        })();
+                        if let Err(error) = result {
+                            state["error"] = json!(error);
+                        }
+                    }
                     "browse" => {
                         if let Some(p) = provider.clone()
                             && let Ok(source) =
                                 serde_json::from_value::<SourceId>(v["source"].clone())
                         {
+                            albums.source_changed(source);
                             let Ok(offset) =
                                 serde_json::from_value::<qoda_core::Counter>(v["offset"].clone())
                             else {
@@ -582,7 +626,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "play" => {
                         if provider.is_some() {
-                            match catalog_track(&state, &v) {
+                            match catalog_track(&state, &albums, &v) {
                                 Ok(track) => match queue.replace(track.clone()) {
                                     Ok(_) => {
                                         desired_playing = true;
@@ -606,8 +650,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         if provider.is_none() {
                                             return Err("Connect Plex before adding tracks.".into());
                                         }
-                                        let track =
-                                            catalog_track(&state, &v).map_err(str::to_owned)?;
+                                        let track = catalog_track(&state, &albums, &v)
+                                            .map_err(str::to_owned)?;
                                         queue
                                             .enqueue(track, v["op"] == "play_next")
                                             .map_err(|e| e.to_string())?;
@@ -789,6 +833,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .ok_or("Generation exhausted")?;
                         provider = None;
                         playlists.invalidate();
+                        albums.invalidate();
                         queue = queue.empty_session();
                         purge_epoch = purge_epoch
                             .checked_add(1)
@@ -989,6 +1034,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         state["queue"] = json!(queue.snapshot());
         state["playlists"] = json!(playlists.view);
+        state["albums"] = json!(albums.view);
         state["account_epoch"] = json!(auth_generation.to_string());
         let stamp = (queue.durable_stamp(), purge_epoch);
         if force_save || stamp != last_requested {

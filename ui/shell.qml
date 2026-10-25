@@ -7,7 +7,7 @@ import Quickshell.Io
 
 ShellRoot {
     id: root
-    property var snapshot: ({libraries: [], status: "Connecting backend", intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
+    property var snapshot: ({albums: {page: null, selected: null, busy: false, message: "Choose a library to browse albums."}, libraries: [], status: "Connecting backend", intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
     property var libraryModel: []
     property var trackModel: []
     property var queueModel: []
@@ -18,6 +18,8 @@ ShellRoot {
     property var playlistEntries: []
     property var playlistSeed: null
     property bool accountExpanded: false
+    property bool queueRequested: false
+    readonly property bool queueOnly: window.width < 980 && queueRequested
     property string playlistJson: "[]"
     property string playlistEntriesJson: "[]"
     property var playlistView: snapshot.playlists ? snapshot.playlists.selected : null
@@ -71,6 +73,10 @@ ShellRoot {
         while (carry > 0) { digits.unshift(String(carry % 10)); carry = Math.floor(carry / 10); }
         return digits.join("").replace(/^0+(?=.)/, "");
     }
+    function browseAlbums(offset) {
+        if (libraryId) send("album_list", {source: libraryId, offset: offset || "0", query: search.text});
+    }
+    function searchCatalog() { if (libraryTabs.currentIndex === 2) browseAlbums("0"); else browse("0"); }
     function browse(offset) {
         if (libraryId) send("browse", {source: libraryId, offset: offset || "0", query: search.text});
     }
@@ -91,7 +97,11 @@ ShellRoot {
                         let a = next.revision, b = root.snapshot.revision || "0";
                         if (a.length < b.length || (a.length === b.length && a < b)) return;
                     }
-                    if (!root.instance && next.page) {
+                    if (!root.instance && next.albums && next.albums.page) {
+                        root.libraryId = next.albums.page.source;
+                        search.text = next.albums.page.query;
+                    }
+                    if (!root.instance && next.page && !root.libraryId) {
                         root.libraryId = next.page.source;
                         search.text = next.page.query;
                     }
@@ -113,7 +123,7 @@ ShellRoot {
         }
     }
     Timer { interval: 1000; repeat: true; running: !socket.connected; onTriggered: socket.connected = true }
-    Timer { id: searchDelay; interval: 300; onTriggered: root.browse("0") }
+    Timer { id: searchDelay; interval: 300; onTriggered: root.searchCatalog() }
     FloatingWindow {
         id: window
         title: "Qoda Player"
@@ -125,53 +135,75 @@ ShellRoot {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 22
-            spacing: 14
-            RowLayout {
+            anchors.margins: 16
+            spacing: 8
+            Flow {
+                Layout.fillWidth: true
+                Layout.preferredHeight: childrenRect.height
+                spacing: 6
                 Label { text: "Qoda"; color: "#f2e9db"; font.pixelSize: 28; font.bold: true }
-                Label { text: "Plex music"; color: "#acb8c8"; Layout.fillWidth: true }
+                Label { text: "Plex music"; color: "#acb8c8" }
+                Button { text: root.queueOnly ? "Browser" : "Queue"; visible: window.width < 980; onClicked: root.queueRequested = !root.queueRequested }
                 Button { text: "Account"; onClicked: root.accountExpanded = !root.accountExpanded }
-                Button { text: "Connect Plex (this session)"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
+                Button { text: "Connect Plex"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
                 Button { text: "Disconnect"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes the saved queue and session backups. Keeps saved sign-in."; onClicked: root.send("disconnect") }
                 Button { text: "Hide"; onClicked: window.visible = false }
                 Button { text: "Quit"; onClicked: { root.send("quit"); Qt.quit(); } }
             }
-            RowLayout {
+            Flow {
+                Layout.fillWidth: true
+                Layout.preferredHeight: childrenRect.height
+                spacing: 6
                 visible: root.accountExpanded || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || root.snapshot.sign_in.saved !== "present"
                 Button { text: "Restore saved sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
                 Button { text: "Save sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
                 Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, saved queue and session backups. Keeps general preferences."; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
-                Label { text: root.snapshot.sign_in ? root.snapshot.sign_in.message || "" : ""; color: "#acb8c8"; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+                Label { text: root.snapshot.sign_in ? root.snapshot.sign_in.message || "" : ""; color: "#acb8c8"; width: parent.width; wrapMode: Text.Wrap; textFormat: Text.PlainText }
             }
             RowLayout {
                 Label { text: root.snapshot.storage ? root.snapshot.storage.message : "Opening session storage…"; color: root.snapshot.storage && (root.snapshot.storage.state === "unsaved" || root.snapshot.storage.state === "blocked") ? "#f2a89b" : "#acb8c8"; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
                 Button { text: "Retry save"; enabled: socket.connected; onClicked: root.send("retry_save") }
             }
-            Label { text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: "#acb8c8"; textFormat: Text.PlainText }
+            Label { text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: "#acb8c8"; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
             Label { visible: !!root.snapshot.error; text: root.snapshot.error || ""; color: "#f2a89b"; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
             RowLayout {
                 visible: !!root.snapshot.signin_url
                 Button { text: "Open Plex sign-in"; onClicked: { browser.command = ["/usr/bin/brave", root.snapshot.signin_url]; browser.running = true; } }
                 TextField { text: root.snapshot.signin_url || ""; readOnly: true; selectByMouse: true; Layout.fillWidth: true }
             }
-            RowLayout {
+            GridLayout {
+                Layout.fillWidth: true
+                columns: window.width < 980 ? 2 : 3
                 ComboBox {
                     currentIndex: root.libraryModel.findIndex(library => library.id === root.libraryId)
-                    Layout.preferredWidth: 300
+                    Layout.preferredWidth: 220
+                    Layout.minimumWidth: 0
+                    Layout.fillWidth: true
                     model: root.libraryModel
                     textRole: "title"
-                    onActivated: index => { root.libraryId = model[index].id; root.playlistSeed = null; root.browse("0"); if (libraryTabs.currentIndex === 1) root.refreshPlaylists(); }
+                    onActivated: index => { root.libraryId = model[index].id; root.playlistSeed = null; root.browse("0"); if (libraryTabs.currentIndex === 1) root.refreshPlaylists(); if (libraryTabs.currentIndex === 2) root.browseAlbums("0"); }
                     displayText: root.libraryId ? currentText : "Choose a music library"
                 }
-                TabBar { id: libraryTabs; Layout.preferredWidth: 230; TabButton { text: "Library" } TabButton { text: "Playlists" } onCurrentIndexChanged: { if (currentIndex === 1 && root.libraryId) root.refreshPlaylists(); } }
-                TextField { visible: libraryTabs.currentIndex === 0; id: search; Layout.fillWidth: true; placeholderText: "Search this library"; onTextEdited: searchDelay.restart(); onAccepted: { searchDelay.stop(); root.browse("0"); } }
+                TabBar { id: libraryTabs; currentIndex: 2; Layout.preferredWidth: 280; TabButton { text: "Tracks" } TabButton { text: "Playlists" } TabButton { text: "Albums" } onCurrentIndexChanged: { searchDelay.stop(); if (currentIndex === 1 && root.libraryId) root.refreshPlaylists(); if (currentIndex === 2 && root.libraryId && !(root.snapshot.albums && root.snapshot.albums.page && root.snapshot.albums.page.source === root.libraryId && root.snapshot.albums.page.query === search.text)) root.browseAlbums("0"); } }
+                TextField { visible: libraryTabs.currentIndex !== 1; id: search; Layout.fillWidth: true; Layout.columnSpan: window.width < 980 ? 2 : 1; placeholderText: libraryTabs.currentIndex === 2 ? "Search album titles" : "Search this library"; onTextEdited: searchDelay.restart(); onAccepted: { searchDelay.stop(); root.searchCatalog(); } }
             }
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 16
+                AlbumBrowser {
+                    id: albumBrowser
+                    visible: libraryTabs.currentIndex === 2 && !root.queueOnly
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    snapshot: root.snapshot.albums || null
+                    connected: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
+                    onOpenAlbum: reference => root.send("album_open", {reference: reference})
+                    onPageRequested: direction => root.browseAlbums(root.pageOffset(albumBrowser.page.offset, direction === "previous" ? -100 : 100))
+                    onQueueAlbum: (op, fields) => root.editQueue(op, fields)
+                    onTrackAction: (op, track) => root.editQueue(op, {source: track.reference.source, key: track.reference.key})
+                }
                 ColumnLayout {
-                    visible: libraryTabs.currentIndex === 0
+                    visible: libraryTabs.currentIndex === 0 && !root.queueOnly
                     Layout.fillWidth: true
                     Layout.fillHeight: true
             Label { text: "Click a track title to select the first track for a new playlist."; color: "#acb8c8"; wrapMode: Text.Wrap; Layout.fillWidth: true }
@@ -214,7 +246,7 @@ ShellRoot {
             }
                 }
                 ColumnLayout {
-                    visible: libraryTabs.currentIndex === 1
+                    visible: libraryTabs.currentIndex === 1 && !root.queueOnly
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Label { text: "Audio playlists on the selected library's server"; color: "#f2e9db"; font.bold: true }
@@ -283,8 +315,10 @@ ShellRoot {
                         }
                     }
                 }
-                Rectangle { width: 1; Layout.fillHeight: true; color: "#394355" }
+                Rectangle { visible: window.width >= 980; width: 1; Layout.fillHeight: true; color: "#394355" }
                 ColumnLayout {
+                    visible: window.width >= 980 || root.queueOnly
+                    Layout.fillWidth: root.queueOnly
                     Layout.preferredWidth: 340
                     Layout.fillHeight: true
                     Label { text: "Queue · " + root.queueModel.length; color: "#f2e9db"; font.pixelSize: 20; font.bold: true }
@@ -332,17 +366,19 @@ ShellRoot {
                 }
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: "#394355" }
-            Label { text: root.snapshot.selection ? root.snapshot.selection.title + " · " + root.snapshot.selection.artist : "No track selected"; color: "#f2e9db"; textFormat: Text.PlainText }
-            RowLayout {
+            Label { text: root.snapshot.selection ? root.snapshot.selection.title + " · " + root.snapshot.selection.artist : "No track selected"; color: "#f2e9db"; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
+            Flow {
+                Layout.fillWidth: true
+                Layout.preferredHeight: childrenRect.height
+                spacing: 6
                 Button { text: root.snapshot.intent === "playing" ? "Pause" : "Resume"; enabled: root.queueModel.length > 0 && !!root.snapshot.sign_in && root.snapshot.sign_in.connected; onClicked: root.send(root.snapshot.intent === "playing" ? "pause" : "resume") }
                 Button { text: "Previous"; enabled: !!root.snapshot.queue && root.snapshot.queue.previous_available; onClicked: root.editQueue("previous") }
                 Button { text: "Next track"; enabled: root.queueModel.length > 0; onClicked: root.editQueue("next") }
                 Button { text: "Replay"; enabled: !!root.snapshot.queue && root.snapshot.queue.membership_count > 0; onClicked: root.editQueue("replay") }
                 Label { text: "Seek (seconds)"; color: "#acb8c8" }
-                TextField { id: seek; placeholderText: "0"; Layout.preferredWidth: 90; validator: DoubleValidator { bottom: 0; top: 1000000000; locale: "C" } onAccepted: root.send("seek", {seconds: Number(text)}) }
+                TextField { id: seek; placeholderText: "0"; width: 75; validator: DoubleValidator { bottom: 0; top: 1000000000; locale: "C" } onAccepted: root.send("seek", {seconds: Number(text)}) }
                 Button { text: "Seek"; enabled: !!root.snapshot.queue && !!root.snapshot.queue.selected && seek.acceptableInput; onClicked: root.send("seek", {seconds: Number(seek.text)}) }
-                Item { Layout.fillWidth: true }
-                Label { text: (root.snapshot.audio && root.snapshot.audio.position_seconds !== null ? root.snapshot.audio.position_seconds.toFixed(1) + " s · " : root.snapshot.queue && root.snapshot.queue.selected ? root.snapshot.queue.position_seconds.toFixed(1) + " s local · " : "") + "Desktop / PipeWire · ReplayGain off"; color: "#acb8c8" }
+                Label { width: parent.width; text: (root.snapshot.audio && root.snapshot.audio.position_seconds !== null ? root.snapshot.audio.position_seconds.toFixed(1) + " s · " : root.snapshot.queue && root.snapshot.queue.selected ? root.snapshot.queue.position_seconds.toFixed(1) + " s local · " : "") + "Desktop / PipeWire · ReplayGain off"; color: "#acb8c8" }
             }
         }
     }
@@ -350,8 +386,11 @@ ShellRoot {
         target: "control"
         function show(): void { window.visible = true;  }
         function hide(): void { window.visible = false; }
-        function browsePlaylists(): void { libraryTabs.currentIndex = 1; window.visible = true; }
-        function status(): string { return JSON.stringify({geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
+        function browseAlbums(): void { root.queueRequested = false; albumBrowser.showDetails = !!albumBrowser.selected; libraryTabs.currentIndex = 2; window.visible = true; }
+        function albumOverview(): void { root.queueRequested = false; albumBrowser.showDetails = false; libraryTabs.currentIndex = 2; window.visible = true; }
+        function showQueue(): void { root.queueRequested = true; window.visible = true; }
+        function browsePlaylists(): void { root.queueRequested = false; libraryTabs.currentIndex = 1; window.visible = true; }
+        function status(): string { return JSON.stringify({queueOnly: root.queueOnly, albums: {details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, visible: window.visible}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }
