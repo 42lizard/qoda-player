@@ -1,0 +1,57 @@
+{
+  "form": "hidden",
+  "lastForm": "full",
+  "page": "Albums",
+  "queryMatchesFixture": false,
+  "queryEmpty": true,
+  "selected": 0,
+  "savedY": 0,
+  "listY": 0,
+  "playing": true,
+  "ticks": 47,
+  "closeEvents": 0,
+  "handledPhysicalKeys": 0,
+  "dialog": false,
+  "queueDrawer": false,
+  "full": {
+    "visible": false,
+    "mapped": false,
+    "width": 1100,
+    "height": 700,
+    "dpr": 1,
+    "active": false,
+    "focusItem": "none",
+    "searchFocused": false,
+    "persistentQueue": true,
+    "screen": "eDP-1"
+  },
+  "compact": {
+    "visible": false,
+    "mapped": false,
+    "width": 420,
+    "height": 240,
+    "dpr": 2,
+    "active": false,
+    "focusItem": "none",
+    "keyboardMode": 0,
+    "screen": "eDP-1"
+  },
+  "helperActive": true,
+  "step": 0,
+  "inputEvents": [],
+  "reviews": [],
+  "screens": [
+    {
+      "name": "eDP-1",
+      "width": 1200,
+      "height": 800
+    }
+  ],
+  "journal": [
+    {
+      "action": "ready:hidden",
+      "form": "hidden",
+      "tick": 0
+    }
+  ]
+}
