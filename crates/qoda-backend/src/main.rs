@@ -32,7 +32,8 @@ use zeroize::Zeroizing;
 enum Event {
     Request(Value),
     Desktop(mpris::Request),
-    DesktopLost,
+    DesktopLost(uuid::Uuid),
+    DesktopReady(Result<mpris::Service, ()>),
     Advance(u64),
     Stored(storage::Reply),
     Checkpoint,
@@ -523,22 +524,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_clock_stale = false;
     let mut checkpoint_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     checkpoint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut desktop = match tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        mpris::Service::start(tx.clone()),
-    )
-    .await
-    {
-        Ok(Ok(service)) => {
+    let mut desktop = match mpris::Service::start(tx.clone()).await {
+        Ok(service) if service.is_live() => {
             state["mpris"] =
                 json!({"state":"available","message":"Desktop media controls available."});
             Some(service)
         }
         _ => {
-            state["mpris"] = json!({"state":"unavailable","message":"Desktop media controls are unavailable. Restart Qoda after the session bus is available or another Qoda instance closes."});
+            state["mpris"] = json!({"state":"unavailable","message":"Desktop media controls unavailable. Retry after the session bus is available or another Qoda instance closes."});
             None
         }
     };
+    let mut desktop_task: Option<tokio::task::JoinHandle<()>> = None;
     updates.send_replace(state.clone());
     if let Some(c) = credential {
         auth_generation = auth_generation
@@ -634,10 +631,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut desktop_reply = None;
         let mut desktop_action = None;
         let mut desktop_deadline = None;
+        let mut desktop_owner = None;
         let mut event = if let Event::Desktop(request) = event {
-            if !request.is_live() {
+            if !desktop
+                .as_ref()
+                .is_some_and(|service| service.accepts(&request))
+            {
                 let _ = request.reply.send(Err(
-                    "The desktop command expired before it was applied.".into(),
+                    "The desktop command expired or its connection was replaced.".into(),
                 ));
                 continue;
             }
@@ -652,6 +653,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             if let Some(command) = mpris::translate(&request.action, &view, &queue, &instance) {
                 desktop_deadline = Some(request.deadline);
+                desktop_owner = Some(request.owner);
                 desktop_action = Some(request.action);
                 desktop_reply = Some(request.reply);
                 Event::Request(command)
@@ -733,12 +735,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(action) = &desktop_action {
             if desktop_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now())
+                || !desktop_owner.is_some_and(|owner| {
+                    desktop
+                        .as_ref()
+                        .is_some_and(|service| service.id() == owner && service.is_live())
+                })
                 || desktop_reply
                     .as_ref()
                     .is_some_and(|reply| reply.is_closed())
             {
                 event = Event::Checkpoint;
-                state["error"] = json!("The desktop command expired before queue mutation.");
+                state["error"] = json!(
+                    "The desktop command expired or its connection closed before queue mutation."
+                );
             } else if matches!(event, Event::Request(_)) {
                 let view = mpris::View::capture(
                     &queue,
@@ -785,11 +794,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state["audio"] = Value::Null;
                 }
             }
-            Event::DesktopLost => {
-                if let Some(desktop) = desktop.take() {
-                    desktop.shutdown().await;
+            Event::DesktopLost(id)
+                if desktop.as_ref().is_some_and(|service| service.id() == id) =>
+            {
+                if let Some(service) = desktop.take() {
+                    service.shutdown().await;
                 }
-                state["mpris"] = json!({"state":"unavailable","message":"Desktop media controls disconnected. Playback controls in Qoda remain available; restart Qoda to reconnect the session bus."});
+                state["mpris"] = json!({"state":"unavailable","message":"Desktop media controls disconnected. Retry to reconnect; playback controls in Qoda remain available."});
+            }
+            Event::DesktopReady(result) => {
+                desktop_task = None;
+                match result {
+                    Ok(service) if service.is_live() => {
+                        desktop = Some(service);
+                        state["mpris"] = json!({"state":"available","message":"Desktop media controls available."});
+                    }
+                    _ => {
+                        state["mpris"] = json!({"state":"unavailable","message":"Desktop media controls unavailable. Retry after the session bus is available or another Qoda instance closes."})
+                    }
+                }
             }
             Event::Stored(reply) => {
                 if reply.serial == durable.serial() {
@@ -1261,6 +1284,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 },
                                 Err(error) => state["error"] = json!(error),
                             }
+                        }
+                    }
+                    "retry_desktop" => {
+                        if desktop_task.is_none()
+                            && desktop.as_ref().is_some_and(|service| !service.is_live())
+                            && let Some(service) = desktop.take()
+                        {
+                            service.shutdown().await;
+                        }
+                        if desktop.is_none() && desktop_task.is_none() {
+                            state["mpris"] = json!({"state":"connecting","message":"Connecting desktop media controls…"});
+                            let tx = tx.clone();
+                            desktop_task = Some(tokio::spawn(async move {
+                                let result =
+                                    mpris::Service::start(tx.clone()).await.map_err(|_| ());
+                                let _ = tx.send(Event::DesktopReady(result)).await;
+                            }));
                         }
                     }
                     "navigation_page" => {
@@ -1806,6 +1846,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     gapless.invalidate();
     player.send(Command::Pause(true));
     player.send(Command::Stop);
+    if let Some(task) = desktop_task {
+        task.abort();
+        let _ = task.await;
+    }
+    events.close();
+    while let Ok(event) = events.try_recv() {
+        if let Event::DesktopReady(Ok(service)) = event {
+            service.shutdown().await;
+        }
+    }
     proxy.revoke().await;
     artwork.revoke(false).await;
     if let Some(task) = cache_task {

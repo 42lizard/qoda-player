@@ -4,7 +4,10 @@ use qoda_core::{OccurrenceId, SessionId};
 use serde_json::{Value as Json, json};
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::{mpsc, oneshot, watch};
@@ -28,6 +31,7 @@ pub enum Action {
     Quit,
 }
 pub struct Request {
+    pub owner: uuid::Uuid,
     pub action: Action,
     pub deadline: tokio::time::Instant,
     pub reply: oneshot::Sender<Result<(), String>>,
@@ -300,6 +304,7 @@ pub fn translate(
 }
 #[derive(Clone)]
 struct Remote {
+    owner: uuid::Uuid,
     view: Arc<RwLock<View>>,
     tx: mpsc::Sender<crate::Event>,
 }
@@ -313,6 +318,7 @@ impl Remote {
         tokio::time::timeout_at(deadline, async {
             self.tx
                 .send(crate::Event::Desktop(Request {
+                    owner: self.owner,
                     action,
                     deadline,
                     reply,
@@ -500,6 +506,8 @@ impl Player {
     }
 }
 pub struct Service {
+    id: uuid::Uuid,
+    live: Arc<AtomicBool>,
     connection: Connection,
     shared: Arc<RwLock<View>>,
     updates: watch::Sender<View>,
@@ -509,12 +517,17 @@ pub struct Service {
 }
 impl Service {
     pub async fn start(tx: mpsc::Sender<crate::Event>) -> zbus::Result<Self> {
-        Self::build(Builder::session(), tx).await
+        tokio::time::timeout(Duration::from_secs(3), Self::build(Builder::session(), tx))
+            .await
+            .map_err(|_| zbus::Error::Failure("Desktop connection timed out.".into()))?
     }
     async fn build(builder: Builder<'_>, tx: mpsc::Sender<crate::Event>) -> zbus::Result<Self> {
+        let id = uuid::Uuid::new_v4();
+        let live = Arc::new(AtomicBool::new(true));
         let initial = View::default();
         let shared = Arc::new(RwLock::new(initial.clone()));
         let remote = Remote {
+            owner: id,
             view: shared.clone(),
             tx: tx.clone(),
         };
@@ -528,11 +541,12 @@ impl Service {
             .await?;
         let (updates, mut rx) = watch::channel(initial.clone());
         let bus = connection.clone();
+        let healthy = live.clone();
         let task = tokio::spawn(async move {
             let mut old = initial;
             loop {
                 tokio::select! {
-                    _ = bus.closed() => { let _ = tx.send(crate::Event::DesktopLost).await; break; }
+                    _ = bus.closed() => { healthy.store(false, Ordering::Release); let _ = tx.send(crate::Event::DesktopLost(id)).await; break; }
                     changed = rx.changed() => { if changed.is_err() { break; } }
                 }
                 let next = rx.borrow_and_update().clone();
@@ -549,7 +563,8 @@ impl Service {
                         .await
                         .is_err()
                 {
-                    let _ = tx.send(crate::Event::DesktopLost).await;
+                    healthy.store(false, Ordering::Release);
+                    let _ = tx.send(crate::Event::DesktopLost(id)).await;
                     break;
                 }
                 if next.seek_serial != old.seek_serial
@@ -558,13 +573,16 @@ impl Service {
                         .await
                         .is_err()
                 {
-                    let _ = tx.send(crate::Event::DesktopLost).await;
+                    healthy.store(false, Ordering::Release);
+                    let _ = tx.send(crate::Event::DesktopLost(id)).await;
                     break;
                 }
                 old = next;
             }
         });
         Ok(Self {
+            id,
+            live,
             connection,
             shared,
             updates,
@@ -572,6 +590,15 @@ impl Service {
             pending_seek: None,
             seek_serial: 0,
         })
+    }
+    pub fn id(&self) -> uuid::Uuid {
+        self.id
+    }
+    pub fn is_live(&self) -> bool {
+        self.live.load(Ordering::Acquire) && !self.task.is_finished()
+    }
+    pub fn accepts(&self, request: &Request) -> bool {
+        self.is_live() && request.owner == self.id && request.is_live()
     }
     pub fn mark_seek(&mut self, queue: &queue::Queue, generation: u64) {
         let q = queue.snapshot();
@@ -593,8 +620,17 @@ impl Service {
         self.updates.send_replace(view);
     }
     pub async fn shutdown(self) {
+        self.live.store(false, Ordering::Release);
         self.task.abort();
-        let _ = self.connection.release_name(NAME).await;
+        let _ =
+            tokio::time::timeout(Duration::from_secs(1), self.connection.release_name(NAME)).await;
+    }
+}
+
+impl Drop for Service {
+    fn drop(&mut self) {
+        self.live.store(false, Ordering::Release);
+        self.task.abort();
     }
 }
 
@@ -816,6 +852,7 @@ mod tests {
     fn expired_or_abandoned_desktop_requests_cannot_gain_late_authority() {
         let (reply, rx) = oneshot::channel();
         let request = Request {
+            owner: uuid::Uuid::new_v4(),
             action: Action::Toggle,
             deadline: tokio::time::Instant::now() + Duration::from_secs(1),
             reply,
@@ -825,6 +862,7 @@ mod tests {
         assert!(!request.is_live());
         let (reply, _rx) = oneshot::channel();
         let request = Request {
+            owner: uuid::Uuid::new_v4(),
             action: Action::Play,
             deadline: tokio::time::Instant::now() - Duration::from_secs(1),
             reply,
@@ -1034,6 +1072,86 @@ mod tests {
         );
     }
     #[tokio::test]
+    async fn queued_commands_from_a_replaced_connection_cannot_control_its_successor() {
+        let bus = Bus::new().await;
+        let (tx, mut rx) = mpsc::channel(8);
+        let old = Service::build(Builder::address(bus.address.as_str()), tx.clone())
+            .await
+            .unwrap();
+        let remote = Remote {
+            owner: old.id(),
+            view: old.shared.clone(),
+            tx: tx.clone(),
+        };
+        let caller = tokio::spawn(async move { remote.request(Action::Shuffle(true)).await });
+        let Some(crate::Event::Desktop(stale)) = rx.recv().await else {
+            panic!("Expected desktop request")
+        };
+        assert!(old.accepts(&stale));
+        let old_id = old.id();
+        old.shutdown().await;
+        let current = Service::build(Builder::address(bus.address.as_str()), tx.clone())
+            .await
+            .unwrap();
+        assert_ne!(old_id, current.id());
+        assert!(!current.accepts(&stale));
+        stale
+            .reply
+            .send(Err("Connection was replaced.".into()))
+            .unwrap();
+        assert!(caller.await.unwrap().is_err());
+        assert_eq!(current.seek_serial, 0);
+        assert!(current.pending_seek.is_none());
+        assert_eq!(current.shared.read().unwrap().clone(), View::default());
+        let remote = Remote {
+            owner: current.id(),
+            view: current.shared.clone(),
+            tx,
+        };
+        let caller = tokio::spawn(async move { remote.request(Action::Shuffle(false)).await });
+        let Some(crate::Event::Desktop(request)) = rx.recv().await else {
+            panic!("Expected new desktop request")
+        };
+        assert!(current.accepts(&request));
+        request.reply.send(Ok(())).unwrap();
+        assert!(caller.await.unwrap().is_ok());
+        current.shutdown().await;
+    }
+    #[tokio::test]
+    async fn dropping_a_completed_connection_attempt_releases_its_name_and_publisher() {
+        let bus = Bus::new().await;
+        let (tx, _rx) = mpsc::channel(4);
+        let service = Service::build(Builder::address(bus.address.as_str()), tx)
+            .await
+            .unwrap();
+        let live = service.live.clone();
+        drop(service);
+        assert!(!live.load(Ordering::Acquire));
+        let client = Builder::address(bus.address.as_str())
+            .build()
+            .await
+            .unwrap();
+        let dbus = zbus::Proxy::new(
+            &client,
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while dbus
+                .call::<_, _, bool>("NameHasOwner", &(NAME,))
+                .await
+                .unwrap()
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    #[tokio::test]
     async fn seek_signals_wait_for_a_matching_nominal_clock_and_old_generations_are_cancelled() {
         let bus = Bus::new().await;
         let (tx, _rx) = mpsc::channel(4);
@@ -1066,8 +1184,9 @@ mod tests {
             tokio::time::timeout(Duration::from_secs(2), rx.recv())
                 .await
                 .unwrap(),
-            Some(crate::Event::DesktopLost)
+            Some(crate::Event::DesktopLost(id)) if id == service.id()
         ));
+        assert!(!service.is_live());
         service.shutdown().await;
     }
 }

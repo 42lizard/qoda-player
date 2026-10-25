@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   db.execute('INSERT INTO pages VALUES(?,?,?,?,?,?)',('fixture',source,payload,int(time.time()),1,len(payload)+128))
  database.chmod(0o600)
 
- p=None;ui=None;f=None;s=None;log=open(temp+'/ui.log','w+')
+ p=None;ui=None;f=None;s=None;hung=None;log=open(temp+'/ui.log','w+')
  try:
   def start(unavailable=False):
    global p,s,f,state,instance
@@ -110,10 +110,27 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   assert bus('get-property',name,path,player,'PlaybackStatus',ok=False).returncode!=0
   start();assert state['metadata_cache']['budget_mib']==1;assert state['artwork_cache']['budget_mib']==1;assert state['queue']['shuffled'] and state['queue']['repeat']=='all' and state['intent']=='paused';assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('MPRIS Quit closed backend/UI and released the name; restart retained modes without sign-in or autoplay',flush=True)
   command('quit');p.wait(timeout=15);assert p.returncode==0;f.close();f=None;s.close();s=None
-  start(unavailable=True);assert state['intent']=='paused';command('quit');p.wait(timeout=15);assert p.returncode==0;print('Unavailable session bus remained a visible, nonfatal feature limitation',flush=True)
+  start(unavailable=True);assert state['intent']=='paused'
+  ui=subprocess.Popen(['quickshell','--path',str(root/'ui'),'--no-duplicate'],env=env,stdout=log,stderr=log)
+  for _ in range(60):
+   assert ui.poll() is None,'Recovery UI exited'
+   try:
+    info=json.loads(ipc('status'))
+    if info['instance']==instance and info['desktopControls']['state']=='unavailable':break
+   except (ValueError,KeyError):pass
+   time.sleep(.1)
+  else:raise AssertionError('Recovery controls never loaded')
+  hung=socket.socket(socket.AF_UNIX);hung.bind(temp+'/missing-session-bus');hung.listen()
+  before=state['queue'];ipc('retryDesktopControls');until(lambda v:v['mpris']['state']=='connecting')
+  command('set_gapless',enabled=False);until(lambda v:not v['gapless']['enabled']);assert state['mpris']['state']=='connecting'
+  until(lambda v:v['mpris']['state']=='unavailable');assert state['queue']==before and state['intent']=='paused'
+  hung.close();hung=None
+  command('quit');p.wait(timeout=15);assert p.returncode==0;ui.wait(timeout=5);assert ui.returncode==0
+  print('Native recovery controls started a bounded hung-bus retry while other controls stayed responsive; timeout remained nonfatal',flush=True)
   log.flush();log.seek(0);errors=[line for line in log.read().splitlines() if any(e in line for e in ['TypeError','ReferenceError','Cannot assign','Failed to load','SyntaxError'])];assert not errors,'QML runtime error: '+repr(errors)
   print('No real music, credentials or Plex requests were used; scoped processes stopped',flush=True)
  finally:
+  if hung:hung.close()
   if ui and ui.poll() is None:ui.terminate();ui.wait(timeout=5)
   if p and p.poll() is None:
    p.send_signal(2)
