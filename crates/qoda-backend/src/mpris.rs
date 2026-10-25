@@ -155,8 +155,13 @@ impl View {
         failed: bool,
     ) -> Self {
         let q = queue.snapshot();
-        let has_pending = q.entries.iter().any(|row| !row.selected);
-        let can_play = connected && (has_pending || q.selected.is_some() && !q.ended);
+        let has_pending = q
+            .entries
+            .iter()
+            .any(|row| !row.selected && row.unavailable.is_none());
+        let can_play = connected
+            && (has_pending
+                || q.selected.is_some() && (!q.ended || q.selected_unavailable.is_some()));
         let mut view = Self {
             generation,
             intent,
@@ -865,6 +870,28 @@ mod tests {
         }
         audio.entry_ready = false;
         assert_eq!(view(&queue, &audio).presentation()["known"], false);
+    }
+    #[test]
+    fn desktop_play_can_explicitly_retry_an_exhausted_unavailable_selection() {
+        let (mut q, audio) = fixture();
+        let id = q.selected().unwrap();
+        q.mark_unavailable(id, queue::Unavailable::Missing).unwrap();
+        assert!(q.advance().unwrap().is_none());
+        let v = View::capture(&q, &audio, 7, None, true, false, false);
+        assert!(v.can_play && v.track.is_none());
+        assert_eq!(
+            translate(&Action::Play, &v, &q, "fixture").unwrap()["op"],
+            "resume"
+        );
+        assert!(!View::capture(&q, &audio, 7, None, false, false, false).can_play);
+        let mut pending = queue::Queue::default();
+        let failed = pending
+            .enqueue(q.snapshot().entries[0].track.clone(), false)
+            .unwrap();
+        pending
+            .mark_unavailable(failed, queue::Unavailable::Missing)
+            .unwrap();
+        assert!(!View::capture(&pending, &audio, 7, None, true, false, false).can_play);
     }
     #[test]
     fn raise_depends_on_ui_attachment_and_cannot_translate_to_playback() {

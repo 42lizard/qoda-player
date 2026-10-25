@@ -526,7 +526,7 @@ ShellRoot {
                 Layout.fillWidth: true
                 Layout.preferredHeight: childrenRect.height
                 spacing: 6
-                Button { text: root.snapshot.intent === "playing" ? "Pause" : "Resume"; enabled: root.queueModel.length > 0 && !!root.snapshot.sign_in && root.snapshot.sign_in.connected; onClicked: root.send(root.snapshot.intent === "playing" ? "pause" : "resume") }
+                Button { text: root.snapshot.intent === "playing" ? "Pause" : "Resume"; enabled: socket.connected && !!root.snapshot.presentation && (root.snapshot.intent === "playing" ? root.snapshot.presentation.can_pause : root.snapshot.presentation.can_play); onClicked: root.send(root.snapshot.intent === "playing" ? "pause" : "resume") }
                 Button { text: "Previous"; enabled: !!root.snapshot.queue && root.snapshot.queue.previous_available; onClicked: root.editQueue("previous") }
                 Button { text: "Next track"; enabled: root.queueModel.length > 0; onClicked: root.editQueue("next") }
                 Button { text: "Replay"; enabled: !!root.snapshot.queue && root.snapshot.queue.membership_count > 0; onClicked: root.editQueue("replay") }
