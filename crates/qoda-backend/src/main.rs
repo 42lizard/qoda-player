@@ -17,7 +17,7 @@ use qoda_core::{OccurrenceId, SourceId, TrackRef};
 use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider, PreparedMedia};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Read,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::PathBuf,
@@ -34,6 +34,7 @@ enum Event {
     Desktop(mpris::Request),
     DesktopLost(uuid::Uuid),
     DesktopReady(Result<mpris::Service, ()>),
+    UiPeer(uuid::Uuid, bool),
     Advance(u64),
     Stored(storage::Reply),
     Checkpoint,
@@ -110,7 +111,18 @@ fn save_identities(ids: &HashMap<String, SourceId>) -> std::io::Result<()> {
 async fn connection(
     stream: tokio::net::UnixStream,
     tx: mpsc::Sender<Event>,
+    updates: watch::Receiver<Value>,
+) -> std::io::Result<()> {
+    let peer = uuid::Uuid::new_v4();
+    let result = connection_io(stream, tx.clone(), updates, peer).await;
+    let _ = tx.send(Event::UiPeer(peer, false)).await;
+    result
+}
+async fn connection_io(
+    stream: tokio::net::UnixStream,
+    tx: mpsc::Sender<Event>,
     mut updates: watch::Receiver<Value>,
+    peer: uuid::Uuid,
 ) -> std::io::Result<()> {
     if stream.peer_cred()?.uid() != unsafe { libc::getuid() } {
         return Ok(());
@@ -133,6 +145,7 @@ async fn connection(
                 if !hello {
                     if value["op"] != "hello" || value["protocol"] != 1 { return Ok(()); }
                     hello = true;
+                    if value["role"] == "shell" { tx.send(Event::UiPeer(peer, true)).await.map_err(|_| std::io::Error::other("Backend stopped"))?; }
                 } else {
                     tx.send(Event::Request(value)).await.map_err(|_| std::io::Error::other("Backend stopped"))?;
                 }
@@ -565,6 +578,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     state["gapless"] = json!(gapless.view);
     let mut desired_playing = false;
     let mut automatic_preparation = None;
+    let mut ui_peers = HashSet::new();
+    state["ui"] = json!({"can_raise":false,"raise_token":null});
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut last_audio = player.status();
     let mut last_stream_failed = false;
@@ -630,7 +645,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                     state["revision"] = json!(revision.to_string());
-                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale);
+                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale).with_ui(!ui_peers.is_empty());
                     state["presentation"]=view.presentation();
                     state["gapless"]=json!(gapless.view);
                     state["artwork_cache"]=artwork.view().await;
@@ -698,7 +713,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 provider.is_some(),
                 desired_playing,
                 last_stream_failed || last_clock_stale,
-            );
+            )
+            .with_ui(!ui_peers.is_empty());
             if let Some(command) = mpris::translate(&request.action, &view, &queue, &instance) {
                 desktop_deadline = Some(request.deadline);
                 desktop_owner = Some(request.owner);
@@ -816,7 +832,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     provider.is_some(),
                     desired_playing,
                     last_stream_failed || last_clock_stale,
-                );
+                )
+                .with_ui(!ui_peers.is_empty());
                 event = mpris::translate(action, &view, &queue, &instance)
                     .map(Event::Request)
                     .unwrap_or(Event::Checkpoint);
@@ -858,6 +875,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     state["error"] = json!(error.to_string());
                 }
+            }
+            Event::UiPeer(peer, attached) => {
+                let changed = if attached {
+                    ui_peers.insert(peer)
+                } else {
+                    ui_peers.remove(&peer)
+                };
+                if !changed {
+                    continue;
+                }
+                state["ui"]["can_raise"] = json!(!ui_peers.is_empty());
             }
             Event::DesktopLost(id)
                 if desktop.as_ref().is_some_and(|service| service.id() == id) =>
@@ -967,6 +995,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let _ = reply.send(Ok(()));
                         }
                         break;
+                    }
+                    "show_ui" => {
+                        if !ui_peers.is_empty() {
+                            state["ui"]["raise_token"] = json!(uuid::Uuid::new_v4().to_string());
+                        }
                     }
                     "retry_save" => force_save = true,
                     "clear_artwork_cache" | "set_artwork_budget" => {
@@ -1913,7 +1946,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             provider.is_some(),
             desired_playing,
             last_stream_failed || last_clock_stale,
-        );
+        )
+        .with_ui(!ui_peers.is_empty());
         state["presentation"] = view.presentation();
         if let Some(desktop) = &mut desktop {
             if seeked {
@@ -2233,6 +2267,35 @@ mod tests {
         drop(write);
         drop(read);
         task.await.unwrap().unwrap();
+    }
+    #[tokio::test]
+    async fn only_explicit_ui_handshakes_attach_and_disconnect_their_own_peer() {
+        let (tx, mut events) = mpsc::channel(8);
+        let (updates, rx) = watch::channel(json!({"instance":"fixture","revision":"0"}));
+        let (server, mut client) = tokio::net::UnixStream::pair().unwrap();
+        let task = tokio::spawn(connection(server, tx.clone(), rx));
+        client
+            .write_all(b"{\"op\":\"hello\",\"protocol\":1,\"role\":\"shell\"}\n")
+            .await
+            .unwrap();
+        let Some(Event::UiPeer(id, true)) = events.recv().await else {
+            panic!("UI was not attached")
+        };
+        drop(client);
+        let _ = task.await.unwrap();
+        let Some(Event::UiPeer(closed, false)) = events.recv().await else {
+            panic!("UI was not detached")
+        };
+        assert_eq!(id, closed);
+        let (server, mut client) = tokio::net::UnixStream::pair().unwrap();
+        let task = tokio::spawn(connection(server, tx, updates.subscribe()));
+        client
+            .write_all(b"{\"op\":\"hello\",\"protocol\":1}\n")
+            .await
+            .unwrap();
+        drop(client);
+        let _ = task.await.unwrap();
+        assert!(matches!(events.recv().await, Some(Event::UiPeer(_, false))));
     }
     #[tokio::test]
     async fn socket_rejects_wrong_version_and_oversized_frames() {

@@ -29,6 +29,7 @@ pub enum Action {
     Shuffle(bool),
     Loop(queue::Repeat),
     Quit,
+    Raise,
 }
 pub struct Request {
     pub owner: uuid::Uuid,
@@ -60,6 +61,7 @@ pub struct View {
     can_next: bool,
     can_previous: bool,
     can_seek: bool,
+    can_raise: bool,
     shuffled: bool,
     repeat: queue::Repeat,
     seek_serial: u64,
@@ -77,6 +79,7 @@ impl Default for View {
             can_next: false,
             can_previous: false,
             can_seek: false,
+            can_raise: false,
             shuffled: false,
             repeat: queue::Repeat::Off,
             seek_serial: 0,
@@ -228,6 +231,10 @@ impl View {
         }
         metadata
     }
+    pub fn with_ui(mut self, connected: bool) -> Self {
+        self.can_raise = connected;
+        self
+    }
     fn changes(&self, old: &Self) -> HashMap<&'static str, Value<'static>> {
         let mut changed = HashMap::new();
         if self.status != old.status {
@@ -272,6 +279,7 @@ pub fn translate(
         Action::Shuffle(enabled) => json!({"op":"set_shuffle","enabled":enabled}),
         Action::Loop(mode) => json!({"op":"set_repeat","mode":mode}),
         Action::Quit => json!({"op":"quit"}),
+        Action::Raise if view.can_raise => json!({"op":"show_ui"}),
         Action::Seek(offset) if view.can_seek => {
             let position = (i128::from(view.position) + i128::from(*offset)).max(0);
             if view
@@ -341,7 +349,12 @@ impl Root {
     async fn quit(&self) -> fdo::Result<()> {
         self.0.request(Action::Quit).await
     }
-    fn raise(&self) {}
+    async fn raise(&self) -> fdo::Result<()> {
+        if !self.0.view().can_raise {
+            return Ok(());
+        }
+        self.0.request(Action::Raise).await
+    }
     #[zbus(property)]
     fn identity(&self) -> &str {
         "Qoda Player"
@@ -352,7 +365,7 @@ impl Root {
     }
     #[zbus(property)]
     fn can_raise(&self) -> bool {
-        false
+        self.0.view().can_raise
     }
     #[zbus(property)]
     fn has_track_list(&self) -> bool {
@@ -550,6 +563,26 @@ impl Service {
                     changed = rx.changed() => { if changed.is_err() { break; } }
                 }
                 let next = rx.borrow_and_update().clone();
+                if next.can_raise != old.can_raise
+                    && bus
+                        .emit_signal(
+                            None::<&str>,
+                            PATH,
+                            "org.freedesktop.DBus.Properties",
+                            "PropertiesChanged",
+                            &(
+                                "org.mpris.MediaPlayer2",
+                                HashMap::from([("CanRaise", Value::from(next.can_raise))]),
+                                Vec::<String>::new(),
+                            ),
+                        )
+                        .await
+                        .is_err()
+                {
+                    healthy.store(false, Ordering::Release);
+                    let _ = tx.send(crate::Event::DesktopLost(id)).await;
+                    break;
+                }
                 let changed = next.changes(&old);
                 if !changed.is_empty()
                     && bus
@@ -834,6 +867,16 @@ mod tests {
         assert_eq!(view(&queue, &audio).presentation()["known"], false);
     }
     #[test]
+    fn raise_depends_on_ui_attachment_and_cannot_translate_to_playback() {
+        let (q, audio) = fixture();
+        let ordinary = view(&q, &audio);
+        assert!(translate(&Action::Raise, &ordinary, &q, "fixture").is_none());
+        let attached = ordinary.with_ui(true);
+        let request = translate(&Action::Raise, &attached, &q, "fixture").unwrap();
+        assert_eq!(request["op"], "show_ui");
+        assert!(attached.changes(&view(&q, &audio)).is_empty());
+    }
+    #[test]
     fn position_ticks_do_not_emit_properties_changed_but_transport_and_metadata_do() {
         let (queue, mut audio) = fixture();
         let old = view(&queue, &audio);
@@ -1031,6 +1074,49 @@ mod tests {
         );
         service.shutdown().await;
         actor.abort();
+    }
+    #[tokio::test]
+    async fn root_raise_capability_changes_and_commands_use_the_desktop_channel() {
+        let bus = Bus::new().await;
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut service = Service::build(Builder::address(bus.address.as_str()), tx)
+            .await
+            .unwrap();
+        let client = Builder::address(bus.address.as_str())
+            .build()
+            .await
+            .unwrap();
+        let root = proxy(&client, "org.mpris.MediaPlayer2").await;
+        assert!(!root.get_property::<bool>("CanRaise").await.unwrap());
+        let _: () = root.call("Raise", &()).await.unwrap();
+        assert!(rx.try_recv().is_err());
+        let properties = proxy(&client, "org.freedesktop.DBus.Properties").await;
+        let mut signals = properties
+            .receive_signal("PropertiesChanged")
+            .await
+            .unwrap();
+        service.publish(View::default().with_ui(true));
+        let signal = tokio::time::timeout(Duration::from_secs(2), signals.next())
+            .await
+            .unwrap()
+            .unwrap();
+        let (interface, changed, _): (String, HashMap<String, zbus::OwnedVariant>, Vec<String>) =
+            signal.body().deserialize().unwrap();
+        assert_eq!(interface, "org.mpris.MediaPlayer2");
+        assert!(changed.contains_key("CanRaise"));
+        assert!(root.get_property::<bool>("CanRaise").await.unwrap());
+        let (result, ()) = tokio::join!(root.call::<_, _, ()>("Raise", &()), async {
+            let Some(crate::Event::Desktop(request)) = rx.recv().await else {
+                panic!("No Raise request")
+            };
+            assert_eq!(request.action, Action::Raise);
+            assert!(service.accepts(&request));
+            request.reply.send(Ok(())).unwrap();
+        });
+        assert!(result.is_ok());
+        service.publish(View::default());
+        assert!(!root.get_property::<bool>("CanRaise").await.unwrap());
+        service.shutdown().await;
     }
     #[tokio::test]
     async fn an_existing_bus_owner_is_not_replaced_and_shutdown_releases_the_name() {

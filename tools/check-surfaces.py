@@ -51,6 +51,8 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   start();assert state['intent']=='paused' and not state['sign_in']['connected'];assert bus('get-property',name,path,player,'PlaybackStatus').stdout.strip()=='s "Stopped"'
   assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('Native desktop bus registered with stopped, metadata-free, unsigned-in state',flush=True)
 
+  assert bus('get-property',name,path,'org.mpris.MediaPlayer2','CanRaise').stdout.strip()=='b false'
+  bus('call',name,path,'org.mpris.MediaPlayer2','Raise')
   assert state['metadata_cache']['pages']==1
   queue_before=state['queue']
   command('set_metadata_budget',mib=1);until(lambda v:v.get('metadata_cache',{}).get('budget_mib')==1 and not v.get('metadata_cache_action'))
@@ -86,6 +88,8 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
    except ValueError:pass
    time.sleep(.1)
   else:raise AssertionError('UI never connected')
+  until(lambda v:v.get('ui',{}).get('can_raise'))
+  assert bus('get-property',name,path,'org.mpris.MediaPlayer2','CanRaise').stdout.strip()=='b true'
   ipc('showCache');initial=json.loads(ipc('status'));assert initial['form']=='full' and initial['cacheExpanded'] and initial['artworkCache']['budget_mib']==1
   assert not initial['presentation']['known'] and initial['presentation']['track'] is None
   ipc('previewCompact');time.sleep(.3);compact=json.loads(ipc('status'))
@@ -104,6 +108,29 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
    ipc('showCompact');ipc('hide');ipc('showFull')
   assert json.loads(ipc('status'))['form']=='full'
   print('Compact passive/interactive focus, last-form restore, rapid switching and browser-state retention passed',flush=True)
+  before=state['queue'];ipc('showCompact');ipc('hide');bus('call',name,path,'org.mpris.MediaPlayer2','Raise')
+  for _ in range(60):
+   raised=json.loads(ipc('status'))
+   if raised['visible'] and raised['form']=='compact' and raised['compact']['mapped']:break
+   time.sleep(.05)
+  else:raise AssertionError('Desktop Raise did not restore the compact surface')
+  until(lambda v:bool(v.get('ui',{}).get('raise_token')))
+  assert state['queue']==before and state['intent']=='paused'
+  ui.terminate();ui.wait(timeout=5);until(lambda v:not v['ui']['can_raise'])
+  assert bus('get-property',name,path,'org.mpris.MediaPlayer2','CanRaise').stdout.strip()=='b false'
+  ui=subprocess.Popen(['quickshell','--path',str(root/'ui'),'--no-duplicate'],env=env,stdout=log,stderr=log)
+  for _ in range(60):
+   assert ui.poll() is None,'Replacement UI exited'
+   try:
+    info=json.loads(ipc('status'))
+    if info['instance']==instance:break
+   except ValueError:pass
+   time.sleep(.1)
+  else:raise AssertionError('Replacement UI did not connect')
+  until(lambda v:v['ui']['can_raise'])
+  assert json.loads(ipc('status'))['form']=='full'
+  print('Desktop Raise restored an attached hidden surface without playback changes; CanRaise followed UI disconnect/replacement',flush=True)
+
   ipc('hide');bus('set-property',name,path,player,'Shuffle','b','false');until(lambda v:not v['queue']['shuffled']);assert not json.loads(ipc('status'))['visible'];ipc('show')
   bus('set-property',name,path,player,'Shuffle','b','true');until(lambda v:v['queue']['shuffled']);print('Desktop controls remained active while native QML was hidden',flush=True)
   bus('call',name,path,'org.mpris.MediaPlayer2','Quit');p.wait(timeout=15);assert p.returncode==0;ui.wait(timeout=5);assert ui.returncode==0;f.close();f=None;s.close();s=None
