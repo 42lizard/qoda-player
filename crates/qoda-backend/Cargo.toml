@@ -19,6 +19,7 @@ futures-util.workspace = true
 zeroize.workspace = true
 rusqlite.workspace = true
 bytes.workspace = true
+zbus.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true

@@ -125,6 +125,7 @@ ShellRoot {
                     if (!next.libraries || next.libraries.length === 0) { root.libraryId = ""; search.text = ""; root.albumQuery = ""; root.artistQuery = ""; root.trackQuery = ""; root.playlistSeed = null; }
                     root.instance = next.instance;
                     root.snapshot = next;
+                    if (next.shutdown) { Qt.quit(); return; }
                     let libraries = JSON.stringify(next.libraries || []);
                     if (libraries !== root.libraryJson) { root.libraryJson = libraries; root.libraryModel = next.libraries || []; }
                     let tracks = JSON.stringify(next.page ? next.page.tracks : []);
@@ -181,6 +182,7 @@ ShellRoot {
                 Label { text: root.snapshot.storage ? root.snapshot.storage.message : "Opening session storage…"; color: root.snapshot.storage && (root.snapshot.storage.state === "unsaved" || root.snapshot.storage.state === "blocked") ? "#f2a89b" : "#acb8c8"; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
                 Button { text: "Retry save"; enabled: socket.connected; onClicked: root.send("retry_save") }
             }
+            Label { visible: !!root.snapshot.mpris && root.snapshot.mpris.state !== "available"; text: root.snapshot.mpris ? root.snapshot.mpris.message : ""; color: "#acb8c8"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
             Label { text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: "#acb8c8"; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
             Label { visible: !!root.snapshot.error; text: root.snapshot.error || ""; color: "#f2a89b"; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
             RowLayout {

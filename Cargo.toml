@@ -26,6 +26,7 @@ rusqlite = { version = "0.41", features = ["backup"] }
 
 sha2 = "0.10"
 base64 = "0.22"
+zbus = { version = "6.1", default-features = false, features = ["tokio", "service", "proxy"] }
 
 # Inherited by every crate. Keep lint policy here rather than in individual files.
 [workspace.lints.rust]

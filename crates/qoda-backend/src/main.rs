@@ -1,5 +1,6 @@
 mod albums;
 mod artwork;
+mod mpris;
 mod player;
 mod playlists;
 mod proxy;
@@ -25,6 +26,8 @@ use zeroize::Zeroizing;
 
 enum Event {
     Request(Value),
+    Desktop(mpris::Request),
+    DesktopLost,
     Advance(u64),
     Stored(storage::Reply),
     Checkpoint,
@@ -185,6 +188,39 @@ fn catalog_track(
         .find(|t| t.reference == reference)
         .or_else(|| albums.track(&reference))
         .ok_or("That track is no longer on the displayed page. Browse again.")
+}
+enum ResumePlan {
+    Waiting,
+    Unpause,
+    Prepare(qoda_provider::Track),
+    Exhausted,
+}
+// Native Stop is asynchronous. An old engine generation must never be unpaused
+// in place of loading the retained selection after Stop or another reset.
+fn resume_selection(
+    queue: &mut queue::Queue,
+    audio: &player::Status,
+    generation: u64,
+    preparing: bool,
+) -> Result<ResumePlan, queue::Error> {
+    if preparing {
+        return Ok(ResumePlan::Waiting);
+    }
+    if audio.generation == generation && !audio.idle && audio.error.is_none() {
+        return Ok(ResumePlan::Unpause);
+    }
+    let track = if queue.ended() || queue.selected().is_none() {
+        queue.advance()?
+    } else {
+        queue
+            .selected()
+            .map(|id| queue.visible_track(id))
+            .transpose()?
+    };
+    Ok(match track {
+        Some(track) => ResumePlan::Prepare(track),
+        None => ResumePlan::Exhausted,
+    })
 }
 fn check_queue(queue: &queue::Queue, request: &Value) -> Result<(), queue::Error> {
     let session = serde_json::from_value(request["queue_session"].clone())
@@ -351,8 +387,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut last_audio = player.status();
     let mut last_stream_failed = false;
+    let mut desktop_clock = mpris::Clock::default();
+    let mut last_clock_stale = false;
     let mut checkpoint_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     checkpoint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut desktop = match tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        mpris::Service::start(tx.clone()),
+    )
+    .await
+    {
+        Ok(Ok(service)) => {
+            state["mpris"] =
+                json!({"state":"available","message":"Desktop media controls available."});
+            Some(service)
+        }
+        _ => {
+            state["mpris"] = json!({"state":"unavailable","message":"Desktop media controls are unavailable. Restart Qoda after the session bus is available or another Qoda instance closes."});
+            None
+        }
+    };
+    updates.send_replace(state.clone());
     if let Some(c) = credential {
         auth_generation = auth_generation
             .checked_add(1)
@@ -367,9 +422,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ = audio_tick.tick() => {
                 let audio = player.status();
                 let stream_failed=proxy.failed().await;
+                let observed_at=std::time::Instant::now();
+                desktop_clock.observe(&audio,observed_at);
+                let clock_stale=desktop_clock.stale(&audio,observed_at);
                 let mut presentation_changed=false;
-                if (audio != last_audio || stream_failed!=last_stream_failed) && audio.generation == play_generation {
+                if (audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale) && audio.generation == play_generation {
                     last_stream_failed=stream_failed;
+                    last_clock_stale=clock_stale;
                     if let Some(position)=audio.position_seconds{let _=queue.set_position(position);}
                     if audio.position_seconds.is_some_and(|position|position>0.0)&&!audio.paused&&!audio.idle&&audio.error.is_none()&&!stream_failed{presented_generation=Some(play_generation);presentation_changed=queue.confirm_presented().unwrap_or(false);}
                     last_audio = audio.clone();
@@ -383,6 +442,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                     state["revision"] = json!(revision.to_string());
                     updates.send_replace(state.clone());
+                    if let Some(desktop) = &mut desktop {
+                        desktop.publish(mpris::View::capture(&queue,&audio,play_generation,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale));
+                    }
                 }
                 if audio.generation==play_generation && audio.idle && audio.natural_eof && handled_end!=Some(play_generation) && audio.error.is_none() && !stream_failed {
                     handled_end=Some(play_generation);
@@ -392,9 +454,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ = checkpoint_tick.tick()=>Event::Checkpoint,
             _ = tokio::signal::ctrl_c() => break,
         };
+        let mut desktop_reply = None;
+        let event = if let Event::Desktop(request) = event {
+            if !request.is_live() {
+                let _ = request.reply.send(Err(
+                    "The desktop command expired before it was applied.".into(),
+                ));
+                continue;
+            }
+            let view = mpris::View::capture(
+                &queue,
+                &player.status(),
+                play_generation,
+                presented_generation,
+                provider.is_some(),
+                desired_playing,
+                last_stream_failed || last_clock_stale,
+            );
+            if let Some(command) = mpris::translate(&request.action, &view, &queue, &instance) {
+                desktop_reply = Some(request.reply);
+                Event::Request(command)
+            } else {
+                let _ = request.reply.send(Ok(()));
+                continue;
+            }
+        } else {
+            event
+        };
         let mut to_prepare = None;
         let mut force_save = false;
+        let mut seeked = false;
         match event {
+            Event::DesktopLost => {
+                if let Some(desktop) = desktop.take() {
+                    desktop.shutdown().await;
+                }
+                state["mpris"] = json!({"state":"unavailable","message":"Desktop media controls disconnected. Playback controls in Qoda remain available; restart Qoda to reconnect the session bus."});
+            }
             Event::Stored(reply) => {
                 if reply.serial == durable.serial() {
                     storage_result(&mut state, reply.result);
@@ -439,7 +535,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 state["error"] = Value::Null;
                 match v["op"].as_str().unwrap_or("") {
-                    "quit" => break,
+                    "quit" => {
+                        state["shutdown"] = json!(true);
+                        revision = revision.checked_add(1).ok_or("Revision exhausted")?;
+                        state["revision"] = json!(revision.to_string());
+                        updates.send_replace(state.clone());
+                        if let Some(reply) = desktop_reply.take() {
+                            let _ = reply.send(Ok(()));
+                        }
+                        break;
+                    }
                     "retry_save" => force_save = true,
                     "restore_signin" => {
                         if provider.is_some() || !state["sign_in"]["keyring_action"].is_null() {
@@ -779,6 +884,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 json!(if desired_playing { "playing" } else { "paused" });
                         }
                     }
+                    "stop" => {
+                        if let Some(task) = prepare_task.take() {
+                            task.abort();
+                        }
+                        if queue.selected().is_some() {
+                            let _ = queue.seek_to(0.0);
+                        }
+                        desired_playing = false;
+                        play_generation = play_generation
+                            .checked_add(1)
+                            .ok_or("Generation exhausted")?;
+                        player.send(Command::Pause(true));
+                        player.send(Command::Stop);
+                        proxy.revoke().await;
+                        state["selection"] = Value::Null;
+                        state["audio"] = Value::Null;
+                        state["intent"] = json!("paused");
+                        state["status"] = json!(
+                            "Stopped. Resume starts the retained selection from the beginning."
+                        );
+                        force_save = true;
+                    }
                     "pause" => {
                         let audio = player.status();
                         if audio.generation == play_generation
@@ -794,18 +921,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "resume" => {
                         if provider.is_some() {
                             desired_playing = true;
-                            if player.status().idle {
-                                to_prepare = if queue.ended() || queue.selected().is_none() {
-                                    queue.advance().ok().flatten()
-                                } else {
-                                    queue.selected().and_then(|id| queue.visible_track(id).ok())
-                                };
-                                if to_prepare.is_none() {
+                            let preparing = prepare_task
+                                .as_ref()
+                                .is_some_and(|task| !task.is_finished());
+                            match resume_selection(
+                                &mut queue,
+                                &player.status(),
+                                play_generation,
+                                preparing,
+                            ) {
+                                Ok(ResumePlan::Waiting) => {}
+                                Ok(ResumePlan::Unpause) => player.send(Command::Pause(false)),
+                                Ok(ResumePlan::Prepare(track)) => to_prepare = Some(track),
+                                Ok(ResumePlan::Exhausted) => {
                                     desired_playing = false;
                                     state["status"] = json!("End of queue — choose Replay");
                                 }
-                            } else {
-                                player.send(Command::Pause(false));
+                                Err(error) => {
+                                    desired_playing = false;
+                                    state["error"] = json!(error.to_string());
+                                }
                             }
                             state["intent"] =
                                 json!(if desired_playing { "playing" } else { "paused" });
@@ -816,6 +951,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             match queue.seek_to(position) {
                                 Ok(()) => {
                                     force_save = true;
+                                    seeked = true;
                                     if provider.is_some() {
                                         to_prepare = queue
                                             .selected()
@@ -1045,6 +1181,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
             state["status"] = json!("Preparing selected queue entry");
         }
+        if let Some(desktop) = &mut desktop {
+            if seeked {
+                desktop.mark_seek(&queue, play_generation);
+            }
+            desktop.publish(mpris::View::capture(
+                &queue,
+                &player.status(),
+                play_generation,
+                presented_generation,
+                provider.is_some(),
+                desired_playing,
+                last_stream_failed || last_clock_stale,
+            ));
+        }
         state["queue"] = json!(queue.snapshot());
         state["playlists"] = json!(playlists.view);
         state["albums"] = json!(albums.view);
@@ -1063,6 +1213,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
         state["revision"] = json!(revision.to_string());
         updates.send_replace(state.clone());
+        if let Some(reply) = desktop_reply.take() {
+            let result = state["error"]
+                .as_str()
+                .map(|error| Err(error.to_owned()))
+                .unwrap_or(Ok(()));
+            let _ = reply.send(result);
+        }
     }
     let audio = player.status();
     if audio.generation == play_generation
@@ -1079,6 +1236,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(Some(warning)) => eprintln!("Qoda: {warning}"),
         Ok(None) => {}
     }
+    if let Some(desktop) = desktop {
+        desktop.shutdown().await;
+    }
     drop(player);
     std::fs::remove_file(path)?;
     drop(lock);
@@ -1088,6 +1248,79 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn queued_selection() -> queue::Queue {
+        let track = qoda_provider::Track {
+            reference: TrackRef {
+                source: SourceId::new(),
+                key: "1".to_owned().try_into().unwrap(),
+            },
+            title: "Synthetic fixture".into(),
+            artist: "Fixture".into(),
+            album: "Fixture".into(),
+            duration_ms: None,
+        };
+        let mut q = queue::Queue::default();
+        q.replace(track.clone()).unwrap();
+        q.enqueue(track, false).unwrap();
+        q
+    }
+    #[test]
+    fn stop_then_immediate_play_reloads_the_same_occurrence_instead_of_unpausing_stale_native_state()
+     {
+        let mut q = queued_selection();
+        let selected = q.selected();
+        let before = q.snapshot();
+        q.seek_to(0.0).unwrap();
+        let audio = player::Status {
+            generation: 7,
+            idle: false,
+            paused: false,
+            ..Default::default()
+        };
+        let plan = resume_selection(&mut q, &audio, 8, false).unwrap();
+        assert!(matches!(plan, ResumePlan::Prepare(_)));
+        assert_eq!(q.selected(), selected);
+        assert_eq!(q.snapshot().membership_count, before.membership_count);
+        assert_eq!(q.snapshot().session, before.session);
+        assert_eq!(q.position(), 0.0);
+        assert!(matches!(
+            resume_selection(&mut q, &audio, 8, true).unwrap(),
+            ResumePlan::Waiting
+        ));
+        assert_eq!(q.selected(), selected);
+    }
+    #[test]
+    fn resume_unpauses_only_the_matching_live_engine_and_explicitly_retries_errors() {
+        let mut q = queued_selection();
+        let audio = player::Status {
+            generation: 7,
+            idle: false,
+            paused: true,
+            ..Default::default()
+        };
+        assert!(matches!(
+            resume_selection(&mut q, &audio, 7, false).unwrap(),
+            ResumePlan::Unpause
+        ));
+        let failed = player::Status {
+            error: Some("Synthetic engine failure"),
+            ..audio
+        };
+        assert!(matches!(
+            resume_selection(&mut q, &failed, 7, false).unwrap(),
+            ResumePlan::Prepare(_)
+        ));
+        let mut empty = queue::Queue::default();
+        let idle = player::Status {
+            idle: true,
+            ..Default::default()
+        };
+        assert!(matches!(
+            resume_selection(&mut empty, &idle, 0, false).unwrap(),
+            ResumePlan::Exhausted
+        ));
+        assert_eq!(empty.snapshot().membership_count, 0);
+    }
     #[tokio::test]
     async fn socket_requires_hello_and_preserves_partial_frames_across_updates() {
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
