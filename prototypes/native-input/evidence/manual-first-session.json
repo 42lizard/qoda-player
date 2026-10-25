@@ -1,0 +1,718 @@
+{
+  "status": "incomplete",
+  "observations": {
+    "form": "hidden",
+    "lastForm": "full",
+    "page": "Albums",
+    "queryMatchesFixture": false,
+    "queryEmpty": true,
+    "selected": 2,
+    "savedY": 0,
+    "listY": 0,
+    "playing": true,
+    "ticks": 56,
+    "closeEvents": 0,
+    "handledPhysicalKeys": 0,
+    "dialog": false,
+    "queueDrawer": false,
+    "full": {
+      "visible": false,
+      "mapped": false,
+      "width": 581,
+      "height": 368,
+      "dpr": 2,
+      "active": false,
+      "focusItem": "none",
+      "searchFocused": false,
+      "persistentQueue": false,
+      "screen": "eDP-1"
+    },
+    "compact": {
+      "visible": false,
+      "mapped": false,
+      "width": 420,
+      "height": 240,
+      "dpr": 2,
+      "active": false,
+      "focusItem": "none",
+      "keyboardMode": 0,
+      "screen": "eDP-1"
+    },
+    "helperActive": true,
+    "step": 2,
+    "inputEvents": [
+      {
+        "time": 1792939613454,
+        "step": 0,
+        "kind": "pointer",
+        "source": "outside-target",
+        "key": ""
+      },
+      {
+        "time": 1792939613454,
+        "step": 0,
+        "kind": "activate",
+        "source": "outside-target",
+        "key": ""
+      },
+      {
+        "time": 1792939616723,
+        "step": 0,
+        "kind": "pointer",
+        "source": "restore",
+        "key": ""
+      },
+      {
+        "time": 1792939621652,
+        "step": 0,
+        "kind": "pointer",
+        "source": "full-hide",
+        "key": ""
+      },
+      {
+        "time": 1792939623650,
+        "step": 0,
+        "kind": "pointer",
+        "source": "open-compact",
+        "key": ""
+      },
+      {
+        "time": 1792939626599,
+        "step": 0,
+        "kind": "pointer",
+        "source": "compact-expand",
+        "key": ""
+      },
+      {
+        "time": 1792939643415,
+        "step": 0,
+        "kind": "pointer",
+        "source": "key-probe",
+        "key": ""
+      },
+      {
+        "time": 1792939643415,
+        "step": 0,
+        "kind": "activate",
+        "source": "key-probe",
+        "key": ""
+      },
+      {
+        "time": 1792939644276,
+        "step": 0,
+        "kind": "pointer",
+        "source": "key-probe",
+        "key": ""
+      },
+      {
+        "time": 1792939644277,
+        "step": 0,
+        "kind": "activate",
+        "source": "key-probe",
+        "key": ""
+      },
+      {
+        "time": 1792939645494,
+        "step": 0,
+        "kind": "pointer",
+        "source": "full-hide",
+        "key": ""
+      },
+      {
+        "time": 1792939648202,
+        "step": 0,
+        "kind": "pointer",
+        "source": "restore",
+        "key": ""
+      },
+      {
+        "time": 1792939650559,
+        "step": 0,
+        "kind": "pointer",
+        "source": "item-2",
+        "key": ""
+      },
+      {
+        "time": 1792939653122,
+        "step": 0,
+        "kind": "pointer",
+        "source": "full-play",
+        "key": ""
+      },
+      {
+        "time": 1792939655931,
+        "step": 0,
+        "kind": "pointer",
+        "source": "full-play",
+        "key": ""
+      },
+      {
+        "time": 1792939659105,
+        "step": 0,
+        "kind": "pointer",
+        "source": "full-hide",
+        "key": ""
+      },
+      {
+        "time": 1792939661403,
+        "step": 0,
+        "kind": "pointer",
+        "source": "report-ok",
+        "key": ""
+      },
+      {
+        "time": 1792939664813,
+        "step": 1,
+        "kind": "pointer",
+        "source": "report-issue",
+        "key": ""
+      }
+    ],
+    "reviews": [
+      {
+        "step": 0,
+        "name": "Tab and Shift+Tab",
+        "humanReport": "observed-ok",
+        "time": 1792939661404
+      },
+      {
+        "step": 1,
+        "name": "Spaces inside search",
+        "humanReport": "issue-or-unavailable",
+        "time": 1792939664814
+      }
+    ],
+    "screens": [
+      {
+        "name": "eDP-1",
+        "width": 1200,
+        "height": 800
+      }
+    ],
+    "journal": [
+      {
+        "action": "ready:hidden",
+        "form": "hidden",
+        "tick": 0
+      },
+      {
+        "action": "show:full:interactive",
+        "form": "full",
+        "tick": 7
+      },
+      {
+        "action": "show:hidden:passive",
+        "form": "hidden",
+        "tick": 12
+      },
+      {
+        "action": "show:compact:interactive",
+        "form": "compact",
+        "tick": 14
+      },
+      {
+        "action": "focus:ondemand",
+        "form": "compact",
+        "tick": 14
+      },
+      {
+        "action": "show:full:interactive",
+        "form": "full",
+        "tick": 17
+      },
+      {
+        "action": "show:hidden:passive",
+        "form": "hidden",
+        "tick": 36
+      },
+      {
+        "action": "show:full:interactive",
+        "form": "full",
+        "tick": 39
+      },
+      {
+        "action": "select:2",
+        "form": "full",
+        "tick": 41
+      },
+      {
+        "action": "show:hidden:passive",
+        "form": "hidden",
+        "tick": 47
+      }
+    ]
+  },
+  "humanReviews": [
+    {
+      "step": 0,
+      "name": "Tab and Shift+Tab",
+      "humanReport": "observed-ok",
+      "time": 1792939661404,
+      "state": {
+        "form": "hidden",
+        "lastForm": "full",
+        "page": "Albums",
+        "queryMatchesFixture": false,
+        "queryEmpty": true,
+        "selected": 2,
+        "savedY": 0,
+        "listY": 0,
+        "playing": true,
+        "ticks": 49,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 368,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "helperActive": true,
+        "step": 0,
+        "inputEvents": [
+          {
+            "time": 1792939613454,
+            "step": 0,
+            "kind": "pointer",
+            "source": "outside-target",
+            "key": ""
+          },
+          {
+            "time": 1792939613454,
+            "step": 0,
+            "kind": "activate",
+            "source": "outside-target",
+            "key": ""
+          },
+          {
+            "time": 1792939616723,
+            "step": 0,
+            "kind": "pointer",
+            "source": "restore",
+            "key": ""
+          },
+          {
+            "time": 1792939621652,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-hide",
+            "key": ""
+          },
+          {
+            "time": 1792939623650,
+            "step": 0,
+            "kind": "pointer",
+            "source": "open-compact",
+            "key": ""
+          },
+          {
+            "time": 1792939626599,
+            "step": 0,
+            "kind": "pointer",
+            "source": "compact-expand",
+            "key": ""
+          },
+          {
+            "time": 1792939643415,
+            "step": 0,
+            "kind": "pointer",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939643415,
+            "step": 0,
+            "kind": "activate",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939644276,
+            "step": 0,
+            "kind": "pointer",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939644277,
+            "step": 0,
+            "kind": "activate",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939645494,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-hide",
+            "key": ""
+          },
+          {
+            "time": 1792939648202,
+            "step": 0,
+            "kind": "pointer",
+            "source": "restore",
+            "key": ""
+          },
+          {
+            "time": 1792939650559,
+            "step": 0,
+            "kind": "pointer",
+            "source": "item-2",
+            "key": ""
+          },
+          {
+            "time": 1792939653122,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-play",
+            "key": ""
+          },
+          {
+            "time": 1792939655931,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-play",
+            "key": ""
+          },
+          {
+            "time": 1792939659105,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-hide",
+            "key": ""
+          },
+          {
+            "time": 1792939661403,
+            "step": 0,
+            "kind": "pointer",
+            "source": "report-ok",
+            "key": ""
+          }
+        ],
+        "reviews": [],
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 7
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 12
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 14
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 14
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 17
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 36
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 39
+          },
+          {
+            "action": "select:2",
+            "form": "full",
+            "tick": 41
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 47
+          }
+        ]
+      }
+    },
+    {
+      "step": 1,
+      "name": "Spaces inside search",
+      "humanReport": "issue-or-unavailable",
+      "time": 1792939664814,
+      "state": {
+        "form": "hidden",
+        "lastForm": "full",
+        "page": "Albums",
+        "queryMatchesFixture": false,
+        "queryEmpty": true,
+        "selected": 2,
+        "savedY": 0,
+        "listY": 0,
+        "playing": true,
+        "ticks": 53,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 368,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "helperActive": true,
+        "step": 1,
+        "inputEvents": [
+          {
+            "time": 1792939613454,
+            "step": 0,
+            "kind": "pointer",
+            "source": "outside-target",
+            "key": ""
+          },
+          {
+            "time": 1792939613454,
+            "step": 0,
+            "kind": "activate",
+            "source": "outside-target",
+            "key": ""
+          },
+          {
+            "time": 1792939616723,
+            "step": 0,
+            "kind": "pointer",
+            "source": "restore",
+            "key": ""
+          },
+          {
+            "time": 1792939621652,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-hide",
+            "key": ""
+          },
+          {
+            "time": 1792939623650,
+            "step": 0,
+            "kind": "pointer",
+            "source": "open-compact",
+            "key": ""
+          },
+          {
+            "time": 1792939626599,
+            "step": 0,
+            "kind": "pointer",
+            "source": "compact-expand",
+            "key": ""
+          },
+          {
+            "time": 1792939643415,
+            "step": 0,
+            "kind": "pointer",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939643415,
+            "step": 0,
+            "kind": "activate",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939644276,
+            "step": 0,
+            "kind": "pointer",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939644277,
+            "step": 0,
+            "kind": "activate",
+            "source": "key-probe",
+            "key": ""
+          },
+          {
+            "time": 1792939645494,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-hide",
+            "key": ""
+          },
+          {
+            "time": 1792939648202,
+            "step": 0,
+            "kind": "pointer",
+            "source": "restore",
+            "key": ""
+          },
+          {
+            "time": 1792939650559,
+            "step": 0,
+            "kind": "pointer",
+            "source": "item-2",
+            "key": ""
+          },
+          {
+            "time": 1792939653122,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-play",
+            "key": ""
+          },
+          {
+            "time": 1792939655931,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-play",
+            "key": ""
+          },
+          {
+            "time": 1792939659105,
+            "step": 0,
+            "kind": "pointer",
+            "source": "full-hide",
+            "key": ""
+          },
+          {
+            "time": 1792939661403,
+            "step": 0,
+            "kind": "pointer",
+            "source": "report-ok",
+            "key": ""
+          },
+          {
+            "time": 1792939664813,
+            "step": 1,
+            "kind": "pointer",
+            "source": "report-issue",
+            "key": ""
+          }
+        ],
+        "reviews": [
+          {
+            "step": 0,
+            "name": "Tab and Shift+Tab",
+            "humanReport": "observed-ok",
+            "time": 1792939661404
+          }
+        ],
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 7
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 12
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 14
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 14
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 17
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 36
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 39
+          },
+          {
+            "action": "select:2",
+            "form": "full",
+            "tick": 41
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 47
+          }
+        ]
+      }
+    }
+  ],
+  "assessment": "Pointer events received; Tab review reported OK without captured Tab/Backtab. Space-input review reported issue-or-unavailable with empty search and hidden player. These are not accepted keyboard passes."
+}
