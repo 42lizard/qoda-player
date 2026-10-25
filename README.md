@@ -33,6 +33,8 @@ Playback actions, shuffle/repeat, restoration, recovery, and transition edits ar
 
 Credential handling, SQLite persistence, cache budgets, checkpoint/retry defaults, and recovery are specified in [Define authentication, cache and durable-state policies](https://github.com/42lizard/qoda-player/issues/10). Live Plex compatibility validation remains a separate prerequisite for the final specification.
 
+[Player-side audio measurements](https://github.com/42lizard/qoda-player/issues/13) record decoded-sample and transition evidence from a synthetic libmpv harness. Hardware/DAC fidelity and real-device gapless continuity remain unverified.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
