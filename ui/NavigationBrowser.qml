@@ -1,0 +1,87 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+ColumnLayout {
+    id: navigation
+    required property var snapshot
+    property bool connected: false
+    property var rows: []
+    property string rowsJson: "[]"
+    property string pageKey: ""
+    property string total: "0"
+    property bool followingLatest: false
+    readonly property real viewportHeight: pathView.height
+    signal pageRequested(var offset, var fence)
+    signal revisitRequested(var fields)
+    onSnapshotChanged: updateRows()
+    Component.onCompleted: updateRows()
+    function updateRows() {
+        const entries = snapshot ? snapshot.entries : [];
+        const encoded = JSON.stringify(entries);
+        const key = snapshot ? snapshot.session + ":" + snapshot.offset : "";
+        const pageChanged = key !== pageKey;
+        const rowsChanged = encoded !== rowsJson;
+        const sizeChanged = !!snapshot && snapshot.total !== total;
+        const followed = !!snapshot && snapshot.following_latest && !followingLatest;
+        total = snapshot ? snapshot.total : "0";
+        followingLatest = !!snapshot && snapshot.following_latest;
+        pageKey = key;
+        if (rowsChanged) { rowsJson = encoded; rows = entries; }
+        if (pageChanged || rowsChanged || followed) Qt.callLater(() => {
+            if (snapshot && snapshot.following_latest && (pageChanged || sizeChanged || followed)) pathView.positionViewAtEnd();
+            else if (pageChanged) pathView.positionViewAtBeginning();
+        });
+    }
+    function fence() {
+        return {queue_session: snapshot.session, queue_revision: snapshot.revision};
+    }
+    function revisit(row) {
+        if (!connected || !snapshot || !rows.some(current => current.index === row.index && current.occurrence === row.occurrence)) return;
+        const fields = fence();
+        fields.index = row.index;
+        fields.occurrence = row.occurrence;
+        revisitRequested(fields);
+    }
+    Label {
+        Layout.fillWidth: true
+        text: "Confirmed nominal navigation only. Selected or skipped tracks without a clock are excluded. Go here keeps paused/playing intent."
+        wrapMode: Text.Wrap; textFormat: Text.PlainText; color: "#acb8c8"
+    }
+    Label {
+        visible: navigation.rows.length === 0
+        text: "No confirmed entries in the Previous path."
+        wrapMode: Text.Wrap; color: "#acb8c8"; Layout.fillWidth: true
+    }
+    ListView {
+        id: pathView
+        Layout.fillWidth: true; Layout.fillHeight: true
+        model: navigation.rows
+        clip: true; spacing: 6
+        ScrollBar.vertical: ScrollBar {}
+        delegate: Rectangle {
+            required property var modelData
+            width: pathView.width; height: 112
+            color: modelData.selected ? "#344354" : "#202735"; radius: 5
+            ColumnLayout {
+                anchors.fill: parent; anchors.margins: 8; spacing: 3
+                Label { text: (modelData.selected ? "Selected path entry · " : "") + modelData.track.title; color: "#f2e9db"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { text: modelData.track.artist + " · " + modelData.track.album; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                Button { objectName: "revisitNavigation"; text: "Go here"; enabled: navigation.connected; onClicked: navigation.revisit(modelData) }
+            }
+        }
+    }
+    Label {
+        Layout.fillWidth: true
+        text: snapshot && snapshot.total !== "0" ? "Entries " + (Number(snapshot.offset) + 1) + "–" + (Number(snapshot.offset) + navigation.rows.length) + " of " + snapshot.total : "0 entries"
+        color: "#acb8c8"; wrapMode: Text.Wrap
+    }
+    Flow {
+        Layout.fillWidth: true
+        Layout.preferredHeight: childrenRect.height
+        spacing: 6
+        Button { objectName: "olderNavigation"; text: "Older"; enabled: navigation.connected && !!snapshot && snapshot.has_previous; onClicked: navigation.pageRequested(String(Math.max(0, Number(snapshot.offset) - 50)), navigation.fence()) }
+        Button { objectName: "newerNavigation"; text: "Newer"; enabled: navigation.connected && !!snapshot && snapshot.has_next; onClicked: navigation.pageRequested(String(Number(snapshot.offset) + 50), navigation.fence()) }
+        Button { objectName: "latestNavigation"; text: "Follow latest"; enabled: navigation.connected && !!snapshot; onClicked: navigation.pageRequested(null, navigation.fence()) }
+    }
+}

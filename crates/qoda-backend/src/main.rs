@@ -241,6 +241,21 @@ async fn finish_gapless_reset(
     gapless.review();
     promoted.map(|_| ())
 }
+fn navigation_request(
+    queue: &queue::Queue,
+    request: &Value,
+) -> Result<(u64, OccurrenceId), String> {
+    check_queue(queue, request).map_err(|error| error.to_string())?;
+    let index = serde_json::from_value::<qoda_core::Counter>(request["index"].clone())
+        .map_err(|_| "Choose an entry from the current Previous path.")?
+        .get();
+    let occurrence = serde_json::from_value::<OccurrenceId>(request["occurrence"].clone())
+        .map_err(|_| "Choose an entry from the current Previous path.")?;
+    queue
+        .navigation_target(index, occurrence)
+        .map_err(|error| error.to_string())?;
+    Ok((index, occurrence))
+}
 fn guarded_queue_command(op: &str) -> bool {
     matches!(
         op,
@@ -251,6 +266,7 @@ fn guarded_queue_command(op: &str) -> bool {
             | "queue_play"
             | "replay"
             | "previous"
+            | "navigation_select"
             | "next"
             | "seek"
             | "stop"
@@ -280,6 +296,7 @@ fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
             | "queue_play"
             | "replay"
             | "previous"
+            | "navigation_select"
             | "next"
             | "seek"
             | "stop"
@@ -450,6 +467,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(error) = start_error {
         storage_result(&mut state, Err(error));
     }
+    let mut navigation_offset = None;
+    state["navigation"] = json!(queue.navigation_page(navigation_offset));
     state["queue"] = json!(queue.snapshot());
     state["playlists"] = json!(playlists.view);
     state["albums"] = json!(albums.view);
@@ -647,6 +666,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             && request["instance"] == instance
             && catalog::is_batch(request["op"].as_str().unwrap_or(""))
             && let Err(error) = catalog::selected_tracks(&state, request, auth_generation)
+        {
+            state["error"] = json!(error);
+            event = Event::Checkpoint;
+        }
+        // Reject stale/invalid path rows before cancelling any speculative output.
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
+            && request["op"] == "navigation_select"
+            && let Err(error) = navigation_request(&queue, request)
         {
             state["error"] = json!(error);
             event = Event::Checkpoint;
@@ -1235,9 +1263,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
+                    "navigation_page" => {
+                        let result: Result<Option<u64>, String> = (|| {
+                            check_queue(&queue, &v).map_err(|error| error.to_string())?;
+                            if v["offset"].is_null() {
+                                return Ok(None);
+                            }
+                            serde_json::from_value::<qoda_core::Counter>(v["offset"].clone())
+                                .map(|offset| Some(offset.get()))
+                                .map_err(|_| "Choose a valid Previous path page.".into())
+                        })();
+                        match result {
+                            Ok(offset) => navigation_offset = offset,
+                            Err(error) => state["error"] = json!(error),
+                        }
+                    }
                     "enqueue" | "play_next" | "queue_play" | "queue_move" | "queue_remove"
                     | "clear_upcoming" | "stop_clear" | "next" | "replay" | "previous"
-                    | "set_shuffle" | "set_repeat" => {
+                    | "navigation_select" | "set_shuffle" | "set_repeat" => {
                         if let Err(error) = check_queue(&queue, &v) {
                             state["error"] = json!(error.to_string());
                         } else {
@@ -1303,6 +1346,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             let _ = queue.set_position(position);
                                         }
                                         to_prepare = queue.previous().map_err(|e| e.to_string())?;
+                                    }
+                                    "navigation_select" => {
+                                        let (index, occurrence) = navigation_request(&queue, &v)?;
+                                        to_prepare = Some(
+                                            queue
+                                                .revisit(index, occurrence)
+                                                .map_err(|error| error.to_string())?,
+                                        );
                                     }
                                     "set_shuffle" => {
                                         let enabled = v["enabled"]
@@ -1713,6 +1764,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             desktop.publish(view);
         }
+        if state["navigation"]["session"] != json!(queue.durable_stamp().0) {
+            navigation_offset = None;
+        }
+        state["navigation"] = json!(queue.navigation_page(navigation_offset));
         state["queue"] = json!(queue.snapshot());
         state["playlists"] = json!(playlists.view);
         albums.view.covers = artwork.urls().await;
@@ -1794,6 +1849,30 @@ mod tests {
         q.replace(track.clone()).unwrap();
         q.enqueue(track, false).unwrap();
         q
+    }
+    #[test]
+    fn navigation_commands_require_current_session_revision_and_exact_route_identity() {
+        let mut q = queued_selection();
+        q.confirm_presented().unwrap();
+        let page = q.navigation_page(None);
+        let request = json!({"queue_session":page.session,"queue_revision":page.revision,"index":page.entries[0].index,"occurrence":page.entries[0].occurrence});
+        assert!(navigation_request(&q, &request).is_ok());
+        let mut invalid = request.clone();
+        invalid["index"] = json!(0);
+        assert!(navigation_request(&q, &invalid).is_err());
+        invalid["index"] = json!("18446744073709551615");
+        assert!(navigation_request(&q, &invalid).is_err());
+        invalid = request.clone();
+        invalid["occurrence"] = json!(q.pending()[0]);
+        assert!(navigation_request(&q, &invalid).is_err());
+        let other = queued_selection();
+        assert!(navigation_request(&other, &request).is_err());
+        q.set_shuffle(true).unwrap();
+        assert!(navigation_request(&q, &request).is_err());
+        assert!(guarded_queue_command("navigation_select"));
+        assert!(changes_current("navigation_select", &request, &q));
+        assert!(!guarded_queue_command("navigation_page"));
+        assert!(!changes_current("navigation_page", &request, &q));
     }
     #[test]
     fn stop_then_immediate_play_reloads_the_same_occurrence_instead_of_unpausing_stale_native_state()

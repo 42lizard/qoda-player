@@ -61,6 +61,25 @@ pub struct Snapshot {
     pub navigating: bool,
     pub navigation_dropped: Counter,
 }
+const NAVIGATION_PAGE_SIZE: usize = 50;
+#[derive(Serialize)]
+pub struct NavigationRow {
+    pub index: Counter,
+    pub occurrence: OccurrenceId,
+    pub track: Track,
+    pub selected: bool,
+}
+#[derive(Serialize)]
+pub struct NavigationPage {
+    pub session: SessionId,
+    pub revision: Counter,
+    pub offset: Counter,
+    pub total: Counter,
+    pub has_previous: bool,
+    pub has_next: bool,
+    pub following_latest: bool,
+    pub entries: Vec<NavigationRow>,
+}
 #[derive(Clone, Serialize)]
 pub struct Queue {
     membership: QueueMembership,
@@ -172,6 +191,50 @@ impl Queue {
             navigating: self.navigating,
             navigation_dropped: self.navigation_dropped,
         }
+    }
+    /// The Previous route is confirmed navigation state, not a complete listening archive.
+    /// None follows its latest page; an explicit offset stays anchored while browsing.
+    pub fn navigation_page(&self, requested: Option<u64>) -> NavigationPage {
+        let last = self.route.len().saturating_sub(1) / NAVIGATION_PAGE_SIZE * NAVIGATION_PAGE_SIZE;
+        let offset = requested
+            .map(|value| {
+                value.min(last as u64) as usize / NAVIGATION_PAGE_SIZE * NAVIGATION_PAGE_SIZE
+            })
+            .unwrap_or(last);
+        let entries = self
+            .route
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(NAVIGATION_PAGE_SIZE)
+            .map(|(index, id)| NavigationRow {
+                index: Counter::new(index as u64),
+                occurrence: *id,
+                track: self.metadata[id].clone(),
+                selected: self.recorded && self.cursor == Some(index) && self.selected == Some(*id),
+            })
+            .collect();
+        NavigationPage {
+            session: self.membership.session_id(),
+            revision: self.revision,
+            offset: Counter::new(offset as u64),
+            total: Counter::new(self.route.len() as u64),
+            following_latest: requested.is_none(),
+            has_previous: offset > 0,
+            has_next: offset + NAVIGATION_PAGE_SIZE < self.route.len(),
+            entries,
+        }
+    }
+    pub fn navigation_target(&self, index: u64, occurrence: OccurrenceId) -> Result<usize, Error> {
+        let index = usize::try_from(index).map_err(|_| Error::Missing)?;
+        if self.route.get(index) != Some(&occurrence) {
+            return Err(Error::Missing);
+        }
+        Ok(index)
+    }
+    pub fn revisit(&mut self, index: u64, occurrence: OccurrenceId) -> Result<Track, Error> {
+        let index = self.navigation_target(index, occurrence)?;
+        self.navigate(index)
     }
     pub fn check(&self, session: SessionId, revision: Counter) -> Result<(), Error> {
         if session != self.membership.session_id() || revision != self.revision {
@@ -788,6 +851,118 @@ mod tests {
     }
     fn observed(q: &mut Queue) {
         q.confirm_presented().unwrap();
+    }
+    #[test]
+    fn navigation_inspector_excludes_unconfirmed_and_skipped_selections() {
+        let mut q = Queue::default();
+        assert!(q.navigation_page(None).entries.is_empty());
+        q.replace_many(vec![track("A"), track("skipped"), track("C")])
+            .unwrap();
+        assert!(q.navigation_page(None).entries.is_empty());
+        observed(&mut q);
+        q.advance().unwrap(); // selected but no positive clock
+        let page = q.navigation_page(None);
+        assert_eq!(page.entries.len(), 1);
+        assert!(!page.entries[0].selected);
+        q.advance().unwrap();
+        observed(&mut q);
+        let page = q.navigation_page(None);
+        assert_eq!(
+            page.entries
+                .iter()
+                .map(|r| r.track.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["A", "C"]
+        );
+        assert!(page.entries[1].selected);
+    }
+    #[test]
+    fn revisiting_an_exact_path_entry_retains_duplicate_identity_and_forward_navigation() {
+        let mut q = Queue::default();
+        q.replace_many(vec![track("same"), track("same"), track("C")])
+            .unwrap();
+        observed(&mut q);
+        q.advance().unwrap();
+        observed(&mut q);
+        q.advance().unwrap();
+        observed(&mut q);
+        let page = q.navigation_page(None);
+        let first = page.entries[0].occurrence;
+        let duplicate = page.entries[1].occurrence;
+        assert_ne!(first, duplicate);
+        q.set_position(12.0).unwrap();
+        let order = q.order.clone();
+        q.revisit(0, first).unwrap();
+        assert_eq!(q.selected(), Some(first));
+        assert_eq!(q.position(), 0.0);
+        assert!(q.snapshot().navigating);
+        assert_eq!(q.order, order);
+        assert!(!q.confirm_presented().unwrap());
+        assert_eq!(q.route.len(), 3);
+        q.advance().unwrap();
+        assert_eq!(q.selected(), Some(duplicate));
+        q.previous().unwrap();
+        assert_eq!(q.selected(), Some(first));
+        let copy: Queue = serde_json::from_value(serde_json::to_value(&q).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(copy.navigation_page(None)).unwrap(),
+            serde_json::to_value(q.navigation_page(None)).unwrap()
+        );
+    }
+    #[test]
+    fn navigation_pages_are_bounded_and_keep_lossless_fences_after_route_eviction() {
+        let mut q = Queue::default();
+        q.replace(track("repeat")).unwrap();
+        observed(&mut q);
+        q.set_repeat(Repeat::One).unwrap();
+        for _ in 0..NAVIGATION_LIMIT + 2 {
+            q.complete(true).unwrap();
+            observed(&mut q);
+        }
+        q.revision = Counter::new(9_007_199_254_740_993);
+        let page = q.navigation_page(None);
+        assert_eq!(page.total.get(), NAVIGATION_LIMIT as u64);
+        assert_eq!(page.offset.get(), 4050);
+        assert_eq!(page.entries.len(), 46);
+        assert!(page.following_latest && page.has_previous && !page.has_next);
+        assert_eq!(q.navigation_dropped.get(), 3);
+        let first = q.navigation_page(Some(0));
+        assert_eq!(first.entries.len(), 50);
+        assert!(!first.following_latest && !first.has_previous && first.has_next);
+        assert_eq!(
+            q.navigation_page(Some(u64::MAX)).offset.get(),
+            page.offset.get()
+        );
+        let wire = serde_json::to_value(page).unwrap();
+        assert_eq!(wire["revision"], "9007199254740993");
+        assert_eq!(wire["entries"][0]["index"], "4050");
+    }
+    #[test]
+    fn invalid_navigation_targets_do_not_mutate_the_queue_and_removed_rows_are_invalidated() {
+        let mut q = Queue::default();
+        q.replace_many(vec![track("A"), track("B"), track("C")])
+            .unwrap();
+        observed(&mut q);
+        q.advance().unwrap();
+        observed(&mut q);
+        q.advance().unwrap();
+        observed(&mut q);
+        let first = q.route[0];
+        let removed = q.route[1];
+        let before = serde_json::to_value(&q).unwrap();
+        for (index, occurrence) in [(u64::MAX, first), (0, removed)] {
+            assert_eq!(q.revisit(index, occurrence).unwrap_err(), Error::Missing);
+            assert_eq!(serde_json::to_value(&q).unwrap(), before);
+        }
+        q.revisit(0, first).unwrap();
+        q.remove(removed).unwrap();
+        assert_eq!(q.navigation_page(Some(0)).entries.len(), 2);
+        assert_eq!(q.revisit(1, removed).unwrap_err(), Error::Missing);
+        assert!(q.empty_session().navigation_page(None).entries.is_empty());
+        q.revision = Counter::new(u64::MAX);
+        let before = serde_json::to_value(&q).unwrap();
+        assert_eq!(q.revisit(0, first).unwrap_err(), Error::Counter);
+        assert_eq!(serde_json::to_value(&q).unwrap(), before);
     }
     #[test]
     fn playlist_snapshots_keep_duplicates_and_do_not_follow_saved_playlist_edits() {

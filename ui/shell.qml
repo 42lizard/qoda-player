@@ -446,9 +446,16 @@ ShellRoot {
                 Button { text: "Shuffle: " + (root.snapshot.queue && root.snapshot.queue.shuffled ? "On" : "Off"); enabled: !!root.snapshot.queue; onClicked: root.editQueue("set_shuffle", {enabled: !root.snapshot.queue.shuffled}) }
                 Button { text: "Repeat: " + (root.snapshot.queue ? root.snapshot.queue.repeat : "off"); enabled: !!root.snapshot.queue; onClicked: { let modes = ["off", "one", "all"]; root.editQueue("set_repeat", {mode: modes[(modes.indexOf(root.snapshot.queue.repeat) + 1) % 3]}); } }
                     }
-                    Label { text: root.snapshot.queue && root.snapshot.queue.navigating ? "Previous navigation · Next returns forward" : root.snapshot.queue && root.snapshot.queue.ended ? "End of selection · Play pending or Replay" : "Selected and upcoming"; color: "#acb8c8"; textFormat: Text.PlainText }
+                    TabBar {
+                        id: queueTabs
+                        Layout.fillWidth: true
+                        TabButton { text: "Queue" }
+                        TabButton { text: "Previous path" }
+                    }
+                    Label { visible: queueTabs.currentIndex === 0; text: root.snapshot.queue && root.snapshot.queue.navigating ? "Previous navigation · Next returns forward" : root.snapshot.queue && root.snapshot.queue.ended ? "End of selection · Play pending or Replay" : "Selected and upcoming"; color: "#acb8c8"; textFormat: Text.PlainText }
                     ListView {
                         id: queueView
+                        visible: queueTabs.currentIndex === 0
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: root.queueModel
@@ -476,6 +483,15 @@ ShellRoot {
                                 }
                             }
                         }
+                    }
+                    NavigationBrowser {
+                        id: navigationBrowser
+                        visible: queueTabs.currentIndex === 1
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        snapshot: root.snapshot.navigation || null
+                        connected: socket.connected
+                        onPageRequested: (offset, fence) => { fence.offset = offset; root.send("navigation_page", fence); }
+                        onRevisitRequested: fields => root.send("navigation_select", fields)
                     }
                     RowLayout {
                         Button { text: "Clear upcoming"; onClicked: root.editQueue("clear_upcoming") }
@@ -512,7 +528,7 @@ ShellRoot {
         onHideRequested: root.hideSurface()
         onQuitRequested: { root.send("quit"); Qt.quit(); }
         onTransportRequested: op => root.send(op)
-        onQueueRequested: op => { if (op === "show") root.queueRequested = true; else root.editQueue(op); }
+        onQueueRequested: op => { if (op === "show") { root.queueRequested = true; queueTabs.currentIndex = 0; } else root.editQueue(op); }
     }
     IpcHandler {
         target: "control"
@@ -527,10 +543,11 @@ ShellRoot {
         function browseTracks(): void { root.queueRequested = false; libraryTabs.currentIndex = 0; root.showSurface("full", true); }
         function browseAlbums(): void { root.queueRequested = false; albumBrowser.showDetails = !!albumBrowser.selected; libraryTabs.currentIndex = 2; root.showSurface("full", true); }
         function albumOverview(): void { root.queueRequested = false; albumBrowser.showDetails = false; libraryTabs.currentIndex = 2; root.showSurface("full", true); }
-        function showQueue(): void { root.queueRequested = true; root.showSurface("full", true); }
+        function showNavigation(): void { root.queueRequested = true; queueTabs.currentIndex = 1; root.showSurface("full", true); }
+        function showQueue(): void { root.queueRequested = true; queueTabs.currentIndex = 0; root.showSurface("full", true); }
         function browseArtists(): void { root.queueRequested = false; libraryTabs.currentIndex = 3; root.showSurface("full", true); }
         function browsePlaylists(): void { root.queueRequested = false; libraryTabs.currentIndex = 1; root.showSurface("full", true); }
-        function status(): string { return JSON.stringify({artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {canQueue: albumBrowser.canQueue, cache: root.snapshot.albums ? root.snapshot.albums.cache || null : null, thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
+        function status(): string { return JSON.stringify({navigation: {visible: queueTabs.currentIndex === 1, entries: navigationBrowser.rows.length, viewportHeight: navigationBrowser.viewportHeight, page: root.snapshot.navigation || null}, artists: artistBrowser.artistModel.length, queueOnly: root.queueOnly, albums: {canQueue: albumBrowser.canQueue, cache: root.snapshot.albums ? root.snapshot.albums.cache || null : null, thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
         function quit(): void { root.send("quit"); Qt.quit(); }
     }
 }
