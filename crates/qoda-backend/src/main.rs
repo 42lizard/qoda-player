@@ -1,4 +1,5 @@
 mod albums;
+mod artwork;
 mod player;
 mod playlists;
 mod proxy;
@@ -286,6 +287,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     let player = Player::start()?;
     let proxy = proxy::Proxy::start().await?;
+    let artwork = artwork::Artwork::start().await?;
     let instance = uuid::Uuid::new_v4().to_string();
     let mut revision = 0_u64;
 
@@ -405,7 +407,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::Checkpoint => {}
             Event::Albums(reply) => {
-                albums.apply(reply, auth_generation);
+                if albums.apply(reply, auth_generation)
+                    && let (Some(page), Some(provider)) = (&albums.view.page, provider.clone())
+                {
+                    albums.view.covers = artwork
+                        .publish(provider, page.albums.iter().map(|a| a.reference.clone()))
+                        .await;
+                }
             }
             Event::Playlists(reply) => {
                 playlists.apply(reply, auth_generation);
@@ -560,12 +568,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state["error"] = json!(error);
                         }
                     }
-                    "album_list" | "album_open" => {
+                    "album_list" | "album_open" | "artist_list" | "artist_open" => {
                         if let Some(provider) = provider.clone() {
                             if let Err(error) =
                                 albums.command(&v, provider, auth_generation, tx.clone())
                             {
                                 state["error"] = json!(error);
+                            } else if v["op"] != "album_open" {
+                                artwork.revoke(false).await;
                             }
                         } else {
                             state["error"] = json!("Connect Plex before browsing albums.");
@@ -596,7 +606,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             && let Ok(source) =
                                 serde_json::from_value::<SourceId>(v["source"].clone())
                         {
-                            albums.source_changed(source);
+                            if albums.source_changed(source) {
+                                artwork.revoke(true).await;
+                            }
                             let Ok(offset) =
                                 serde_json::from_value::<qoda_core::Counter>(v["offset"].clone())
                             else {
@@ -834,6 +846,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         provider = None;
                         playlists.invalidate();
                         albums.invalidate();
+                        artwork.revoke(true).await;
                         queue = queue.empty_session();
                         purge_epoch = purge_epoch
                             .checked_add(1)

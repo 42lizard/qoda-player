@@ -31,14 +31,33 @@ pub struct CatalogPage {
     pub tracks: Vec<Track>,
     pub has_more: bool,
 }
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct AlbumRef {
     pub source: SourceId,
     pub key: String,
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArtistRef {
+    pub source: SourceId,
+    pub key: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Artist {
+    pub reference: ArtistRef,
+    pub title: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ArtistPage {
+    pub source: SourceId,
+    pub offset: Counter,
+    pub query: String,
+    pub artists: Vec<Artist>,
+    pub has_more: bool,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Album {
     pub reference: AlbumRef,
+    pub artist_ref: Option<ArtistRef>,
     pub title: String,
     pub artist: String,
     pub year: Option<u32>,
@@ -46,6 +65,7 @@ pub struct Album {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AlbumPage {
+    pub artist: Option<Artist>,
     pub source: SourceId,
     pub offset: Counter,
     pub query: String,
@@ -179,6 +199,26 @@ impl std::fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 pub trait MusicProvider: Send + Sync {
+    fn artists(
+        &self,
+        _source: SourceId,
+        _offset: u64,
+        _query: String,
+    ) -> ProviderFuture<'_, ArtistPage> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
+    fn artist_albums(
+        &self,
+        _reference: ArtistRef,
+        _offset: u64,
+        _query: String,
+    ) -> ProviderFuture<'_, AlbumPage> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
+    /// A provider must validate JPEG dimensions and cap the result at 256 KiB.
+    fn cover(&self, _reference: AlbumRef) -> ProviderFuture<'_, Vec<u8>> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
     fn albums(
         &self,
         _source: SourceId,

@@ -1,6 +1,8 @@
 //! Cancellable album browsing; account and request generations fence late reads.
 use qoda_core::{Counter, SourceId};
-use qoda_provider::{AlbumPage, AlbumRef, AlbumSnapshot, MusicProvider, ProviderError, Track};
+use qoda_provider::{
+    AlbumPage, AlbumRef, AlbumSnapshot, ArtistPage, ArtistRef, MusicProvider, ProviderError, Track,
+};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -9,6 +11,8 @@ use tokio::sync::mpsc;
 #[derive(Default, Serialize)]
 pub struct View {
     pub page: Option<AlbumPage>,
+    pub artists: Option<ArtistPage>,
+    pub covers: std::collections::HashMap<String, String>,
     pub selected: Option<AlbumSnapshot>,
     pub busy: bool,
     pub message: String,
@@ -20,6 +24,7 @@ pub struct Reply {
 }
 enum Update {
     Page(AlbumPage),
+    Artists(ArtistPage),
     Open(AlbumSnapshot),
 }
 #[derive(Default)]
@@ -38,10 +43,12 @@ impl Controller {
         self.view = View::default();
         self.source = None;
     }
-    pub fn source_changed(&mut self, source: SourceId) {
+    pub fn source_changed(&mut self, source: SourceId) -> bool {
         if self.source.is_some_and(|current| current != source) {
             self.invalidate();
+            return true;
         }
+        false
     }
     pub fn command(
         &mut self,
@@ -51,13 +58,27 @@ impl Controller {
         events: mpsc::Sender<crate::Event>,
     ) -> Result<(), String> {
         enum Action {
-            Page(SourceId, u64, String),
+            Page(SourceId, u64, String, Option<ArtistRef>),
+            Artists(SourceId, u64, String),
             Open(AlbumRef),
         }
         let action = match request["op"].as_str() {
-            Some("album_list") => {
-                let source = serde_json::from_value(request["source"].clone())
-                    .map_err(|_| ProviderError::UnknownSource.to_string())?;
+            Some("album_list" | "artist_list" | "artist_open") => {
+                let artist = if request["op"] == "artist_open" {
+                    let reference: ArtistRef = serde_json::from_value(request["reference"].clone())
+                        .map_err(|_| "Choose an artist.")?;
+                    if !self.known_artist(&reference) {
+                        return Err("That artist is no longer displayed. Browse again.".into());
+                    }
+                    Some(reference)
+                } else {
+                    None
+                };
+                let source = match &artist {
+                    Some(artist) => artist.source,
+                    None => serde_json::from_value(request["source"].clone())
+                        .map_err(|_| ProviderError::UnknownSource.to_string())?,
+                };
                 let offset = serde_json::from_value::<Counter>(request["offset"].clone())
                     .map_err(|_| "Invalid album page.")?
                     .get();
@@ -67,7 +88,11 @@ impl Controller {
                     .chars()
                     .take(512)
                     .collect();
-                Action::Page(source, offset, query)
+                if request["op"] == "artist_list" {
+                    Action::Artists(source, offset, query)
+                } else {
+                    Action::Page(source, offset, query, artist)
+                }
             }
             Some("album_open") => {
                 let reference: AlbumRef = serde_json::from_value(request["reference"].clone())
@@ -86,6 +111,11 @@ impl Controller {
             }
             _ => return Err("Unknown album action.".into()),
         };
+        let source = match &action {
+            Action::Page(source, ..) | Action::Artists(source, ..) => *source,
+            Action::Open(reference) => reference.source,
+        };
+        self.source_changed(source);
         let generation = self
             .generation
             .checked_add(1)
@@ -95,22 +125,41 @@ impl Controller {
             task.abort();
         }
         self.source = Some(match &action {
-            Action::Page(source, ..) => *source,
+            Action::Page(source, ..) | Action::Artists(source, ..) => *source,
             Action::Open(reference) => reference.source,
         });
         self.view.selected = None;
         self.view.busy = true;
-        self.view.message = "Loading albums…".into();
-        if matches!(action, Action::Page(..)) {
+        self.view.message = if matches!(action, Action::Artists(..)) {
+            "Loading artists…"
+        } else {
+            "Loading albums…"
+        }
+        .into();
+        if matches!(action, Action::Page(..) | Action::Artists(..)) {
             self.view.page = None;
+            self.view.covers.clear();
+        }
+        if matches!(action, Action::Artists(..)) {
+            self.view.artists = None;
         }
         self.task = Some(tokio::spawn(async move {
             let work = async {
                 match action {
-                    Action::Page(source, offset, query) => provider
-                        .albums(source, offset, query)
+                    Action::Page(source, offset, query, artist) => match artist {
+                        Some(reference) => provider
+                            .artist_albums(reference, offset, query)
+                            .await
+                            .map(Update::Page),
+                        None => provider
+                            .albums(source, offset, query)
+                            .await
+                            .map(Update::Page),
+                    },
+                    Action::Artists(source, offset, query) => provider
+                        .artists(source, offset, query)
                         .await
-                        .map(Update::Page),
+                        .map(Update::Artists),
                     Action::Open(reference) => provider.album(reference).await.map(Update::Open),
                 }
             };
@@ -127,13 +176,41 @@ impl Controller {
         }));
         Ok(())
     }
-    pub fn apply(&mut self, reply: Reply, auth: u64) {
+    pub fn known_artist(&self, reference: &ArtistRef) -> bool {
+        self.view
+            .artists
+            .as_ref()
+            .is_some_and(|p| p.artists.iter().any(|a| &a.reference == reference))
+            || self.view.page.as_ref().is_some_and(|p| {
+                p.artist.as_ref().is_some_and(|a| &a.reference == reference)
+                    || p.albums
+                        .iter()
+                        .any(|a| a.artist_ref.as_ref() == Some(reference))
+            })
+            || self
+                .view
+                .selected
+                .as_ref()
+                .is_some_and(|s| s.album.artist_ref.as_ref() == Some(reference))
+    }
+    /// Returns true only when a current page needs fresh artwork grants.
+    pub fn apply(&mut self, reply: Reply, auth: u64) -> bool {
         if reply.auth != auth || reply.generation != self.generation {
-            return;
+            return false;
         }
         self.task = None;
         self.view.busy = false;
+        let new_page = matches!(&reply.result, Ok(Update::Page(_)));
         match reply.result {
+            Ok(Update::Artists(page)) => {
+                self.view.message = if page.artists.is_empty() {
+                    "No artists found."
+                } else {
+                    "Choose an artist to browse their albums."
+                }
+                .into();
+                self.view.artists = Some(page);
+            }
             Ok(Update::Page(page)) => {
                 self.view.message = if page.albums.is_empty() {
                     "No albums found."
@@ -156,6 +233,7 @@ impl Controller {
                 self.view.message = error.to_string();
             }
         }
+        new_page
     }
     pub fn tracks(&self, request: &Value) -> Result<Vec<Track>, String> {
         let reference: AlbumRef = serde_json::from_value(request["reference"].clone())
@@ -213,6 +291,7 @@ mod tests {
                     source,
                     key: "10".into(),
                 },
+                artist_ref: None,
                 title: "Album".into(),
                 artist: "Artist".into(),
                 year: None,
@@ -260,6 +339,108 @@ mod tests {
         assert!(c.tracks(&request).is_err());
         c.invalidate();
         assert!(c.tracks(&request).is_err());
+    }
+    fn artist_page(source: SourceId) -> ArtistPage {
+        ArtistPage {
+            source,
+            offset: Counter::new(0),
+            query: "".into(),
+            has_more: false,
+            artists: ["1", "2"]
+                .into_iter()
+                .map(|key| qoda_provider::Artist {
+                    reference: ArtistRef {
+                        source,
+                        key: key.into(),
+                    },
+                    title: "Same name".into(),
+                })
+                .collect(),
+        }
+    }
+    #[test]
+    fn artist_navigation_uses_displayed_source_scoped_identity_and_invalidates_on_switch() {
+        let source = SourceId::new();
+        let mut c = Controller {
+            source: Some(source),
+            ..Default::default()
+        };
+        c.view.artists = Some(artist_page(source));
+        assert!(c.known_artist(&ArtistRef {
+            source,
+            key: "1".into()
+        }));
+        assert!(c.known_artist(&ArtistRef {
+            source,
+            key: "2".into()
+        }));
+        assert!(!c.known_artist(&ArtistRef {
+            source,
+            key: "3".into()
+        }));
+        assert!(!c.known_artist(&ArtistRef {
+            source: SourceId::new(),
+            key: "1".into()
+        }));
+        assert!(c.source_changed(SourceId::new()));
+        assert!(!c.known_artist(&ArtistRef {
+            source,
+            key: "1".into()
+        }));
+        let snapshot = snapshot();
+        let reference = ArtistRef {
+            source: snapshot.album.reference.source,
+            key: "9".into(),
+        };
+        c.view.selected = Some(AlbumSnapshot {
+            album: qoda_provider::Album {
+                artist_ref: Some(reference.clone()),
+                ..snapshot.album.clone()
+            },
+            ..snapshot
+        });
+        assert!(c.known_artist(&reference));
+        c.invalidate();
+        assert!(!c.known_artist(&reference));
+    }
+    #[test]
+    fn late_artist_pages_cannot_cross_account_request_or_library_fences() {
+        let source = SourceId::new();
+        let mut c = Controller {
+            generation: 4,
+            source: Some(source),
+            ..Default::default()
+        };
+        for (auth, generation) in [(1, 4), (2, 3)] {
+            assert!(!c.apply(
+                Reply {
+                    auth,
+                    generation,
+                    result: Ok(Update::Artists(artist_page(source)))
+                },
+                2
+            ));
+            assert!(c.view.artists.is_none());
+        }
+        c.apply(
+            Reply {
+                auth: 2,
+                generation: 4,
+                result: Ok(Update::Artists(artist_page(source))),
+            },
+            2,
+        );
+        assert!(c.view.artists.is_some());
+        c.source_changed(SourceId::new());
+        c.apply(
+            Reply {
+                auth: 2,
+                generation: 4,
+                result: Ok(Update::Artists(artist_page(source))),
+            },
+            2,
+        );
+        assert!(c.view.artists.is_none());
     }
     #[test]
     fn old_account_or_superseded_album_reads_cannot_repopulate_current_view() {

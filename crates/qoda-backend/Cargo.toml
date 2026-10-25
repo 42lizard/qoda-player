@@ -18,7 +18,7 @@ axum.workspace = true
 futures-util.workspace = true
 zeroize.workspace = true
 rusqlite.workspace = true
+bytes.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
-bytes.workspace = true

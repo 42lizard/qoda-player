@@ -1,4 +1,5 @@
 mod albums;
+mod artists;
 mod playlists;
 use crate::*;
 use futures_util::StreamExt;
@@ -413,6 +414,25 @@ fn parse_track(node: Node<'_, '_>, source: SourceId) -> Result<Track, ProviderEr
     })
 }
 impl MusicProvider for PlexProvider {
+    fn artists(
+        &self,
+        source: SourceId,
+        offset: u64,
+        query: String,
+    ) -> ProviderFuture<'_, ArtistPage> {
+        Box::pin(self.artist_list(source, offset, query))
+    }
+    fn artist_albums(
+        &self,
+        reference: ArtistRef,
+        offset: u64,
+        query: String,
+    ) -> ProviderFuture<'_, AlbumPage> {
+        Box::pin(self.albums_by_artist(reference, offset, query))
+    }
+    fn cover(&self, reference: AlbumRef) -> ProviderFuture<'_, Vec<u8>> {
+        Box::pin(self.album_cover(reference))
+    }
     fn albums(
         &self,
         source: SourceId,

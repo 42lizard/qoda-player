@@ -6,6 +6,9 @@ ColumnLayout {
     id: albums
     required property var snapshot
     property bool connected: false
+    property bool artworkEnabled: true
+    property var covers: snapshot && snapshot.covers ? snapshot.covers : ({})
+    readonly property int readyThumbnails: albumGrid.contentItem.children.filter(item => item.thumbnailReady).length
     property var page: snapshot ? snapshot.page : null
     property var selected: snapshot ? snapshot.selected : null
     property bool busy: !!snapshot && snapshot.busy
@@ -18,6 +21,8 @@ ColumnLayout {
     readonly property bool coverReady: cover.status === Image.Ready
     readonly property real trackViewport: albumTracks.height
     signal openAlbum(var reference)
+    signal openArtist(var reference)
+    signal allAlbums()
     signal pageRequested(string offset)
     signal queueAlbum(string op, var fields)
     signal trackAction(string op, var track)
@@ -50,6 +55,11 @@ ColumnLayout {
         textFormat: Text.PlainText
     }
     RowLayout {
+        visible: !!albums.page && !!albums.page.artist && !albums.showDetails
+        Button { text: "All albums"; onClicked: albums.allAlbums() }
+        Label { text: albums.page && albums.page.artist ? albums.page.artist.title : ""; Layout.fillWidth: true; textFormat: Text.PlainText; elide: Text.ElideRight; color: "#f2e9db"; font.bold: true }
+    }
+    RowLayout {
         Layout.fillWidth: true
         visible: albums.showDetails && !!albums.selected
         spacing: 16
@@ -70,7 +80,13 @@ ColumnLayout {
         ColumnLayout {
             Layout.fillWidth: true
             Label { text: albums.selected ? albums.selected.album.title : ""; color: "#f2e9db"; font.bold: true; font.pixelSize: 20; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
-            Label { text: albums.selected ? albums.selected.album.artist + (albums.selected.album.year ? " · " + albums.selected.album.year : "") : ""; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Button {
+                Layout.fillWidth: true
+                flat: true
+                enabled: !!albums.selected && !!albums.selected.album.artist_ref && !albums.busy
+                contentItem: Text { text: albums.selected ? albums.selected.album.artist + (albums.selected.album.year ? " · " + albums.selected.album.year : "") + "  ›" : ""; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight }
+                onClicked: albums.openArtist(albums.selected.album.artist_ref)
+            }
             Label { text: albums.trackModel.length + " tracks · disc and track order"; color: "#acb8c8" }
             RowLayout {
                 Button { text: "Back to albums"; onClicked: albums.showDetails = false }
@@ -84,12 +100,15 @@ ColumnLayout {
         visible: !albums.showDetails
         Layout.fillWidth: true; Layout.fillHeight: true
         cellWidth: Math.max(180, Math.floor(width / Math.max(1, Math.floor(width / 210))))
-        cellHeight: 110
+        cellHeight: 242
+        cacheBuffer: 0
         model: albums.albumModel
         clip: true
         ScrollBar.vertical: ScrollBar {}
         delegate: Item {
+            id: albumCard
             required property var modelData
+            property bool thumbnailReady: tileCover.status === Image.Ready
             width: albumGrid.cellWidth; height: albumGrid.cellHeight
             Rectangle {
                 anchors.fill: parent; anchors.margins: 4
@@ -97,6 +116,20 @@ ColumnLayout {
                 HoverHandler { id: albumTap }
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 12; spacing: 5
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 142
+                        color: "#141820"; radius: 4
+                        Label { anchors.centerIn: parent; text: "♪"; font.pixelSize: 44; color: "#acb8c8"; visible: tileCover.status !== Image.Ready }
+                        Image {
+                            id: tileCover
+                            anchors.fill: parent
+                            source: albums.visible && albumGrid.visible && albums.artworkEnabled && albumCard.y + albumCard.height >= albumGrid.contentY && albumCard.y <= albumGrid.contentY + albumGrid.height ? albums.covers[modelData.reference.key] || "" : ""
+                            sourceSize.width: 180; sourceSize.height: 180
+                            asynchronous: true; cache: false
+                            fillMode: Image.PreserveAspectFit
+                        }
+                    }
                     Label { text: modelData.title; font.bold: true; color: "#f2e9db"; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
                     Label { text: modelData.artist; color: "#acb8c8"; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
                     Label { text: (modelData.year ? modelData.year + " · " : "") + (modelData.track_count !== null ? modelData.track_count + " tracks" : "Album"); color: "#acb8c8" }

@@ -3,7 +3,7 @@ use super::*;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256};
 
-fn key(value: &str) -> Result<&str, ProviderError> {
+pub(super) fn key(value: &str) -> Result<&str, ProviderError> {
     if value.is_empty() || value.len() > 32 || !value.bytes().all(|b| b.is_ascii_digit()) {
         return Err(ProviderError::InvalidReply);
     }
@@ -18,6 +18,13 @@ fn album(node: Node<'_, '_>, source: SourceId) -> Result<Album, ProviderError> {
             source,
             key: key(node.attribute("ratingKey").unwrap_or_default())?.into(),
         },
+        artist_ref: node
+            .attribute("parentRatingKey")
+            .filter(|id| key(id).is_ok())
+            .map(|id| ArtistRef {
+                source,
+                key: id.into(),
+            }),
         title: display_attr(node, "title"),
         artist: display_attr(node, "parentTitle"),
         year: node.attribute("year").and_then(|v| v.parse().ok()),
@@ -31,7 +38,7 @@ fn album(node: Node<'_, '_>, source: SourceId) -> Result<Album, ProviderError> {
             .transpose()?,
     })
 }
-fn page_headers(source: &Source, offset: u64, size: &'static str) -> HeaderMap {
+pub(super) fn page_headers(source: &Source, offset: u64, size: &'static str) -> HeaderMap {
     let mut h = source.headers.clone();
     h.insert(
         "X-Plex-Container-Start",
@@ -40,7 +47,11 @@ fn page_headers(source: &Source, offset: u64, size: &'static str) -> HeaderMap {
     h.insert("X-Plex-Container-Size", HeaderValue::from_static(size));
     h
 }
-fn page_count(root: Node<'_, '_>, offset: u64, count: usize) -> Result<u64, ProviderError> {
+pub(super) fn page_count(
+    root: Node<'_, '_>,
+    offset: u64,
+    count: usize,
+) -> Result<u64, ProviderError> {
     if root
         .attribute("offset")
         .and_then(|v| v.parse::<u64>().ok())
@@ -66,6 +77,15 @@ impl PlexProvider {
         offset: u64,
         query: String,
     ) -> Result<AlbumPage, ProviderError> {
+        self.album_list_for(source, offset, query, None).await
+    }
+    pub(super) async fn album_list_for(
+        &self,
+        source: SourceId,
+        offset: u64,
+        query: String,
+        artist: Option<Artist>,
+    ) -> Result<AlbumPage, ProviderError> {
         let s = self
             .sources
             .get(&source)
@@ -79,6 +99,10 @@ impl PlexProvider {
             .append_pair("sort", "artist.titleSort:asc,album.titleSort:asc");
         if !query.is_empty() {
             url.query_pairs_mut().append_pair("title", &query);
+        }
+        if let Some(artist) = &artist {
+            url.query_pairs_mut()
+                .append_pair("artist.id", &artist.reference.key);
         }
         let body = xml(&self.http, url, page_headers(s, offset, "100")).await?;
         let doc = Document::parse(&body).map_err(|_| ProviderError::InvalidReply)?;
@@ -99,7 +123,14 @@ impl PlexProvider {
                 {
                     return Err(ProviderError::InvalidReply);
                 }
-                album(n, source)
+                let album = album(n, source)?;
+                if artist
+                    .as_ref()
+                    .is_some_and(|artist| album.artist_ref.as_ref() != Some(&artist.reference))
+                {
+                    return Err(ProviderError::InvalidReply);
+                }
+                Ok(album)
             })
             .collect::<Result<Vec<_>, _>>()?;
         if albums.len() > 100 {
@@ -111,6 +142,7 @@ impl PlexProvider {
             return Err(ProviderError::InvalidReply);
         }
         Ok(AlbumPage {
+            artist,
             source,
             offset: Counter::new(offset),
             query,
@@ -220,7 +252,10 @@ impl PlexProvider {
         let artwork = if thumb.is_empty() {
             None
         } else {
-            self.album_artwork(s, id, &thumb).await.ok()
+            self.album_artwork(s, id, &thumb)
+                .await
+                .ok()
+                .map(|bytes| format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)))
         };
         let artwork_unavailable = artwork.is_none();
         Ok(AlbumSnapshot {
@@ -231,12 +266,48 @@ impl PlexProvider {
             artwork_unavailable,
         })
     }
+    pub(super) async fn album_cover(&self, reference: AlbumRef) -> Result<Vec<u8>, ProviderError> {
+        let s = self
+            .sources
+            .get(&reference.source)
+            .ok_or(ProviderError::UnknownSource)?;
+        let id = key(&reference.key)?;
+        let body = xml(
+            &self.http,
+            path(&s.base, &["library", "metadata", id]),
+            s.headers.clone(),
+        )
+        .await?;
+        let doc = Document::parse(&body).map_err(|_| ProviderError::InvalidReply)?;
+        let node = doc
+            .root_element()
+            .children()
+            .find(|n| n.has_tag_name("Directory"))
+            .ok_or(ProviderError::InvalidReply)?;
+        if node
+            .attribute("librarySectionID")
+            .or_else(|| doc.root_element().attribute("librarySectionID"))
+            != Some(s.key.as_str())
+            || doc
+                .root_element()
+                .attribute("librarySectionID")
+                .is_some_and(|id| id != s.key)
+            || album(node, reference.source)?.reference != reference
+        {
+            return Err(ProviderError::InvalidReply);
+        }
+        let thumb = attr(node, "thumb");
+        if thumb.is_empty() {
+            return Err(ProviderError::MissingTrack);
+        }
+        self.album_artwork(s, id, &thumb).await
+    }
     async fn album_artwork(
         &self,
         s: &Source,
         id: &str,
         thumb: &str,
-    ) -> Result<String, ProviderError> {
+    ) -> Result<Vec<u8>, ProviderError> {
         // Only an album's own numeric thumb path can be sent to the image transcoder.
         // No arbitrary remote URL, query string, token or alternate endpoint is accepted.
         let prefix = format!("/library/metadata/{id}/thumb");
@@ -284,7 +355,7 @@ impl PlexProvider {
         if !bounded_jpeg(&bytes) {
             return Err(ProviderError::InvalidReply);
         }
-        Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)))
+        Ok(bytes)
     }
 }
 // Bound decoder dimensions as well as transport size. QML handles actual decoding.
@@ -550,6 +621,39 @@ mod tests {
                         .any(|p| p.starts_with("/photo/"))
                 );
             }
+            task.abort();
+        }
+    }
+    #[tokio::test]
+    async fn thumbnail_access_is_metadata_only_and_reuses_the_cover_guards() {
+        let (p, source, requests, task) = fixture(0).await;
+        assert_eq!(
+            p.cover(AlbumRef {
+                source,
+                key: "20".into()
+            })
+            .await
+            .unwrap(),
+            JPEG
+        );
+        assert!(
+            !requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|path| path.contains("children"))
+        );
+        task.abort();
+        for mode in [1, 3, 5, 6] {
+            let (p, source, _, task) = fixture(mode).await;
+            assert!(
+                p.cover(AlbumRef {
+                    source,
+                    key: "20".into()
+                })
+                .await
+                .is_err()
+            );
             task.abort();
         }
     }
