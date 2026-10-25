@@ -1,0 +1,4424 @@
+{
+  "scope": "Native Quickshell windows through application IPC and read-only Hyprland diagnostics; no physical key or mouse injection.",
+  "versions": {
+    "quickshell": "Quickshell 0.3.2 (revision 2b4501a282689792b62e94f3fb30d8f512324fe6, distributed by Omarchy)",
+    "hyprland": "Hyprland 0.56.2 built from branch v0.56.2 at commit efb50993780079460b0cbed1363e2166a2de1d9f clean ([gha] Nix: update inputs).",
+    "qt": [
+      "qt6-base 6.12.0-3",
+      "qt6-declarative 6.12.0-2",
+      "qt6-wayland 6.12.0-1"
+    ]
+  },
+  "checks": [
+    {
+      "name": "normal tiled workspace",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "full native map and 200-percent scale",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "full compositor focus",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "narrow queue is not persistent",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "scroll position established",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "programmatic focus-chain operation",
+      "passed": true,
+      "detail": "[\"queue\", \"Qt internal focus item\", \"Qt internal focus item\", \"Qt internal focus item\"]"
+    },
+    {
+      "name": "wide persistent queue",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "queue drawer opened",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "queue dismiss keeps full form",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "full dialog opened",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "dialog dismiss keeps full form",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "full Escape handler leaves browser open",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "hidden maps neither form",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "fictional root ticker survives hiding",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "restores full and navigation",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "native close maps to hide",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "restore after actual close",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "compact passive no keyboard request",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "passive panel preserves previous toplevel",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "panel reserves no desktop space",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "compact is native overlay surface",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "compact selects invoking monitor",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "compact settles to on-demand focus",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "compact native active focus",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "compact dialog opened",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "first dismiss leaves compact",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "second dismiss hides and releases keyboard",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "compositor restores previous toplevel",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "toggle restores compact",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "rapid toggle leaves no keyboard grab",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "all visibility transitions retain selection",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "explicit quit ends prototype instance",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "observations": [
+    {
+      "label": "initial-hidden",
+      "state": {
+        "form": "hidden",
+        "lastForm": "full",
+        "page": "Albums",
+        "library": "Home / Music",
+        "query": "",
+        "selected": 0,
+        "savedY": 0,
+        "listY": 0,
+        "playing": true,
+        "ticks": 0,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 1100,
+          "height": 700,
+          "dpr": 1,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": true,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "full-tiled",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Albums",
+        "library": "Home / Music",
+        "query": "",
+        "selected": 0,
+        "savedY": 0,
+        "listY": 0,
+        "playing": true,
+        "ticks": 1,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "search",
+          "searchFocused": true,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "navigation-seeded",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 2,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "search",
+          "searchFocused": true,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "programmatic-focus-chain",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 2,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "full-maximized",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 3,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      },
+      "note": "Client maximize did not widen the window; installed Omarchy defaults suppress maximize. Test wide layout via a temporary prototype-only fullscreen request."
+    },
+    {
+      "label": "full-width-probe",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 4,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 1200,
+          "height": 800,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": true,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              1200,
+              800
+            ],
+            "at": [
+              0,
+              0
+            ],
+            "monitor": 0,
+            "fullscreen": 2
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "full-unmaximized",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 4,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "queue-open",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 5,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": true,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Drawer",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "queue-dismissed",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 5,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "full-dialog-open",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 6,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": true,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "full-dialog-dismissed",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 6,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "full-dismiss-no-overlay",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 7,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "hidden-ticker",
+      "state": {
+        "form": "hidden",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 8,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "restore-full",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 9,
+        "closeEvents": 0,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "search",
+          "searchFocused": true,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "native-close",
+      "state": {
+        "form": "hidden",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 10,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "search",
+          "searchFocused": true,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "restore-after-close",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 10,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "search",
+          "searchFocused": true,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "before-passive",
+      "state": {
+        "form": "hidden",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 11,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "compact-passive",
+      "state": {
+        "form": "compact",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 11,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": true,
+          "mapped": true,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": [
+            {
+              "x": 762,
+              "y": 542,
+              "w": 420,
+              "h": 240,
+              "alpha": 1,
+              "namespace": "qoda-native-prototype"
+            }
+          ]
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "before-interactive",
+      "state": {
+        "form": "hidden",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 12,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "compact-interactive",
+      "state": {
+        "form": "compact",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 13,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": true,
+          "mapped": true,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "compact-play",
+          "keyboardMode": 2,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 12
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": [
+            {
+              "x": 762,
+              "y": 542,
+              "w": 420,
+              "h": 240,
+              "alpha": 1,
+              "namespace": "qoda-native-prototype"
+            }
+          ]
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "compact-dialog-open",
+      "state": {
+        "form": "compact",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 13,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": true,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": true,
+          "mapped": true,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "Qt internal focus item",
+          "keyboardMode": 2,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "dialog-open",
+            "form": "compact",
+            "tick": 13
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": [
+            {
+              "x": 762,
+              "y": 542,
+              "w": 420,
+              "h": 240,
+              "alpha": 1,
+              "namespace": "qoda-native-prototype"
+            }
+          ]
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "compact-dialog-dismissed",
+      "state": {
+        "form": "compact",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 14,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": true,
+          "mapped": true,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "compact-play",
+          "keyboardMode": 2,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "dialog-open",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "dialog-closed",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "compact",
+            "tick": 13
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": [
+            {
+              "x": 762,
+              "y": 542,
+              "w": 420,
+              "h": 240,
+              "alpha": 1,
+              "namespace": "qoda-native-prototype"
+            }
+          ]
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "compact-dismissed",
+      "state": {
+        "form": "hidden",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 15,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "dialog-open",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "dialog-closed",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 14
+          },
+          {
+            "action": "escape:compact:ipc",
+            "form": "hidden",
+            "tick": 14
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "restore-compact",
+      "state": {
+        "form": "compact",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 15,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": true,
+          "mapped": true,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "compact-play",
+          "keyboardMode": 2,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "dialog-open",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "dialog-closed",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 14
+          },
+          {
+            "action": "escape:compact:ipc",
+            "form": "hidden",
+            "tick": 14
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 15
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 15
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": [
+            {
+              "x": 762,
+              "y": 542,
+              "w": 420,
+              "h": 240,
+              "alpha": 1,
+              "namespace": "qoda-native-prototype"
+            }
+          ]
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "rapid-toggle-finished",
+      "state": {
+        "form": "hidden",
+        "lastForm": "compact",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 17,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": false,
+          "mapped": false,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "searchFocused": false,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "dialog-open",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "dialog-closed",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 14
+          },
+          {
+            "action": "escape:compact:ipc",
+            "form": "hidden",
+            "tick": 14
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 15
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 15
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 15
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 15
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 16
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 16
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 16
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": false,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    },
+    {
+      "label": "before-quit",
+      "state": {
+        "form": "full",
+        "lastForm": "full",
+        "page": "Artists",
+        "library": "Home / Music",
+        "query": "native study",
+        "selected": 35,
+        "savedY": 1680,
+        "listY": 1680,
+        "playing": true,
+        "ticks": 18,
+        "closeEvents": 1,
+        "handledPhysicalKeys": 0,
+        "dialog": false,
+        "queueDrawer": false,
+        "full": {
+          "visible": true,
+          "mapped": true,
+          "width": 581,
+          "height": 750,
+          "dpr": 2,
+          "active": true,
+          "focusItem": "search",
+          "searchFocused": true,
+          "persistentQueue": false,
+          "screen": "eDP-1"
+        },
+        "compact": {
+          "visible": false,
+          "mapped": false,
+          "width": 420,
+          "height": 240,
+          "dpr": 2,
+          "active": false,
+          "focusItem": "none",
+          "keyboardMode": 0,
+          "screen": "eDP-1"
+        },
+        "screens": [
+          {
+            "name": "eDP-1",
+            "width": 1200,
+            "height": 800
+          }
+        ],
+        "journal": [
+          {
+            "action": "ready:hidden",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 0
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 0
+          },
+          {
+            "action": "seed-navigation",
+            "form": "full",
+            "tick": 1
+          },
+          {
+            "action": "wide-probe:true",
+            "form": "full",
+            "tick": 3
+          },
+          {
+            "action": "wide-probe:false",
+            "form": "full",
+            "tick": 4
+          },
+          {
+            "action": "queue-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "escape:queue:ipc",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "queue-closed",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-open",
+            "form": "full",
+            "tick": 5
+          },
+          {
+            "action": "dialog-closed",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "escape:full-stays-open:ipc",
+            "form": "full",
+            "tick": 6
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 7
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 8
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "native-close-as-hide",
+            "form": "hidden",
+            "tick": 9
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 10
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 10
+          },
+          {
+            "action": "show:compact:passive",
+            "form": "compact",
+            "tick": 11
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 11
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 12
+          },
+          {
+            "action": "dialog-open",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "dialog-closed",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "escape:dialog:ipc",
+            "form": "compact",
+            "tick": 13
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 14
+          },
+          {
+            "action": "escape:compact:ipc",
+            "form": "hidden",
+            "tick": 14
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 15
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 15
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 15
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 15
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 16
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 16
+          },
+          {
+            "action": "show:compact:interactive",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "focus:ondemand",
+            "form": "compact",
+            "tick": 16
+          },
+          {
+            "action": "show:hidden:passive",
+            "form": "hidden",
+            "tick": 16
+          },
+          {
+            "action": "show:full:interactive",
+            "form": "full",
+            "tick": 17
+          }
+        ]
+      },
+      "compositor": {
+        "clients": [
+          {
+            "workspace": 1,
+            "floating": false,
+            "mapped": true,
+            "size": [
+              581,
+              750
+            ],
+            "at": [
+              607,
+              38
+            ],
+            "monitor": 0,
+            "fullscreen": 0
+          }
+        ],
+        "panels": {
+          "eDP-1": []
+        },
+        "prototype_toplevel_active": true,
+        "monitors": [
+          {
+            "name": "eDP-1",
+            "width": 2400,
+            "height": 1600,
+            "scale": 2,
+            "reserved": [
+              0,
+              26,
+              0,
+              0
+            ],
+            "workspace": 1
+          }
+        ]
+      }
+    }
+  ],
+  "unverified": [
+    "Physical Tab/Shift+Tab/Enter/Space/Ctrl+K/Escape dispatch and actual pointer interaction: no UI automation surface is available.",
+    "Multiple physical outputs, hotplug and scale changes: only one monitor at scale 2 is connected.",
+    "Real playback/backend survival, large catalog performance and production activation/shortcut binding are separate work."
+  ]
+}
