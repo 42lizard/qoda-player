@@ -39,6 +39,8 @@ Credential handling, SQLite persistence, cache budgets, checkpoint/retry default
 
 The [fidelity and ReplayGain contract](docs/adr/0002-fidelity-and-gain-contract.md) selects desktop PipeWire playback by default, explicit direct ALSA fidelity output, and Auto ReplayGain with a high-precision per-file gain path. Native output and gain transitions require qualification before they receive a verified label.
 
+[Native ALSA handoff observations](https://github.com/42lizard/qoda-player/issues/17) qualify a prototype profile at 48 kHz/S16/stereo on the selected built-in speaker PCM, with exact supported sample/gain comparisons and explicit unsupported-format guards. Downstream hardware fidelity and production Rust integration remain unqualified. [Playback occurrence timing and buffered edits](https://github.com/42lizard/qoda-player/issues/20) need a separate contract because decoder events can lead presentation.
+
 [Native Quickshell surface observations](https://github.com/42lizard/qoda-player/issues/14) establish tiled/full and compact-panel behavior through application IPC on the measured single-monitor setup. Physical keyboard dispatch, multi-output behavior, and scale changes require separate acceptance checks.
 
 The [desktop lifecycle and distribution contract](https://github.com/42lizard/qoda-player/issues/11) selects on-demand user services, targeted launch/toggle commands, explicit Quit, paused crash recovery, and versioned source installs under a user prefix. Installation, desktop identity, upgrade and rollback behavior require separate qualification; no production package or desktop integration has been installed.
