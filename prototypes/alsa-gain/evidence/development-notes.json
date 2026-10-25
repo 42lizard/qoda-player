@@ -1,0 +1,11 @@
+{
+  "scope": "earlier staged development, distinct from the final completed full workflow",
+  "observations": [
+    "First preload shim failed symbol resolution and aborted before PCM submission; global libasound visibility corrected the capture loader.",
+    "An analysis expression spawned tag extraction per sample; it was interrupted and changed to once per file. No repeated audio playback occurred during that analysis loop.",
+    "Earlier captures were reused for analysis after that interruption; original child exit/stderr were not separately retained and were treated as unknown. The final full workflow performed fresh captures instead.",
+    "A control readiness poll failed on unavailable/null position; it now waits for observed progression.",
+    "The short removal fixture operated after engine file advancement. It is retained as a nonqualifying timing example, with a separate long-current confirmation for early removal.",
+    "Whole-file equality is not a valid oracle after an explicit seek; accepted buffers before drop and the requested post-seek tail are checked separately."
+  ]
+}

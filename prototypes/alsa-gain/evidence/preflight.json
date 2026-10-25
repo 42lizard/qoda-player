@@ -1,0 +1,100 @@
+{
+  "selected_device": "hw:CARD=avsmax98927,DEV=1",
+  "boundary": "Exact hw parameter installation; no PCM submitted",
+  "matrix": [
+    {
+      "rate": 44100,
+      "format": "S16_LE",
+      "supported": false,
+      "stage": "rate",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 44100,
+      "format": "S24_LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 44100,
+      "format": "S24_3LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 44100,
+      "format": "S32_LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 48000,
+      "format": "S16_LE",
+      "supported": true,
+      "installed_without_samples": true
+    },
+    {
+      "rate": 48000,
+      "format": "S24_LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 48000,
+      "format": "S24_3LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 48000,
+      "format": "S32_LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 96000,
+      "format": "S16_LE",
+      "supported": false,
+      "stage": "rate",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 96000,
+      "format": "S24_LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 96000,
+      "format": "S24_3LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    },
+    {
+      "rate": 96000,
+      "format": "S32_LE",
+      "supported": false,
+      "stage": "format",
+      "error": -22,
+      "reason": "Invalid argument"
+    }
+  ]
+}

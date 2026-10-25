@@ -1,0 +1,1 @@
+{"outcome":"harness failure before control assertions","error_class":"TypeError","cause":"startup position property was present with null value; readiness poll compared it with a number","fix":"treat unavailable position as not ready and wait for observed progression","qualification":"not counted as a successful control observation"}

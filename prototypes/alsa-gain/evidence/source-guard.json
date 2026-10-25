@@ -1,0 +1,980 @@
+{
+  "cases": [
+    {
+      "name": "descriptor-native-valid",
+      "restored_existing_capture": false,
+      "policies": [
+        {
+          "factor": 1.0,
+          "effective": "off",
+          "provenance": "off",
+          "selected": null,
+          "peak_known": false,
+          "filter": ""
+        }
+      ],
+      "expected_samples": 24000,
+      "actual_samples": 24000,
+      "same_count": true,
+      "max_error_lsb": 0,
+      "exact": true,
+      "native_quantized_error_lsb": 0,
+      "worker_exit": 0,
+      "stderr": "",
+      "worker": {
+        "intent": {
+          "mode": "fidelity",
+          "device": "hw:CARD=avsmax98927,DEV=1",
+          "volume": 100,
+          "native_replaygain": "no",
+          "dither": "no"
+        },
+        "preflight": [
+          {
+            "supported": true,
+            "installed_without_samples": false
+          }
+        ],
+        "events": [
+          {
+            "event": 5,
+            "t": 0.634107,
+            "reply": 1,
+            "error": 0
+          },
+          {
+            "event": 5,
+            "t": 0.634171,
+            "reply": 2,
+            "error": 0
+          },
+          {
+            "event": 22,
+            "t": 0.634206,
+            "property": "path",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.634393,
+            "property": "playlist-pos",
+            "value": 0
+          },
+          {
+            "event": 22,
+            "t": 0.634588,
+            "property": "pause",
+            "value": 0
+          },
+          {
+            "event": 22,
+            "t": 0.636985,
+            "property": "volume",
+            "value": 100.0
+          },
+          {
+            "event": 22,
+            "t": 0.637144,
+            "property": "time-pos",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.637182,
+            "property": "audio-out-params/samplerate",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.637214,
+            "property": "audio-out-params/format",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.637244,
+            "property": "audio-out-params/channels",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.637273,
+            "property": "idle-active",
+            "value": 0
+          },
+          {
+            "event": 6,
+            "t": 0.656053
+          },
+          {
+            "event": 22,
+            "t": 0.656442,
+            "property": "path",
+            "value": "/tmp/qoda-source-guard-j69s_8w0/verified-source.flac"
+          },
+          {
+            "event": 18,
+            "t": 0.670718
+          },
+          {
+            "event": 18,
+            "t": 0.671742
+          },
+          {
+            "event": 8,
+            "t": 0.67213
+          },
+          {
+            "event": 22,
+            "t": 0.672468,
+            "property": "time-pos",
+            "value": 0.0
+          },
+          {
+            "event": 18,
+            "t": 0.693756
+          },
+          {
+            "event": 22,
+            "t": 0.694479,
+            "property": "audio-out-params/samplerate",
+            "value": 48000
+          },
+          {
+            "event": 21,
+            "t": 0.694625
+          },
+          {
+            "event": 22,
+            "t": 0.694677,
+            "property": "audio-out-params/format",
+            "value": "s16"
+          },
+          {
+            "event": 22,
+            "t": 0.694772,
+            "property": "audio-out-params/channels",
+            "value": "stereo"
+          },
+          {
+            "event": 18,
+            "t": 0.696601
+          },
+          {
+            "event": 7,
+            "t": 0.697178,
+            "reason": 0,
+            "error": 0
+          },
+          {
+            "event": 18,
+            "t": 0.951826
+          },
+          {
+            "event": 11,
+            "t": 0.952448
+          },
+          {
+            "event": 22,
+            "t": 0.952499,
+            "property": "path",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.9526,
+            "property": "playlist-pos",
+            "value": -1
+          },
+          {
+            "event": 22,
+            "t": 0.952779,
+            "property": "time-pos",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.952873,
+            "property": "audio-out-params/samplerate",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.952953,
+            "property": "audio-out-params/format",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.953005,
+            "property": "audio-out-params/channels",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.953061,
+            "property": "idle-active",
+            "value": 1
+          }
+        ],
+        "commands": [
+          {
+            "id": 1,
+            "args": [
+              "loadfile",
+              "verified-source.flac",
+              "replace",
+              "-1",
+              "af="
+            ],
+            "submit": 0,
+            "t": 0.633345
+          },
+          {
+            "id": 2,
+            "args": [
+              "set",
+              "pause",
+              "no"
+            ],
+            "submit": 0,
+            "t": 0.633538
+          }
+        ],
+        "errors": [],
+        "source_formats": [
+          {
+            "codec": "flac",
+            "rate": 48000,
+            "bits": 16,
+            "channels": 2,
+            "container": "flac"
+          }
+        ],
+        "options": {
+          "config": "no",
+          "load-scripts": "no",
+          "load-auto-profiles": "no",
+          "ytdl": "no",
+          "osc": "no",
+          "terminal": "no",
+          "vo": "null",
+          "vid": "no",
+          "audio-display": "no",
+          "ao": "alsa",
+          "audio-device": "alsa/hw:CARD=avsmax98927,DEV=1",
+          "alsa-resample": "no",
+          "audio-format": "s16",
+          "audio-channels": "stereo",
+          "volume": "100",
+          "volume-gain": "0",
+          "mute": "no",
+          "speed": "1",
+          "replaygain": "no",
+          "gapless-audio": "weak",
+          "prefetch-playlist": "yes",
+          "audio-swresample-o": "dither_method=none",
+          "pause": "yes",
+          "idle": "yes",
+          "audio-buffer": "0.1"
+        },
+        "proc_hw_params_observations": [
+          "closed\n",
+          "closed\n",
+          "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+          "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+          "closed\n"
+        ],
+        "proc_hw_params": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "state": {
+          "path": null,
+          "playlist-pos": -1,
+          "pause": 0,
+          "volume": 100.0,
+          "time-pos": null,
+          "audio-out-params/samplerate": null,
+          "audio-out-params/format": null,
+          "audio-out-params/channels": null,
+          "idle-active": 1
+        },
+        "end_events": 1,
+        "timeout": false,
+        "unexecuted_actions": [],
+        "stop_reason": null,
+        "elapsed_seconds": 1.008557
+      },
+      "streams": [
+        {
+          "samples": 24000,
+          "events": [
+            {
+              "event": "open",
+              "stream": 0,
+              "route": "hw:CARD=avsmax98927,DEV=1",
+              "t": 0.0
+            },
+            {
+              "event": "proc-hw-params",
+              "value": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+              "t": 0.018595
+            },
+            {
+              "pcm_type": 0,
+              "event": "negotiated",
+              "format": "S16_LE",
+              "rate": 48000,
+              "channels": 2,
+              "container_bits": 16,
+              "valid_bits": 16,
+              "access": 3,
+              "t": 0.018637
+            },
+            {
+              "event": "pcm-state",
+              "state": 2,
+              "accepted_total": 0,
+              "t": 0.019909
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 4800,
+              "accepted_total": 4800,
+              "t": 0.020281
+            },
+            {
+              "event": "pcm-state",
+              "state": 3,
+              "accepted_total": 4800,
+              "t": 0.020899
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 6000,
+              "t": 0.046701
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 7200,
+              "t": 0.071975
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 8400,
+              "t": 0.097257
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 9600,
+              "t": 0.122506
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 10800,
+              "t": 0.147788
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 12000,
+              "t": 0.173085
+            },
+            {
+              "event": "pcm-state",
+              "state": 4,
+              "accepted_total": 12000,
+              "t": 0.273855
+            },
+            {
+              "event": "pcm-state",
+              "state": 2,
+              "accepted_total": 12000,
+              "t": 0.27482
+            },
+            {
+              "event": "drop",
+              "result": 0,
+              "accepted_total": 12000,
+              "t": 0.274918
+            },
+            {
+              "event": "drop",
+              "result": 0,
+              "accepted_total": 12000,
+              "t": 0.275046
+            },
+            {
+              "event": "close",
+              "stream": 0,
+              "route": "hw:CARD=avsmax98927,DEV=1",
+              "accepted_frames": 12000,
+              "t": 0.276668
+            }
+          ]
+        }
+      ],
+      "routes": [
+        {
+          "route": "hw:CARD=avsmax98927,DEV=1",
+          "result": 0
+        }
+      ]
+    },
+    {
+      "name": "descriptor-native-wav",
+      "restored_existing_capture": false,
+      "policies": [
+        {
+          "factor": 1.0,
+          "effective": "off",
+          "provenance": "off",
+          "selected": null,
+          "peak_known": false,
+          "filter": ""
+        }
+      ],
+      "expected_samples": 24000,
+      "actual_samples": 24000,
+      "same_count": true,
+      "max_error_lsb": 0,
+      "exact": true,
+      "native_quantized_error_lsb": 0,
+      "worker_exit": 0,
+      "stderr": "",
+      "worker": {
+        "intent": {
+          "mode": "fidelity",
+          "device": "hw:CARD=avsmax98927,DEV=1",
+          "volume": 100,
+          "native_replaygain": "no",
+          "dither": "no"
+        },
+        "preflight": [
+          {
+            "supported": true,
+            "installed_without_samples": false
+          }
+        ],
+        "events": [
+          {
+            "event": 22,
+            "t": 0.652592,
+            "property": "path",
+            "value": null
+          },
+          {
+            "event": 5,
+            "t": 0.655109,
+            "reply": 1,
+            "error": 0
+          },
+          {
+            "event": 5,
+            "t": 0.655177,
+            "reply": 2,
+            "error": 0
+          },
+          {
+            "event": 22,
+            "t": 0.655218,
+            "property": "playlist-pos",
+            "value": 0
+          },
+          {
+            "event": 22,
+            "t": 0.655434,
+            "property": "pause",
+            "value": 0
+          },
+          {
+            "event": 22,
+            "t": 0.655588,
+            "property": "volume",
+            "value": 100.0
+          },
+          {
+            "event": 22,
+            "t": 0.656414,
+            "property": "time-pos",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.656459,
+            "property": "audio-out-params/samplerate",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.656495,
+            "property": "audio-out-params/format",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.656526,
+            "property": "audio-out-params/channels",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.656555,
+            "property": "idle-active",
+            "value": 0
+          },
+          {
+            "event": 6,
+            "t": 0.671841
+          },
+          {
+            "event": 22,
+            "t": 0.672397,
+            "property": "path",
+            "value": "/tmp/qoda-source-guard-j69s_8w0/verified-wav.wav"
+          },
+          {
+            "event": 18,
+            "t": 0.697731
+          },
+          {
+            "event": 18,
+            "t": 0.700354
+          },
+          {
+            "event": 8,
+            "t": 0.701554
+          },
+          {
+            "event": 22,
+            "t": 0.702221,
+            "property": "time-pos",
+            "value": 0.0
+          },
+          {
+            "event": 18,
+            "t": 0.723831
+          },
+          {
+            "event": 22,
+            "t": 0.724672,
+            "property": "audio-out-params/samplerate",
+            "value": 48000
+          },
+          {
+            "event": 21,
+            "t": 0.725165
+          },
+          {
+            "event": 22,
+            "t": 0.725199,
+            "property": "audio-out-params/format",
+            "value": "s16"
+          },
+          {
+            "event": 22,
+            "t": 0.725281,
+            "property": "audio-out-params/channels",
+            "value": "stereo"
+          },
+          {
+            "event": 18,
+            "t": 0.726231
+          },
+          {
+            "event": 7,
+            "t": 0.727157,
+            "reason": 0,
+            "error": 0
+          },
+          {
+            "event": 18,
+            "t": 0.983518
+          },
+          {
+            "event": 11,
+            "t": 0.984709
+          },
+          {
+            "event": 22,
+            "t": 0.98476,
+            "property": "path",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.984821,
+            "property": "playlist-pos",
+            "value": -1
+          },
+          {
+            "event": 22,
+            "t": 0.984873,
+            "property": "time-pos",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.984905,
+            "property": "audio-out-params/samplerate",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.984938,
+            "property": "audio-out-params/format",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.98498,
+            "property": "audio-out-params/channels",
+            "value": null
+          },
+          {
+            "event": 22,
+            "t": 0.985018,
+            "property": "idle-active",
+            "value": 1
+          }
+        ],
+        "commands": [
+          {
+            "id": 1,
+            "args": [
+              "loadfile",
+              "verified-wav.wav",
+              "replace",
+              "-1",
+              "af="
+            ],
+            "submit": 0,
+            "t": 0.652343
+          },
+          {
+            "id": 2,
+            "args": [
+              "set",
+              "pause",
+              "no"
+            ],
+            "submit": 0,
+            "t": 0.652542
+          }
+        ],
+        "errors": [],
+        "source_formats": [
+          {
+            "codec": "pcm_s16le",
+            "rate": 48000,
+            "bits": 16,
+            "channels": 2,
+            "container": "wav"
+          }
+        ],
+        "options": {
+          "config": "no",
+          "load-scripts": "no",
+          "load-auto-profiles": "no",
+          "ytdl": "no",
+          "osc": "no",
+          "terminal": "no",
+          "vo": "null",
+          "vid": "no",
+          "audio-display": "no",
+          "ao": "alsa",
+          "audio-device": "alsa/hw:CARD=avsmax98927,DEV=1",
+          "alsa-resample": "no",
+          "audio-format": "s16",
+          "audio-channels": "stereo",
+          "volume": "100",
+          "volume-gain": "0",
+          "mute": "no",
+          "speed": "1",
+          "replaygain": "no",
+          "gapless-audio": "weak",
+          "prefetch-playlist": "yes",
+          "audio-swresample-o": "dither_method=none",
+          "pause": "yes",
+          "idle": "yes",
+          "audio-buffer": "0.1"
+        },
+        "proc_hw_params_observations": [
+          "closed\n",
+          "closed\n",
+          "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+          "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+          "closed\n"
+        ],
+        "proc_hw_params": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "state": {
+          "path": null,
+          "playlist-pos": -1,
+          "pause": 0,
+          "volume": 100.0,
+          "time-pos": null,
+          "audio-out-params/samplerate": null,
+          "audio-out-params/format": null,
+          "audio-out-params/channels": null,
+          "idle-active": 1
+        },
+        "end_events": 1,
+        "timeout": false,
+        "unexecuted_actions": [],
+        "stop_reason": null,
+        "elapsed_seconds": 1.042625
+      },
+      "streams": [
+        {
+          "samples": 24000,
+          "events": [
+            {
+              "event": "open",
+              "stream": 0,
+              "route": "hw:CARD=avsmax98927,DEV=1",
+              "t": 0.0
+            },
+            {
+              "event": "proc-hw-params",
+              "value": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+              "t": 0.019303
+            },
+            {
+              "pcm_type": 0,
+              "event": "negotiated",
+              "format": "S16_LE",
+              "rate": 48000,
+              "channels": 2,
+              "container_bits": 16,
+              "valid_bits": 16,
+              "access": 3,
+              "t": 0.019341
+            },
+            {
+              "event": "pcm-state",
+              "state": 2,
+              "accepted_total": 0,
+              "t": 0.020756
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 4800,
+              "accepted_total": 4800,
+              "t": 0.021444
+            },
+            {
+              "event": "pcm-state",
+              "state": 3,
+              "accepted_total": 4800,
+              "t": 0.021753
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 6000,
+              "t": 0.047106
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 7200,
+              "t": 0.072445
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 8400,
+              "t": 0.097742
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 9600,
+              "t": 0.122951
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 10800,
+              "t": 0.148211
+            },
+            {
+              "event": "submit",
+              "method": "writei",
+              "frames": 1200,
+              "accepted_total": 12000,
+              "t": 0.17343
+            },
+            {
+              "event": "pcm-state",
+              "state": 4,
+              "accepted_total": 12000,
+              "t": 0.274093
+            },
+            {
+              "event": "pcm-state",
+              "state": 2,
+              "accepted_total": 12000,
+              "t": 0.276403
+            },
+            {
+              "event": "drop",
+              "result": 0,
+              "accepted_total": 12000,
+              "t": 0.276518
+            },
+            {
+              "event": "drop",
+              "result": 0,
+              "accepted_total": 12000,
+              "t": 0.277038
+            },
+            {
+              "event": "close",
+              "stream": 0,
+              "route": "hw:CARD=avsmax98927,DEV=1",
+              "accepted_frames": 12000,
+              "t": 0.279117
+            }
+          ]
+        }
+      ],
+      "routes": [
+        {
+          "route": "hw:CARD=avsmax98927,DEV=1",
+          "result": 0
+        }
+      ]
+    },
+    {
+      "name": "descriptor-rejects-precision-hint",
+      "restored_existing_capture": false,
+      "policies": [
+        {
+          "factor": 1.0,
+          "effective": "off",
+          "provenance": "off",
+          "selected": null,
+          "peak_known": false,
+          "filter": ""
+        }
+      ],
+      "expected_samples": 24000,
+      "actual_samples": 0,
+      "same_count": false,
+      "max_error_lsb": null,
+      "exact": false,
+      "native_quantized_error_lsb": 0,
+      "worker_exit": 0,
+      "stderr": "",
+      "worker": {
+        "intent": {
+          "mode": "fidelity",
+          "device": "hw:CARD=avsmax98927,DEV=1",
+          "volume": 100,
+          "native_replaygain": "no",
+          "dither": "no"
+        },
+        "preflight": [
+          {
+            "supported": false,
+            "reason": "source format/precision/layout is outside selected profile or mismatches preparation",
+            "source_bits": 24,
+            "source_rate": 48000,
+            "source_channels": 2
+          }
+        ],
+        "events": [],
+        "commands": [],
+        "errors": [],
+        "source_formats": [
+          {
+            "codec": "pcm_s24le",
+            "rate": 48000,
+            "bits": 24,
+            "channels": 2,
+            "container": "wav"
+          }
+        ],
+        "blocked_before_playback": true
+      },
+      "streams": [],
+      "routes": [],
+      "blocked_without_pcm": true
+    },
+    {
+      "name": "descriptor-rejects-mono",
+      "restored_existing_capture": false,
+      "policies": [
+        {
+          "factor": 1.0,
+          "effective": "off",
+          "provenance": "off",
+          "selected": null,
+          "peak_known": false,
+          "filter": ""
+        }
+      ],
+      "expected_samples": 12000,
+      "actual_samples": 0,
+      "same_count": false,
+      "max_error_lsb": null,
+      "exact": false,
+      "native_quantized_error_lsb": 0,
+      "worker_exit": 0,
+      "stderr": "",
+      "worker": {
+        "intent": {
+          "mode": "fidelity",
+          "device": "hw:CARD=avsmax98927,DEV=1",
+          "volume": 100,
+          "native_replaygain": "no",
+          "dither": "no"
+        },
+        "preflight": [
+          {
+            "supported": false,
+            "reason": "source format/precision/layout is outside selected profile or mismatches preparation",
+            "source_bits": 16,
+            "source_rate": 48000,
+            "source_channels": 1
+          }
+        ],
+        "events": [],
+        "commands": [],
+        "errors": [],
+        "source_formats": [
+          {
+            "codec": "pcm_s16le",
+            "rate": 48000,
+            "bits": 16,
+            "channels": 1,
+            "container": "wav"
+          }
+        ],
+        "blocked_before_playback": true
+      },
+      "streams": [],
+      "routes": [],
+      "blocked_without_pcm": true
+    }
+  ],
+  "scope": "Local controlled descriptor extraction before ALSA open; no trust in supplied format hints",
+  "scratch": "/tmp/qoda-source-guard-j69s_8w0"
+}

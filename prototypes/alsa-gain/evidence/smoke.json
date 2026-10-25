@@ -1,0 +1,256 @@
+{
+  "worker_exit": 0,
+  "worker": {
+    "intent": {
+      "mode": "fidelity",
+      "device": "hw:CARD=avsmax98927,DEV=1",
+      "volume": 100,
+      "native_replaygain": "no",
+      "dither": "no"
+    },
+    "preflight": [
+      {
+        "supported": true,
+        "installed_without_samples": false
+      }
+    ],
+    "events": [
+      {
+        "event": 5,
+        "t": 0.510215,
+        "reply": 1,
+        "error": 0
+      },
+      {
+        "event": 5,
+        "t": 0.512586,
+        "reply": 2,
+        "error": 0
+      },
+      {
+        "event": 22,
+        "t": 0.512635,
+        "property": "pause",
+        "value": 0
+      },
+      {
+        "event": 22,
+        "t": 0.513059,
+        "property": "volume",
+        "value": 100.0
+      },
+      {
+        "event": 22,
+        "t": 0.513343,
+        "property": "time-pos",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.513404,
+        "property": "audio-out-params/samplerate",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.51345,
+        "property": "audio-out-params/format",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.513487,
+        "property": "audio-out-params/channels",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.513522,
+        "property": "idle-active",
+        "value": 1
+      },
+      {
+        "event": 6,
+        "t": 0.541424
+      },
+      {
+        "event": 22,
+        "t": 0.542292,
+        "property": "idle-active",
+        "value": 0
+      },
+      {
+        "event": 18,
+        "t": 0.577497
+      },
+      {
+        "event": 18,
+        "t": 0.579294
+      },
+      {
+        "event": 8,
+        "t": 0.579995
+      },
+      {
+        "event": 22,
+        "t": 0.580025,
+        "property": "time-pos",
+        "value": 0.0
+      },
+      {
+        "event": 18,
+        "t": 0.599958
+      },
+      {
+        "event": 22,
+        "t": 0.600921,
+        "property": "audio-out-params/samplerate",
+        "value": 48000
+      },
+      {
+        "event": 21,
+        "t": 0.60118
+      },
+      {
+        "event": 22,
+        "t": 0.601206,
+        "property": "audio-out-params/format",
+        "value": "s16"
+      },
+      {
+        "event": 22,
+        "t": 0.601305,
+        "property": "audio-out-params/channels",
+        "value": "stereo"
+      },
+      {
+        "event": 18,
+        "t": 0.602313
+      },
+      {
+        "event": 7,
+        "t": 0.603336,
+        "reason": 0,
+        "error": 0
+      },
+      {
+        "event": 18,
+        "t": 0.859958
+      },
+      {
+        "event": 11,
+        "t": 0.862018
+      },
+      {
+        "event": 22,
+        "t": 0.862067,
+        "property": "time-pos",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.862146,
+        "property": "audio-out-params/samplerate",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.8622,
+        "property": "audio-out-params/format",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.862312,
+        "property": "audio-out-params/channels",
+        "value": null
+      },
+      {
+        "event": 22,
+        "t": 0.862369,
+        "property": "idle-active",
+        "value": 1
+      }
+    ],
+    "commands": [
+      {
+        "id": 1,
+        "args": [
+          "loadfile",
+          "quiet.wav",
+          "replace",
+          "-1",
+          "af="
+        ],
+        "submit": 0,
+        "t": 0.508816
+      },
+      {
+        "id": 2,
+        "args": [
+          "set",
+          "pause",
+          "no"
+        ],
+        "submit": 0,
+        "t": 0.510149
+      }
+    ],
+    "errors": [],
+    "options": {
+      "config": "no",
+      "load-scripts": "no",
+      "load-auto-profiles": "no",
+      "ytdl": "no",
+      "osc": "no",
+      "terminal": "no",
+      "vo": "null",
+      "vid": "no",
+      "audio-display": "no",
+      "ao": "alsa",
+      "audio-device": "alsa/hw:CARD=avsmax98927,DEV=1",
+      "alsa-resample": "no",
+      "audio-format": "s16",
+      "audio-channels": "stereo",
+      "volume": "100",
+      "volume-gain": "0",
+      "mute": "no",
+      "speed": "1",
+      "replaygain": "no",
+      "gapless-audio": "weak",
+      "prefetch-playlist": "yes",
+      "audio-swresample-o": "dither_method=none",
+      "pause": "yes",
+      "idle": "yes",
+      "audio-buffer": "0.1"
+    },
+    "proc_hw_params": "closed\n",
+    "state": {
+      "pause": 0,
+      "volume": 100.0,
+      "time-pos": null,
+      "audio-out-params/samplerate": null,
+      "audio-out-params/format": null,
+      "audio-out-params/channels": null,
+      "idle-active": 1
+    },
+    "end_events": 1,
+    "timeout": false,
+    "unexecuted_actions": [],
+    "elapsed_seconds": 0.922335
+  },
+  "stderr": "",
+  "streams": [
+    {
+      "name": "stream-0.pcm",
+      "bytes": 48000
+    }
+  ],
+  "expected_bytes": 48000,
+  "actual_bytes": 48000,
+  "exact": true,
+  "logs": {
+    "stream-0.jsonl": "{\"event\":\"open\",\"stream\":0,\"route\":\"hw:CARD=avsmax98927,DEV=1\"}\n{\"pcm_type\":0,\"event\":\"negotiated\",\"format\":\"S16_LE\",\"rate\":48000,\"channels\":2,\"container_bits\":16,\"valid_bits\":16,\"access\":3}\n{\"event\":\"submit\",\"method\":\"writei\",\"frames\":4800,\"accepted_total\":4800}\n{\"event\":\"submit\",\"method\":\"writei\",\"frames\":1200,\"accepted_total\":6000}\n{\"event\":\"submit\",\"method\":\"writei\",\"frames\":1200,\"accepted_total\":7200}\n{\"event\":\"submit\",\"method\":\"writei\",\"frames\":1200,\"accepted_total\":8400}\n{\"event\":\"submit\",\"method\":\"writei\",\"frames\":1200,\"accepted_total\":9600}\n{\"event\":\"submit\",\"method\":\"writei\",\"frames\":1200,\"accepted_total\":10800}\n{\"event\":\"submit\",\"method\":\"writei\",\"frames\":1200,\"accepted_total\":12000}\n{\"event\":\"drop\",\"result\":0}\n{\"event\":\"drop\",\"result\":0}\n{\"event\":\"close\",\"stream\":0,\"route\":\"hw:CARD=avsmax98927,DEV=1\",\"accepted_frames\":12000}\n",
+    "routes.jsonl": "{\"route\":\"hw:CARD=avsmax98927,DEV=1\",\"result\":0}\n"
+  }
+}

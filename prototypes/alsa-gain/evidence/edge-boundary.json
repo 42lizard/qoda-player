@@ -1,0 +1,814 @@
+{
+  "case": {
+    "name": "gain-to-unity-and-back",
+    "restored_existing_capture": false,
+    "policies": [
+      {
+        "factor": 0.5011872336272722,
+        "effective": "track",
+        "provenance": "embedded-static-tags",
+        "selected": "track",
+        "peak_known": true,
+        "filter": "lavfi=[volume=0.50118723362727224:precision=double]"
+      },
+      {
+        "factor": 1.0,
+        "effective": "track",
+        "provenance": "missing-data-unity",
+        "selected": null,
+        "peak_known": false,
+        "filter": ""
+      },
+      {
+        "factor": 0.251188643150958,
+        "effective": "track",
+        "provenance": "embedded-static-tags",
+        "selected": "track",
+        "peak_known": true,
+        "filter": "lavfi=[volume=0.25118864315095801:precision=double]"
+      }
+    ],
+    "expected_samples": 81600,
+    "actual_samples": 81600,
+    "same_count": true,
+    "max_error_lsb": 0,
+    "exact": true,
+    "native_quantized_error_lsb": 3,
+    "worker_exit": 0,
+    "stderr": "",
+    "worker": {
+      "intent": {
+        "mode": "fidelity",
+        "device": "hw:CARD=avsmax98927,DEV=1",
+        "volume": 100,
+        "native_replaygain": "no",
+        "dither": "no"
+      },
+      "preflight": [
+        {
+          "supported": true,
+          "installed_without_samples": false
+        },
+        {
+          "supported": true,
+          "installed_without_samples": false
+        },
+        {
+          "supported": true,
+          "installed_without_samples": false
+        }
+      ],
+      "events": [
+        {
+          "event": 5,
+          "t": 1.248029,
+          "reply": 1,
+          "error": 0
+        },
+        {
+          "event": 5,
+          "t": 1.250078,
+          "reply": 2,
+          "error": 0
+        },
+        {
+          "event": 5,
+          "t": 1.250137,
+          "reply": 3,
+          "error": 0
+        },
+        {
+          "event": 5,
+          "t": 1.250192,
+          "reply": 4,
+          "error": 0
+        },
+        {
+          "event": 22,
+          "t": 1.250233,
+          "property": "path",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.250515,
+          "property": "playlist-pos",
+          "value": 0
+        },
+        {
+          "event": 22,
+          "t": 1.250757,
+          "property": "pause",
+          "value": 0
+        },
+        {
+          "event": 22,
+          "t": 1.250978,
+          "property": "volume",
+          "value": 100.0
+        },
+        {
+          "event": 22,
+          "t": 1.251133,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.251177,
+          "property": "audio-out-params/samplerate",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.251218,
+          "property": "audio-out-params/format",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.251258,
+          "property": "audio-out-params/channels",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.251299,
+          "property": "idle-active",
+          "value": 0
+        },
+        {
+          "event": 6,
+          "t": 1.263357
+        },
+        {
+          "event": 22,
+          "t": 1.263929,
+          "property": "path",
+          "value": "/tmp/qoda-gain-edge-5w1ves__/attenuated-a.flac"
+        },
+        {
+          "event": 18,
+          "t": 1.2811
+        },
+        {
+          "event": 18,
+          "t": 1.283884
+        },
+        {
+          "event": 8,
+          "t": 1.284952
+        },
+        {
+          "event": 22,
+          "t": 1.284985,
+          "property": "time-pos",
+          "value": 0.0
+        },
+        {
+          "event": 18,
+          "t": 1.305925
+        },
+        {
+          "event": 22,
+          "t": 1.307887,
+          "property": "audio-out-params/samplerate",
+          "value": 48000
+        },
+        {
+          "event": 21,
+          "t": 1.308381
+        },
+        {
+          "event": 22,
+          "t": 1.308439,
+          "property": "audio-out-params/format",
+          "value": "s16"
+        },
+        {
+          "event": 22,
+          "t": 1.308569,
+          "property": "audio-out-params/channels",
+          "value": "stereo"
+        },
+        {
+          "event": 22,
+          "t": 1.31975,
+          "property": "time-pos",
+          "value": 0.014000000000000012
+        },
+        {
+          "event": 18,
+          "t": 1.36247
+        },
+        {
+          "event": 7,
+          "t": 1.363523,
+          "reason": 0,
+          "error": 0
+        },
+        {
+          "event": 6,
+          "t": 1.364152
+        },
+        {
+          "event": 22,
+          "t": 1.364674,
+          "property": "path",
+          "value": "/tmp/qoda-gain-edge-5w1ves__/missing-b.flac"
+        },
+        {
+          "event": 22,
+          "t": 1.364888,
+          "property": "playlist-pos",
+          "value": 1
+        },
+        {
+          "event": 22,
+          "t": 1.36502,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 18,
+          "t": 1.365528
+        },
+        {
+          "event": 18,
+          "t": 1.36796
+        },
+        {
+          "event": 8,
+          "t": 1.368566
+        },
+        {
+          "event": 22,
+          "t": 1.369964,
+          "property": "time-pos",
+          "value": 0.0
+        },
+        {
+          "event": 21,
+          "t": 1.371138
+        },
+        {
+          "event": 22,
+          "t": 1.558641,
+          "property": "time-pos",
+          "value": 0.0030000000000000027
+        },
+        {
+          "event": 22,
+          "t": 1.651844,
+          "property": "time-pos",
+          "value": 0.09599999999999997
+        },
+        {
+          "event": 18,
+          "t": 1.652194
+        },
+        {
+          "event": 7,
+          "t": 1.652991,
+          "reason": 0,
+          "error": 0
+        },
+        {
+          "event": 6,
+          "t": 1.653078
+        },
+        {
+          "event": 22,
+          "t": 1.654037,
+          "property": "path",
+          "value": "/tmp/qoda-gain-edge-5w1ves__/attenuated-c.flac"
+        },
+        {
+          "event": 22,
+          "t": 1.654144,
+          "property": "playlist-pos",
+          "value": 2
+        },
+        {
+          "event": 22,
+          "t": 1.654228,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 18,
+          "t": 1.654685
+        },
+        {
+          "event": 18,
+          "t": 1.657192
+        },
+        {
+          "event": 8,
+          "t": 1.657623
+        },
+        {
+          "event": 22,
+          "t": 1.65927,
+          "property": "time-pos",
+          "value": 0.0
+        },
+        {
+          "event": 21,
+          "t": 1.660967
+        },
+        {
+          "event": 22,
+          "t": 1.917935,
+          "property": "time-pos",
+          "value": 0.061
+        },
+        {
+          "event": 18,
+          "t": 1.945194
+        },
+        {
+          "event": 7,
+          "t": 1.948543,
+          "reason": 0,
+          "error": 0
+        },
+        {
+          "event": 18,
+          "t": 2.175367
+        },
+        {
+          "event": 11,
+          "t": 2.176163
+        },
+        {
+          "event": 22,
+          "t": 2.176192,
+          "property": "path",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.17625,
+          "property": "playlist-pos",
+          "value": -1
+        },
+        {
+          "event": 22,
+          "t": 2.176303,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.176334,
+          "property": "audio-out-params/samplerate",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.176375,
+          "property": "audio-out-params/format",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.176444,
+          "property": "audio-out-params/channels",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.176484,
+          "property": "idle-active",
+          "value": 1
+        }
+      ],
+      "commands": [
+        {
+          "id": 1,
+          "args": [
+            "loadfile",
+            "attenuated-a.flac",
+            "replace",
+            "-1",
+            "af=lavfi=[volume=0.50118723362727224:precision=double]"
+          ],
+          "submit": 0,
+          "t": 1.243591
+        },
+        {
+          "id": 2,
+          "args": [
+            "loadfile",
+            "missing-b.flac",
+            "append",
+            "-1",
+            "af="
+          ],
+          "submit": 0,
+          "t": 1.243759
+        },
+        {
+          "id": 3,
+          "args": [
+            "loadfile",
+            "attenuated-c.flac",
+            "append",
+            "-1",
+            "af=lavfi=[volume=0.25118864315095801:precision=double]"
+          ],
+          "submit": 0,
+          "t": 1.243907
+        },
+        {
+          "id": 4,
+          "args": [
+            "set",
+            "pause",
+            "no"
+          ],
+          "submit": 0,
+          "t": 1.244087
+        }
+      ],
+      "errors": [],
+      "source_formats": [
+        {
+          "codec": "flac",
+          "rate": 48000,
+          "bits": 16,
+          "channels": 2,
+          "container": "flac"
+        },
+        {
+          "codec": "flac",
+          "rate": 48000,
+          "bits": 16,
+          "channels": 2,
+          "container": "flac"
+        },
+        {
+          "codec": "flac",
+          "rate": 48000,
+          "bits": 16,
+          "channels": 2,
+          "container": "flac"
+        }
+      ],
+      "options": {
+        "config": "no",
+        "load-scripts": "no",
+        "load-auto-profiles": "no",
+        "ytdl": "no",
+        "osc": "no",
+        "terminal": "no",
+        "vo": "null",
+        "vid": "no",
+        "audio-display": "no",
+        "ao": "alsa",
+        "audio-device": "alsa/hw:CARD=avsmax98927,DEV=1",
+        "alsa-resample": "no",
+        "audio-format": "s16",
+        "audio-channels": "stereo",
+        "volume": "100",
+        "volume-gain": "0",
+        "mute": "no",
+        "speed": "1",
+        "replaygain": "no",
+        "gapless-audio": "weak",
+        "prefetch-playlist": "yes",
+        "audio-swresample-o": "dither_method=none",
+        "pause": "yes",
+        "idle": "yes",
+        "audio-buffer": "0.1"
+      },
+      "proc_hw_params_observations": [
+        "closed\n",
+        "closed\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "closed\n"
+      ],
+      "proc_hw_params": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+      "state": {
+        "path": null,
+        "playlist-pos": -1,
+        "pause": 0,
+        "volume": 100.0,
+        "time-pos": null,
+        "audio-out-params/samplerate": null,
+        "audio-out-params/format": null,
+        "audio-out-params/channels": null,
+        "idle-active": 1
+      },
+      "end_events": 3,
+      "timeout": false,
+      "unexecuted_actions": [],
+      "stop_reason": null,
+      "elapsed_seconds": 2.232894
+    },
+    "streams": [
+      {
+        "samples": 81600,
+        "events": [
+          {
+            "event": "open",
+            "stream": 0,
+            "route": "hw:CARD=avsmax98927,DEV=1",
+            "t": 0.0
+          },
+          {
+            "event": "proc-hw-params",
+            "value": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+            "t": 0.01846
+          },
+          {
+            "pcm_type": 0,
+            "event": "negotiated",
+            "format": "S16_LE",
+            "rate": 48000,
+            "channels": 2,
+            "container_bits": 16,
+            "valid_bits": 16,
+            "access": 3,
+            "t": 0.0185
+          },
+          {
+            "event": "pcm-state",
+            "state": 2,
+            "accepted_total": 0,
+            "t": 0.020849
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 4800,
+            "accepted_total": 4800,
+            "t": 0.021722
+          },
+          {
+            "event": "pcm-state",
+            "state": 3,
+            "accepted_total": 4800,
+            "t": 0.022328
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 6000,
+            "t": 0.048035
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 7200,
+            "t": 0.073451
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 8400,
+            "t": 0.109283
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 9600,
+            "t": 0.134547
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 10800,
+            "t": 0.159892
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 12000,
+            "t": 0.185781
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 13200,
+            "t": 0.21112
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 14400,
+            "t": 0.237112
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 15600,
+            "t": 0.262453
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 16800,
+            "t": 0.287966
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 18000,
+            "t": 0.314015
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 19200,
+            "t": 0.339278
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 20400,
+            "t": 0.364538
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 21600,
+            "t": 0.374247
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 22800,
+            "t": 0.399481
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 24000,
+            "t": 0.424705
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 25200,
+            "t": 0.450093
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 26400,
+            "t": 0.475765
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 27600,
+            "t": 0.501026
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 28800,
+            "t": 0.526788
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 30000,
+            "t": 0.552439
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 31200,
+            "t": 0.577754
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 32400,
+            "t": 0.603416
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 33600,
+            "t": 0.628775
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 34800,
+            "t": 0.655235
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 36000,
+            "t": 0.682617
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 37200,
+            "t": 0.707874
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 38400,
+            "t": 0.733127
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 39600,
+            "t": 0.758442
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 40800,
+            "t": 0.783689
+          },
+          {
+            "event": "pcm-state",
+            "state": 4,
+            "accepted_total": 40800,
+            "t": 0.884359
+          },
+          {
+            "event": "pcm-state",
+            "state": 2,
+            "accepted_total": 40800,
+            "t": 0.885203
+          },
+          {
+            "event": "drop",
+            "result": 0,
+            "accepted_total": 40800,
+            "t": 0.88531
+          },
+          {
+            "event": "drop",
+            "result": 0,
+            "accepted_total": 40800,
+            "t": 0.885569
+          },
+          {
+            "event": "close",
+            "stream": 0,
+            "route": "hw:CARD=avsmax98927,DEV=1",
+            "accepted_frames": 40800,
+            "t": 0.88764
+          }
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "route": "hw:CARD=avsmax98927,DEV=1",
+        "result": 0
+      }
+    ]
+  },
+  "purpose": "Prove filter removal for missing-data unity between two non-unity occurrences"
+}

@@ -1,0 +1,10 @@
+{
+  "worker_exit": -6,
+  "worker": null,
+  "stderr": "\nthread '<unnamed>' (739001) panicked at src/lib.rs:7:103:\nassertion failed: !p.is_null()\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\nthread '<unnamed>' (739001) panicked at library/core/src/panicking.rs:225:5:\npanic in a function that cannot unwind\nstack backtrace:\n   0:     0x7f3928902861 - <<std[1eedbf103d606f03]::sys::backtrace::BacktraceLock>::print::DisplayBacktrace as core[30d0ffc963bfeec7]::fmt::Display>::fmt\n   1:     0x7f392891329a - core[30d0ffc963bfeec7]::fmt::write\n   2:     0x7f3928905d8c - <std[1eedbf103d606f03]::sys::stdio::unix::Stderr as core[30d0ffc963bfeec7]::io::write::Write>::write_fmt\n   3:     0x7f39288ee1d6 - std[1eedbf103d606f03]::panicking::default_hook::{closure#0}\n   4:     0x7f39289001f1 - std[1eedbf103d606f03]::panicking::default_hook\n   5:     0x7f39289003ab - std[1eedbf103d606f03]::panicking::panic_with_hook\n   6:     0x7f39288ee2b4 - std[1eedbf103d606f03]::panicking::panic_handler::{closure#0}\n   7:     0x7f39288e7149 - std[1eedbf103d606f03]::sys::backtrace::__rust_end_short_backtrace::<std[1eedbf103d606f03]::panicking::panic_handler::{closure#0}, !>\n   8:     0x7f39288ee9ed - __rustc[7f5b2530cea08c4d]::rust_begin_unwind\n   9:     0x7f392891380d - core[30d0ffc963bfeec7]::panicking::panic_nounwind_fmt\n  10:     0x7f392891378b - core[30d0ffc963bfeec7]::panicking::panic_nounwind\n  11:     0x7f3928913917 - core[30d0ffc963bfeec7]::panicking::panic_cannot_unwind\n  12:     0x7f39288dbbc4 - snd_pcm_open\n  13:     0x7f3926f5723c - <unknown>\n  14:     0x7f3926f58e7d - <unknown>\n  15:     0x7f3926e35650 - <unknown>\n  16:     0x7f3926ea5292 - <unknown>\n  17:     0x7f3926ea5ff0 - <unknown>\n  18:     0x7f3926ed709e - <unknown>\n  19:     0x7f3926ea6db9 - <unknown>\n  20:     0x7f3927e98042 - <unknown>\n  21:     0x7f3927f2072c - <unknown>\n  22:                0x0 - <unknown>\nthread caused non-unwinding panic. aborting.\n",
+  "streams": [],
+  "expected_bytes": 48000,
+  "actual_bytes": 0,
+  "exact": false,
+  "logs": {}
+}

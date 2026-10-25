@@ -1,0 +1,960 @@
+{
+  "case": {
+    "name": "early-accepted-edit",
+    "restored_existing_capture": false,
+    "policies": [
+      {
+        "factor": 1.0,
+        "effective": "off",
+        "provenance": "off",
+        "selected": null,
+        "peak_known": false,
+        "filter": ""
+      },
+      {
+        "factor": 1.0,
+        "effective": "off",
+        "provenance": "off",
+        "selected": null,
+        "peak_known": false,
+        "filter": ""
+      },
+      {
+        "factor": 1.0,
+        "effective": "off",
+        "provenance": "off",
+        "selected": null,
+        "peak_known": false,
+        "filter": ""
+      }
+    ],
+    "expected_samples": 120000,
+    "actual_samples": 120000,
+    "same_count": true,
+    "max_error_lsb": 0,
+    "exact": true,
+    "native_quantized_error_lsb": 4081,
+    "worker_exit": 0,
+    "stderr": "",
+    "worker": {
+      "intent": {
+        "mode": "fidelity",
+        "device": "hw:CARD=avsmax98927,DEV=1",
+        "volume": 100,
+        "native_replaygain": "no",
+        "dither": "no"
+      },
+      "preflight": [
+        {
+          "supported": true,
+          "installed_without_samples": false
+        },
+        {
+          "supported": true,
+          "installed_without_samples": false
+        },
+        {
+          "supported": true,
+          "installed_without_samples": false
+        }
+      ],
+      "events": [
+        {
+          "event": 5,
+          "t": 1.187369,
+          "reply": 1,
+          "error": 0
+        },
+        {
+          "event": 5,
+          "t": 1.187453,
+          "reply": 2,
+          "error": 0
+        },
+        {
+          "event": 5,
+          "t": 1.187487,
+          "reply": 3,
+          "error": 0
+        },
+        {
+          "event": 5,
+          "t": 1.187521,
+          "reply": 4,
+          "error": 0
+        },
+        {
+          "event": 22,
+          "t": 1.187557,
+          "property": "path",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.187819,
+          "property": "playlist-pos",
+          "value": 0
+        },
+        {
+          "event": 22,
+          "t": 1.189707,
+          "property": "pause",
+          "value": 0
+        },
+        {
+          "event": 22,
+          "t": 1.189907,
+          "property": "volume",
+          "value": 100.0
+        },
+        {
+          "event": 22,
+          "t": 1.190081,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.190119,
+          "property": "audio-out-params/samplerate",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.190152,
+          "property": "audio-out-params/format",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.190183,
+          "property": "audio-out-params/channels",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 1.190225,
+          "property": "idle-active",
+          "value": 0
+        },
+        {
+          "event": 6,
+          "t": 1.196579
+        },
+        {
+          "event": 22,
+          "t": 1.196944,
+          "property": "path",
+          "value": "/tmp/qoda-alsa-confirmation-13z81rpk/current-long.wav"
+        },
+        {
+          "event": 18,
+          "t": 1.272331
+        },
+        {
+          "event": 18,
+          "t": 1.273088
+        },
+        {
+          "event": 8,
+          "t": 1.273467
+        },
+        {
+          "event": 22,
+          "t": 1.273658,
+          "property": "time-pos",
+          "value": 0.0
+        },
+        {
+          "event": 18,
+          "t": 1.294249
+        },
+        {
+          "event": 22,
+          "t": 1.295196,
+          "property": "audio-out-params/samplerate",
+          "value": 48000
+        },
+        {
+          "event": 21,
+          "t": 1.295361
+        },
+        {
+          "event": 22,
+          "t": 1.295403,
+          "property": "audio-out-params/format",
+          "value": "s16"
+        },
+        {
+          "event": 22,
+          "t": 1.295504,
+          "property": "audio-out-params/channels",
+          "value": "stereo"
+        },
+        {
+          "event": 22,
+          "t": 1.372555,
+          "property": "time-pos",
+          "value": 0.08100000000000002
+        },
+        {
+          "event": 5,
+          "t": 1.372966,
+          "reply": 5,
+          "error": 0
+        },
+        {
+          "event": 22,
+          "t": 1.422611,
+          "property": "time-pos",
+          "value": 0.131
+        },
+        {
+          "event": 22,
+          "t": 1.474114,
+          "property": "time-pos",
+          "value": 0.18199999999999997
+        },
+        {
+          "event": 22,
+          "t": 1.524778,
+          "property": "time-pos",
+          "value": 0.23299999999999998
+        },
+        {
+          "event": 22,
+          "t": 1.652117,
+          "property": "time-pos",
+          "value": 0.36000000000000004
+        },
+        {
+          "event": 22,
+          "t": 1.728493,
+          "property": "time-pos",
+          "value": 0.43600000000000005
+        },
+        {
+          "event": 22,
+          "t": 1.778536,
+          "property": "time-pos",
+          "value": 0.4870000000000001
+        },
+        {
+          "event": 22,
+          "t": 1.906432,
+          "property": "time-pos",
+          "value": 0.6140000000000002
+        },
+        {
+          "event": 22,
+          "t": 1.98294,
+          "property": "time-pos",
+          "value": 0.6910000000000003
+        },
+        {
+          "event": 22,
+          "t": 2.084255,
+          "property": "time-pos",
+          "value": 0.7920000000000003
+        },
+        {
+          "event": 18,
+          "t": 2.084474
+        },
+        {
+          "event": 7,
+          "t": 2.084833,
+          "reason": 0,
+          "error": 0
+        },
+        {
+          "event": 6,
+          "t": 2.084994
+        },
+        {
+          "event": 22,
+          "t": 2.085716,
+          "property": "path",
+          "value": "/tmp/qoda-alsa-confirmation-13z81rpk/surviving-upcoming.flac"
+        },
+        {
+          "event": 22,
+          "t": 2.085805,
+          "property": "playlist-pos",
+          "value": 1
+        },
+        {
+          "event": 22,
+          "t": 2.085868,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 18,
+          "t": 2.095389
+        },
+        {
+          "event": 18,
+          "t": 2.097274
+        },
+        {
+          "event": 8,
+          "t": 2.098041
+        },
+        {
+          "event": 22,
+          "t": 2.098086,
+          "property": "time-pos",
+          "value": 0.0
+        },
+        {
+          "event": 21,
+          "t": 2.098955
+        },
+        {
+          "event": 22,
+          "t": 2.304055,
+          "property": "time-pos",
+          "value": 0.01200000000000001
+        },
+        {
+          "event": 18,
+          "t": 2.304268
+        },
+        {
+          "event": 7,
+          "t": 2.304851,
+          "reason": 0,
+          "error": 0
+        },
+        {
+          "event": 18,
+          "t": 2.572438
+        },
+        {
+          "event": 11,
+          "t": 2.572839
+        },
+        {
+          "event": 22,
+          "t": 2.573375,
+          "property": "path",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.57344,
+          "property": "playlist-pos",
+          "value": -1
+        },
+        {
+          "event": 22,
+          "t": 2.57349,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.573517,
+          "property": "audio-out-params/samplerate",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.573541,
+          "property": "audio-out-params/format",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.573566,
+          "property": "audio-out-params/channels",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 2.573591,
+          "property": "idle-active",
+          "value": 1
+        }
+      ],
+      "commands": [
+        {
+          "id": 1,
+          "args": [
+            "loadfile",
+            "current-long.wav",
+            "replace",
+            "-1",
+            "af="
+          ],
+          "submit": 0,
+          "t": 1.18423
+        },
+        {
+          "id": 2,
+          "args": [
+            "loadfile",
+            "removed-upcoming.flac",
+            "append",
+            "-1",
+            "af="
+          ],
+          "submit": 0,
+          "t": 1.184422
+        },
+        {
+          "id": 3,
+          "args": [
+            "loadfile",
+            "surviving-upcoming.flac",
+            "append",
+            "-1",
+            "af="
+          ],
+          "submit": 0,
+          "t": 1.184559
+        },
+        {
+          "id": 4,
+          "args": [
+            "set",
+            "pause",
+            "no"
+          ],
+          "submit": 0,
+          "t": 1.184744
+        },
+        {
+          "id": 5,
+          "args": [
+            "playlist-remove",
+            "1"
+          ],
+          "submit": 0,
+          "t": 1.37286
+        }
+      ],
+      "errors": [],
+      "source_formats": [
+        {
+          "codec": "pcm_s16le",
+          "rate": 48000,
+          "bits": 16,
+          "channels": 2,
+          "container": "wav"
+        },
+        {
+          "codec": "flac",
+          "rate": 48000,
+          "bits": 16,
+          "channels": 2,
+          "container": "flac"
+        },
+        {
+          "codec": "flac",
+          "rate": 48000,
+          "bits": 16,
+          "channels": 2,
+          "container": "flac"
+        }
+      ],
+      "options": {
+        "config": "no",
+        "load-scripts": "no",
+        "load-auto-profiles": "no",
+        "ytdl": "no",
+        "osc": "no",
+        "terminal": "no",
+        "vo": "null",
+        "vid": "no",
+        "audio-display": "no",
+        "ao": "alsa",
+        "audio-device": "alsa/hw:CARD=avsmax98927,DEV=1",
+        "alsa-resample": "no",
+        "audio-format": "s16",
+        "audio-channels": "stereo",
+        "volume": "100",
+        "volume-gain": "0",
+        "mute": "no",
+        "speed": "1",
+        "replaygain": "no",
+        "gapless-audio": "weak",
+        "prefetch-playlist": "yes",
+        "audio-swresample-o": "dither_method=none",
+        "pause": "yes",
+        "idle": "yes",
+        "audio-buffer": "0.1"
+      },
+      "proc_hw_params_observations": [
+        "closed\n",
+        "closed\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "closed\n"
+      ],
+      "proc_hw_params": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+      "state": {
+        "path": null,
+        "playlist-pos": -1,
+        "pause": 0,
+        "volume": 100.0,
+        "time-pos": null,
+        "audio-out-params/samplerate": null,
+        "audio-out-params/format": null,
+        "audio-out-params/channels": null,
+        "idle-active": 1
+      },
+      "end_events": 2,
+      "timeout": false,
+      "unexecuted_actions": [],
+      "stop_reason": null,
+      "elapsed_seconds": 2.62962
+    },
+    "streams": [
+      {
+        "samples": 120000,
+        "events": [
+          {
+            "event": "open",
+            "stream": 0,
+            "route": "hw:CARD=avsmax98927,DEV=1",
+            "t": 0.0
+          },
+          {
+            "event": "proc-hw-params",
+            "value": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+            "t": 0.018323
+          },
+          {
+            "pcm_type": 0,
+            "event": "negotiated",
+            "format": "S16_LE",
+            "rate": 48000,
+            "channels": 2,
+            "container_bits": 16,
+            "valid_bits": 16,
+            "access": 3,
+            "t": 0.018349
+          },
+          {
+            "event": "pcm-state",
+            "state": 2,
+            "accepted_total": 0,
+            "t": 0.019817
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 4800,
+            "accepted_total": 4800,
+            "t": 0.020382
+          },
+          {
+            "event": "pcm-state",
+            "state": 3,
+            "accepted_total": 4800,
+            "t": 0.020836
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 6000,
+            "t": 0.046314
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 7200,
+            "t": 0.071555
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 8400,
+            "t": 0.096831
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 9600,
+            "t": 0.122295
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 10800,
+            "t": 0.147523
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 12000,
+            "t": 0.1729
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 13200,
+            "t": 0.198337
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 14400,
+            "t": 0.22407
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 15600,
+            "t": 0.249498
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 16800,
+            "t": 0.274875
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 18000,
+            "t": 0.300483
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 19200,
+            "t": 0.325816
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 20400,
+            "t": 0.35116
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 21600,
+            "t": 0.37645
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 22800,
+            "t": 0.402012
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 24000,
+            "t": 0.427296
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 25200,
+            "t": 0.452667
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 26400,
+            "t": 0.478316
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 27600,
+            "t": 0.503572
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 28800,
+            "t": 0.528874
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 30000,
+            "t": 0.554477
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 31200,
+            "t": 0.579878
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 32400,
+            "t": 0.60524
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 33600,
+            "t": 0.630592
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 34800,
+            "t": 0.656238
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 36000,
+            "t": 0.681626
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 37200,
+            "t": 0.707086
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 38400,
+            "t": 0.732623
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 39600,
+            "t": 0.757853
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 40800,
+            "t": 0.783218
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 42000,
+            "t": 0.808633
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 43200,
+            "t": 0.823735
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 44400,
+            "t": 0.848946
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 45600,
+            "t": 0.874237
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 46800,
+            "t": 0.9013
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 48000,
+            "t": 0.926488
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 49200,
+            "t": 0.951838
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 50400,
+            "t": 0.977806
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 51600,
+            "t": 1.003107
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 52800,
+            "t": 1.028384
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 54000,
+            "t": 1.054043
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 55200,
+            "t": 1.079304
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 56400,
+            "t": 1.104634
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 57600,
+            "t": 1.129881
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 58800,
+            "t": 1.155164
+          },
+          {
+            "event": "submit",
+            "method": "writei",
+            "frames": 1200,
+            "accepted_total": 60000,
+            "t": 1.180718
+          },
+          {
+            "event": "pcm-state",
+            "state": 4,
+            "accepted_total": 60000,
+            "t": 1.281462
+          },
+          {
+            "event": "pcm-state",
+            "state": 2,
+            "accepted_total": 60000,
+            "t": 1.282253
+          },
+          {
+            "event": "drop",
+            "result": 0,
+            "accepted_total": 60000,
+            "t": 1.282323
+          },
+          {
+            "event": "drop",
+            "result": 0,
+            "accepted_total": 60000,
+            "t": 1.282521
+          },
+          {
+            "event": "close",
+            "stream": 0,
+            "route": "hw:CARD=avsmax98927,DEV=1",
+            "accepted_frames": 60000,
+            "t": 1.296425
+          }
+        ]
+      }
+    ],
+    "routes": [
+      {
+        "route": "hw:CARD=avsmax98927,DEV=1",
+        "result": 0
+      }
+    ]
+  },
+  "mixer_unchanged": true,
+  "mixer_values_exported": false,
+  "driver_states": [
+    {
+      "event": "pcm-state",
+      "state": 2,
+      "accepted_total": 0,
+      "t": 0.019817
+    },
+    {
+      "event": "pcm-state",
+      "state": 3,
+      "accepted_total": 4800,
+      "t": 0.020836
+    },
+    {
+      "event": "pcm-state",
+      "state": 4,
+      "accepted_total": 60000,
+      "t": 1.281462
+    },
+    {
+      "event": "pcm-state",
+      "state": 2,
+      "accepted_total": 60000,
+      "t": 1.282253
+    }
+  ],
+  "xruns_before_all_frames_submitted": [],
+  "limits": [
+    "Only this targeted native case has an explicit before/after hardware mixer comparison",
+    "The earlier short fixture removed an item after the engine had advanced and does not establish an early-edit failure",
+    "Accepted PCM is distinct from heard/consumed PCM; presentation-boundary mapping needs its own decision"
+  ],
+  "scratch": "/tmp/qoda-alsa-confirmation-13z81rpk"
+}

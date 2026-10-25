@@ -1,0 +1,533 @@
+{
+  "case": {
+    "name": "volume-and-late-intent",
+    "responses": [
+      {
+        "before": {
+          "pause": false,
+          "volume": 100.0,
+          "position": 0.07999999999999999,
+          "generation": 1,
+          "desired_playing": true
+        }
+      },
+      {
+        "valid_prepare": {
+          "accepted": true,
+          "stale": false,
+          "generation": 1
+        }
+      },
+      {
+        "app_volume": {
+          "accepted": false,
+          "error": "Fidelity volume locked at unity",
+          "volume": 1.0
+        }
+      },
+      {
+        "mpris_value": "0.5",
+        "exit": 1,
+        "unsupported_error": true
+      },
+      {
+        "mpris_value": "0.0",
+        "exit": 1,
+        "unsupported_error": true
+      },
+      {
+        "mpris_value": "2.0",
+        "exit": 1,
+        "unsupported_error": true
+      },
+      {
+        "mpris_value": "1.0",
+        "exit": 0,
+        "unsupported_error": false
+      },
+      {
+        "mpris_reported": "d 1",
+        "native_after": {
+          "pause": false,
+          "volume": 100.0,
+          "position": 0.1819999999999999,
+          "generation": 1,
+          "desired_playing": true
+        }
+      },
+      {
+        "pause": {
+          "accepted": true,
+          "generation": 2
+        }
+      },
+      {
+        "stale_completion": {
+          "accepted": false,
+          "stale": true,
+          "generation": 2
+        },
+        "after_pause": {
+          "pause": true,
+          "volume": 100.0,
+          "position": 0.22599999999999998,
+          "generation": 2,
+          "desired_playing": false
+        }
+      },
+      {
+        "mode_change": {
+          "accepted": true,
+          "pending_release": true
+        }
+      }
+    ],
+    "worker": {
+      "intent": {
+        "mode": "fidelity",
+        "device": "hw:CARD=avsmax98927,DEV=1",
+        "volume": 100,
+        "native_replaygain": "no",
+        "dither": "no"
+      },
+      "preflight": [
+        {
+          "supported": true,
+          "installed_without_samples": false
+        }
+      ],
+      "events": [
+        {
+          "event": 11,
+          "t": 0.624118
+        },
+        {
+          "event": 5,
+          "t": 0.624436,
+          "reply": 1,
+          "error": 0
+        },
+        {
+          "event": 6,
+          "t": 0.624629
+        },
+        {
+          "event": 5,
+          "t": 0.624814,
+          "reply": 2,
+          "error": 0
+        },
+        {
+          "event": 22,
+          "t": 0.624968,
+          "property": "path",
+          "value": "/tmp/qoda-alsa-volume-final-4usi0oiy/guard-source.flac"
+        },
+        {
+          "event": 22,
+          "t": 0.625557,
+          "property": "playlist-pos",
+          "value": 0
+        },
+        {
+          "event": 22,
+          "t": 0.625914,
+          "property": "pause",
+          "value": 0
+        },
+        {
+          "event": 22,
+          "t": 0.626128,
+          "property": "volume",
+          "value": 100.0
+        },
+        {
+          "event": 22,
+          "t": 0.626284,
+          "property": "time-pos",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 0.626353,
+          "property": "audio-out-params/samplerate",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 0.626415,
+          "property": "audio-out-params/format",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 0.62648,
+          "property": "audio-out-params/channels",
+          "value": null
+        },
+        {
+          "event": 22,
+          "t": 0.626544,
+          "property": "idle-active",
+          "value": 0
+        },
+        {
+          "event": 18,
+          "t": 0.63246
+        },
+        {
+          "event": 18,
+          "t": 0.636154
+        },
+        {
+          "event": 8,
+          "t": 0.637543
+        },
+        {
+          "event": 22,
+          "t": 0.637609,
+          "property": "time-pos",
+          "value": 0.0
+        },
+        {
+          "event": 18,
+          "t": 0.65933
+        },
+        {
+          "event": 22,
+          "t": 0.661809,
+          "property": "audio-out-params/samplerate",
+          "value": 48000
+        },
+        {
+          "event": 21,
+          "t": 0.662033
+        },
+        {
+          "event": 22,
+          "t": 0.66212,
+          "property": "audio-out-params/format",
+          "value": "s16"
+        },
+        {
+          "event": 22,
+          "t": 0.662249,
+          "property": "audio-out-params/channels",
+          "value": "stereo"
+        },
+        {
+          "event": 22,
+          "t": 0.669507,
+          "property": "time-pos",
+          "value": 0.010999999999999982
+        },
+        {
+          "event": 22,
+          "t": 0.738491,
+          "property": "time-pos",
+          "value": 0.07999999999999999
+        },
+        {
+          "event": 22,
+          "t": 0.789903,
+          "property": "time-pos",
+          "value": 0.13099999999999995
+        },
+        {
+          "event": "volume-policy",
+          "requested": 0.5,
+          "accepted": false,
+          "actual_native_volume": 100.0
+        },
+        {
+          "event": "volume-policy",
+          "requested": 0.5,
+          "accepted": false,
+          "actual_native_volume": 100.0
+        },
+        {
+          "event": "volume-policy",
+          "requested": 0.0,
+          "accepted": false,
+          "actual_native_volume": 100.0
+        },
+        {
+          "event": "volume-policy",
+          "requested": 2.0,
+          "accepted": false,
+          "actual_native_volume": 100.0
+        },
+        {
+          "event": "volume-policy",
+          "requested": 1.0,
+          "accepted": true,
+          "actual_native_volume": 100.0
+        },
+        {
+          "event": 22,
+          "t": 0.840385,
+          "property": "time-pos",
+          "value": 0.1819999999999999
+        },
+        {
+          "event": 5,
+          "t": 0.884864,
+          "reply": 3,
+          "error": 0
+        },
+        {
+          "event": 22,
+          "t": 0.885085,
+          "property": "pause",
+          "value": 1
+        },
+        {
+          "event": 22,
+          "t": 0.935061,
+          "property": "time-pos",
+          "value": 0.22599999999999998
+        }
+      ],
+      "commands": [
+        {
+          "id": 1,
+          "args": [
+            "loadfile",
+            "guard-source.flac",
+            "replace",
+            "-1",
+            "af=lavfi=[volume=0.50118723362727224:precision=double]"
+          ],
+          "submit": 0,
+          "t": 0.617555
+        },
+        {
+          "id": 2,
+          "args": [
+            "set",
+            "pause",
+            "no"
+          ],
+          "submit": 0,
+          "t": 0.61795
+        },
+        {
+          "id": 3,
+          "args": [
+            "set",
+            "pause",
+            "yes"
+          ],
+          "submit": 0,
+          "t": 0.883877
+        },
+        {
+          "id": 4,
+          "args": [
+            "set",
+            "pause",
+            "yes"
+          ],
+          "submit": 0,
+          "t": 0.98777
+        }
+      ],
+      "errors": [],
+      "options": {
+        "config": "no",
+        "load-scripts": "no",
+        "load-auto-profiles": "no",
+        "ytdl": "no",
+        "osc": "no",
+        "terminal": "no",
+        "vo": "null",
+        "vid": "no",
+        "audio-display": "no",
+        "ao": "alsa",
+        "audio-device": "alsa/hw:CARD=avsmax98927,DEV=1",
+        "alsa-resample": "no",
+        "audio-format": "s16",
+        "audio-channels": "stereo",
+        "volume": "100",
+        "volume-gain": "0",
+        "mute": "no",
+        "speed": "1",
+        "replaygain": "no",
+        "gapless-audio": "weak",
+        "prefetch-playlist": "yes",
+        "audio-swresample-o": "dither_method=none",
+        "pause": "yes",
+        "idle": "yes",
+        "audio-buffer": "0.1"
+      },
+      "proc_hw_params_observations": [
+        "closed\n",
+        "closed\n",
+        "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n"
+      ],
+      "proc_hw_params": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+      "requested_mode": "desktop",
+      "requested_device": null,
+      "state": {
+        "path": "/tmp/qoda-alsa-volume-final-4usi0oiy/guard-source.flac",
+        "playlist-pos": 0,
+        "pause": 1,
+        "volume": 100.0,
+        "time-pos": 0.22599999999999998,
+        "audio-out-params/samplerate": 48000,
+        "audio-out-params/format": "s16",
+        "audio-out-params/channels": "stereo",
+        "idle-active": 0
+      },
+      "end_events": 0,
+      "timeout": false,
+      "unexecuted_actions": [],
+      "stop_reason": "set_mode",
+      "session_restore": {
+        "paused": true,
+        "position": 0.22599999999999998,
+        "queue_entries": 1,
+        "reason": "set_mode"
+      },
+      "elapsed_seconds": 1.251332
+    },
+    "prefix_comparison": {
+      "same_count": true,
+      "max_error_lsb": 0,
+      "actual_samples": 28800,
+      "expected_samples": 28800
+    },
+    "capture_events": [
+      {
+        "event": "open",
+        "stream": 0,
+        "route": "hw:CARD=avsmax98927,DEV=1",
+        "t": 0.0
+      },
+      {
+        "event": "proc-hw-params",
+        "value": "access: RW_INTERLEAVED\nformat: S16_LE\nsubformat: STD\nchannels: 2\nrate: 48000 (48000/1)\nperiod_size: 1200\nbuffer_size: 4800\n",
+        "t": 0.01927
+      },
+      {
+        "pcm_type": 0,
+        "event": "negotiated",
+        "format": "S16_LE",
+        "rate": 48000,
+        "channels": 2,
+        "container_bits": 16,
+        "valid_bits": 16,
+        "access": 3,
+        "t": 0.019302
+      },
+      {
+        "event": "pcm-state",
+        "state": 2,
+        "accepted_total": 0,
+        "t": 0.022299
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 4800,
+        "accepted_total": 4800,
+        "t": 0.022533
+      },
+      {
+        "event": "pcm-state",
+        "state": 3,
+        "accepted_total": 4800,
+        "t": 0.022795
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 6000,
+        "t": 0.048127
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 7200,
+        "t": 0.073351
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 8400,
+        "t": 0.09875
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 9600,
+        "t": 0.1242
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 10800,
+        "t": 0.149551
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 12000,
+        "t": 0.174963
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 13200,
+        "t": 0.200418
+      },
+      {
+        "event": "submit",
+        "method": "writei",
+        "frames": 1200,
+        "accepted_total": 14400,
+        "t": 0.226049
+      },
+      {
+        "event": "drop",
+        "result": 0,
+        "accepted_total": 14400,
+        "t": 0.349421
+      },
+      {
+        "event": "pcm-state",
+        "state": 2,
+        "accepted_total": 14400,
+        "t": 0.349641
+      },
+      {
+        "event": "drop",
+        "result": 0,
+        "accepted_total": 14400,
+        "t": 0.355356
+      },
+      {
+        "event": "close",
+        "stream": 0,
+        "route": "hw:CARD=avsmax98927,DEV=1",
+        "accepted_frames": 14400,
+        "t": 0.609008
+      }
+    ],
+    "routes": [
+      {
+        "route": "hw:CARD=avsmax98927,DEV=1",
+        "result": 0
+      }
+    ],
+    "process_exit": 0
+  },
+  "reason": "Positive current-generation completion control added; stale completion must reject"
+}

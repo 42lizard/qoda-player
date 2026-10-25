@@ -1,0 +1,195 @@
+{
+  "profile": {
+    "device": "hw:CARD=avsmax98927,DEV=1",
+    "rate": 48000,
+    "channels": 2,
+    "format": "S16_LE",
+    "valid_bits": 16,
+    "pcm_type": "HW",
+    "access": "RW_INTERLEAVED",
+    "boundary": "PCM frames accepted by real snd_pcm_writei on selected hw PCM",
+    "qualified_transfer": "writei",
+    "unqualified_transfers": [
+      "writen",
+      "mmap"
+    ]
+  },
+  "checks": [
+    {
+      "name": "off-wav",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "off-flac",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "ready-lossless-boundary",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "unaligned-boundary",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "track-boundary",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "gain-to-unity-and-back",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "album-boundary",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "auto-album",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "auto-mixed",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "album-track-fallback",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "missing-unity",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "boost-without-peak",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "conservative-peak-cap",
+      "pass": true,
+      "scope": "native accepted PCM, selected profile"
+    },
+    {
+      "name": "unsupported44",
+      "pass": true,
+      "scope": "expected unsupported-input rejection, not a decoded-output comparison"
+    },
+    {
+      "name": "unsupported96",
+      "pass": true,
+      "scope": "expected unsupported-input rejection, not a decoded-output comparison"
+    },
+    {
+      "name": "unsupported24",
+      "pass": true,
+      "scope": "expected unsupported-input rejection, not a decoded-output comparison"
+    },
+    {
+      "name": "positive-gain",
+      "pass": true,
+      "scope": "native PCM; original restored-process exit is not inferred"
+    },
+    {
+      "name": "loop-file-gain",
+      "pass": true,
+      "scope": "native PCM; original restored-process exit is not inferred"
+    },
+    {
+      "name": "seek-gain",
+      "pass": true,
+      "scope": "separate drop-delimited epochs; discarded buffers not claimed as heard"
+    },
+    {
+      "name": "busy-before-playback",
+      "pass": true,
+      "scope": "own held handle; no other client stopped"
+    },
+    {
+      "name": "app/MPRIS unity volume",
+      "pass": true,
+      "scope": "real DBus, disposable owner-thread guard; production Rust integration separate"
+    },
+    {
+      "name": "newer pause beats stale completion",
+      "pass": true,
+      "scope": "positive current-generation completion and rejected stale completion"
+    },
+    {
+      "name": "mode-switch-pauses",
+      "pass": true,
+      "scope": "pause/release; ENODEV injection is not physical unplug; Desktop output not exercised"
+    },
+    {
+      "name": "missing-new-device",
+      "pass": true,
+      "scope": "pause/release; ENODEV injection is not physical unplug; Desktop output not exercised"
+    },
+    {
+      "name": "injected-device-loss",
+      "pass": true,
+      "scope": "pause/release; ENODEV injection is not physical unplug; Desktop output not exercised"
+    },
+    {
+      "name": "early accepted upcoming removal",
+      "pass": true,
+      "scope": "long current source; removed B and accepted A then C"
+    },
+    {
+      "name": "hardware mixer unchanged",
+      "pass": true,
+      "scope": "targeted before/after run only; no mixer values exported"
+    },
+    {
+      "name": "no XRUN before final submission in confirmation",
+      "pass": true,
+      "scope": "post-content XRUN retained; no downstream continuity claim"
+    },
+    {
+      "name": "descriptor-native-valid",
+      "pass": true,
+      "scope": "authoritative local source descriptor checked before ALSA open; supplied hints are not trusted"
+    },
+    {
+      "name": "descriptor-native-wav",
+      "pass": true,
+      "scope": "authoritative local source descriptor checked before ALSA open; supplied hints are not trusted"
+    },
+    {
+      "name": "descriptor-rejects-precision-hint",
+      "pass": true,
+      "scope": "authoritative local source descriptor checked before ALSA open; supplied hints are not trusted"
+    },
+    {
+      "name": "descriptor-rejects-mono",
+      "pass": true,
+      "scope": "authoritative local source descriptor checked before ALSA open; supplied hints are not trusted"
+    }
+  ],
+  "qualified_scope": "prototype digital handoff; deterministic low-level WAV/FLAC and measured gain/transition conditions",
+  "not_qualified": [
+    "speaker/DSP/transport/DAC/analog fidelity",
+    "44.1/96k and 24-bit sources on this device",
+    "other devices, formats, drivers or package versions",
+    "physical hot-unplug and Desktop route playback on mode switch",
+    "production Rust application/MPRIS integration",
+    "current/history/Plex reporting from early decoder events",
+    "unconditional real-time network/device gaplessness"
+  ],
+  "warnings": {
+    "post_content_xrun_observed": true,
+    "short_fixture_edit_not_qualifying": true,
+    "initial_tap_loader_abort_before_pcm": true,
+    "repeated_tag_analysis_corrected": true
+  }
+}

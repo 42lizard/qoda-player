@@ -1,0 +1,9 @@
+{
+  "kernel": "7.2.8-9-omarchy",
+  "packages": "mpv 1:0.41.0-6\nffmpeg 2:9.0.2-2\nalsa-lib 1.2.16.1-1\nalsa-utils 1.2.16-1\npipewire 1:1.6.9-1\nwireplumber 0.5.18-1\nrust 1:1.99.1-1",
+  "client_api": "2.5.0",
+  "desktop_sinks_after": "61\talsa_output.platform-avs_max98927.26.auto.HiFi__Speaker__sink\tPipeWire\ts16le 2ch 48000Hz\tSUSPENDED",
+  "card_id": "avsmax98927",
+  "physical_path": "/sys/devices/platform/avs_max98927.26.auto",
+  "scope": "No microphone capture; no mixer/service/config write; per-child LD_PRELOAD only"
+}
