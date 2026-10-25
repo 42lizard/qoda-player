@@ -21,7 +21,7 @@ The player will use a modular music-provider layer for authentication, catalog m
 
 ## Planning workflow
 
-The canonical map and its child decision tickets live in [GitHub Issues](https://github.com/42lizard/qoda-player/issues). The map carries the `wayfinder:map` label. Tickets use `wayfinder:research`, `wayfinder:grilling`, `wayfinder:prototype`, or `wayfinder:task`; native sub-issues and blocking relationships define the frontier.
+The canonical map is [Find the way to the first Plex release specification](https://github.com/42lizard/qoda-player/issues/1). It carries the `wayfinder:map` label. Its child decision tickets use `wayfinder:research`, `wayfinder:grilling`, `wayfinder:prototype`, or `wayfinder:task`; native sub-issues and blocking relationships define the frontier.
 
 Research notes live on separate `research/*` branches linked from their tickets. These branches are planning evidence, are not merged, and have no pull requests.
 
