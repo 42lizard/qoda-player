@@ -1,7 +1,6 @@
 //! Library-scoped album snapshots and bounded, authenticated cover reads.
 use super::*;
 use crate::artwork::bounded_jpeg;
-use base64::{Engine, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256};
 
 pub(super) fn key(value: &str) -> Result<&str, ProviderError> {
@@ -193,7 +192,6 @@ impl PlexProvider {
         if album.track_count.is_some_and(|count| count.get() > 500) {
             return Err(ProviderError::TooLarge);
         }
-        let thumb = attr(node, "thumb");
         let body = xml(
             &self.http,
             path(&s.base, &["library", "metadata", id, "children"]),
@@ -249,22 +247,12 @@ impl PlexProvider {
         let encoded =
             serde_json::to_vec(&(&album, &tracks)).map_err(|_| ProviderError::InvalidReply)?;
         let revision = format!("{:x}", Sha256::digest(encoded));
-        // Artwork failure never turns a complete, playable album into an error.
-        let artwork = if thumb.is_empty() {
-            None
-        } else {
-            self.album_artwork(s, id, &thumb)
-                .await
-                .ok()
-                .map(|bytes| format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)))
-        };
-        let artwork_unavailable = artwork.is_none();
         Ok(AlbumSnapshot {
             album,
             revision,
             tracks,
-            artwork,
-            artwork_unavailable,
+            artwork: None,
+            artwork_unavailable: true,
         })
     }
     pub(super) async fn album_cover(&self, reference: AlbumRef) -> Result<Vec<u8>, ProviderError> {
@@ -501,7 +489,7 @@ mod tests {
         task.abort();
     }
     #[tokio::test]
-    async fn complete_album_orders_discs_and_delivers_only_bounded_cover_bytes() {
+    async fn album_metadata_is_complete_without_loading_artwork_and_cover_access_is_separate() {
         for mode in [0, 7] {
             let (p, source, requests, task) = fixture(mode).await;
             let view = p
@@ -523,11 +511,17 @@ mod tests {
                     .iter()
                     .all(|t| t.track.reference.source == source)
             );
+            assert!(view.artwork.is_none() && view.artwork_unavailable);
+            assert_eq!(requests.lock().unwrap().len(), 2);
             assert_eq!(
-                view.artwork.unwrap(),
-                format!("data:image/jpeg;base64,{}", STANDARD.encode(JPEG))
+                p.cover(AlbumRef {
+                    source,
+                    key: "20".into()
+                })
+                .await
+                .unwrap(),
+                JPEG
             );
-            assert!(!view.artwork_unavailable);
             assert_eq!(view.revision.len(), 64);
             assert!(
                 requests

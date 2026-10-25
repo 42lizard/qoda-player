@@ -14,7 +14,7 @@ TestCase {
         anchors.fill: parent
         snapshot: ({page: null, selected: null, busy: false})
         connected: true
-        artworkEnabled: false
+        artworkEnabled: true
     }
     SignalSpy { id: queues; target: browser; signalName: "queueAlbum" }
     SignalSpy { id: tracks; target: browser; signalName: "trackAction" }
@@ -31,6 +31,7 @@ TestCase {
     }
     function init() {
         test.width = 1100;
+        browser.artworkEnabled = true;
         browser.snapshot = frame("cached", true, "cached-revision");
         browser.showDetails = true;
         queues.clear(); tracks.clear(); opens.clear();
@@ -70,6 +71,23 @@ TestCase {
         compare(browser.showDetails, false);
         compare(browser.trackModel.length, 1);
         compare(browser.canQueue, true);
+    }
+    function test_detail_cover_uses_the_shared_grant_and_stops_loading_when_hidden() {
+        const next = frame("live", false, "cover-revision");
+        next.selected.artwork = "https://must-not-be-used.invalid/cover";
+        browser.snapshot = next;
+        compare(browser.detailCoverSource, "");
+        const image = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD//gAPTGF2YzYzLjEuMTAyAP/bAEMACAQEBAQEBQUFBQUFBgYGBgYGBgYGBgYGBgcHBwgICAcHBwYGBwcICAgICQkJCAgICAkJCgoKDAwLCw4ODhERFP/EAEsAAQEAAAAAAAAAAAAAAAAAAAAGAQEAAAAAAAAAAAAAAAAAAAAFEAEAAAAAAAAAAAAAAAAAAAAAEQEAAAAAAAAAAAAAAAAAAAAA/8AAEQgAEAAQAwEiAAIRAAMRAP/aAAwDAQACEQMRAD8AmQCox//Z";
+        next.covers = {album: image};
+        browser.snapshot = JSON.parse(JSON.stringify(next));
+        compare(browser.detailCoverSource, image);
+        tryVerify(() => browser.coverReady);
+        browser.artworkEnabled = false;
+        compare(browser.detailCoverSource, "");
+        browser.artworkEnabled = true;
+        browser.showDetails = false;
+        compare(browser.detailCoverSource, "");
+        compare(queues.count, 0); compare(tracks.count, 0);
     }
     function test_live_refresh_enables_actions_with_current_revision() {
         browser.snapshot = frame("live", false, "new-live-revision");

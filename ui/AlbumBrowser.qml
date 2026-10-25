@@ -20,6 +20,7 @@ ColumnLayout {
     property string selectedKey: ""
     property bool showDetails: false
     readonly property bool coverReady: cover.status === Image.Ready
+    readonly property string detailCoverSource: selected && artworkEnabled && showDetails && visible ? covers[selected.album.reference.key] || "" : ""
     readonly property real trackViewport: albumTracks.height
     signal openAlbum(var reference)
     signal openArtist(var reference)
@@ -49,7 +50,7 @@ ColumnLayout {
     }
     Label {
         Layout.fillWidth: true
-        visible: !albums.showDetails || albums.busy || !!albums.selected && (albums.selected.artwork_unavailable || !!snapshot.cache && snapshot.cache.origin !== "live")
+        visible: !albums.showDetails || albums.busy || !!albums.selected && (!albums.coverReady || !!snapshot.cache && snapshot.cache.origin !== "live")
         text: snapshot ? snapshot.message : "Choose a music library."
         color: "#acb8c8"
         wrapMode: Text.Wrap
@@ -71,7 +72,7 @@ ColumnLayout {
             Image {
                 id: cover
                 anchors.fill: parent
-                source: albums.selected && albums.selected.artwork ? albums.selected.artwork : ""
+                source: albums.detailCoverSource
                 sourceSize.width: 320; sourceSize.height: 320
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true

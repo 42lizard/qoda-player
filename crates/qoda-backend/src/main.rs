@@ -856,27 +856,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     && g == auth_generation
                     && let Some(provider) = provider.clone()
                 {
-                    let refs = albums
-                        .view
-                        .page
-                        .as_ref()
-                        .map(|page| {
-                            page.albums
-                                .iter()
-                                .map(|album| album.reference.clone())
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
+                    let refs = albums.artwork_references();
                     artwork.publish(provider, refs).await;
                 }
             }
             Event::Albums(reply) => {
                 if albums.apply(reply, auth_generation)
-                    && let (Some(page), Some(provider)) = (&albums.view.page, provider.clone())
+                    && let Some(provider) = provider.clone()
                 {
-                    albums.view.covers = artwork
-                        .publish(provider, page.albums.iter().map(|a| a.reference.clone()))
-                        .await;
+                    albums.view.covers =
+                        artwork.publish(provider, albums.artwork_references()).await;
                 }
             }
             Event::Playlists(reply) => {

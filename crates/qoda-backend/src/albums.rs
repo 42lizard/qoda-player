@@ -211,7 +211,23 @@ impl Controller {
                 .as_ref()
                 .is_some_and(|s| s.album.artist_ref.as_ref() == Some(reference))
     }
-    /// Returns true only when a current page needs fresh artwork grants.
+    pub fn artwork_references(&self) -> Vec<AlbumRef> {
+        let mut seen = std::collections::HashSet::new();
+        self.view
+            .selected
+            .iter()
+            .map(|s| s.album.reference.clone())
+            .chain(
+                self.view
+                    .page
+                    .iter()
+                    .flat_map(|p| p.albums.iter().map(|a| a.reference.clone())),
+            )
+            .filter(|reference| seen.insert(reference.clone()))
+            .take(100)
+            .collect()
+    }
+    /// Returns true when page/detail grants must be refreshed or revoked.
     pub fn apply(&mut self, reply: Reply, auth: u64) -> bool {
         if reply.auth != auth || reply.generation != self.generation {
             return false;
@@ -221,7 +237,11 @@ impl Controller {
         }
         self.view.busy = false;
         self.view.cache = reply.info;
-        let new_page = matches!(&reply.result, Ok(Update::Page(_)));
+        let artwork_changed = matches!(
+            &reply.result,
+            Ok(Update::Page(_) | Update::Open(_))
+                | Err(ProviderError::AccessDenied | ProviderError::UnknownSource)
+        );
         match reply.result {
             Ok(Update::Artists(page)) => {
                 self.view.message = if page.artists.is_empty() {
@@ -242,12 +262,8 @@ impl Controller {
                 self.view.page = Some(page);
             }
             Ok(Update::Open(snapshot)) => {
-                self.view.message = if snapshot.artwork_unavailable {
-                    "Album loaded. Cover unavailable."
-                } else {
-                    "Album loaded. Queue copies are independent of the library."
-                }
-                .into();
+                self.view.message =
+                    "Album loaded. Queue copies are independent of the library.".into();
                 self.view.selected = Some(snapshot);
             }
             Err(error) => {
@@ -266,7 +282,7 @@ impl Controller {
         if self.view.cache.origin != "live" {
             self.view.message = format!("{} {}", self.view.cache.message, self.view.message);
         }
-        new_page
+        artwork_changed
     }
     pub fn tracks(&self, request: &Value) -> Result<Vec<Track>, String> {
         let reference: AlbumRef = serde_json::from_value(request["reference"].clone())
@@ -375,6 +391,51 @@ mod tests {
         assert!(c.tracks(&request).is_err());
         c.invalidate();
         assert!(c.tracks(&request).is_err());
+    }
+    #[test]
+    fn detail_artwork_is_prioritized_deduplicated_and_denial_revokes_the_grant_set() {
+        let snapshot = snapshot();
+        let reference = snapshot.album.reference.clone();
+        let mut c = Controller::default();
+        c.view.page = Some(AlbumPage {
+            source: reference.source,
+            offset: Counter::ZERO,
+            query: "".into(),
+            artist: None,
+            has_more: false,
+            albums: (0..100)
+                .map(|index| qoda_provider::Album {
+                    reference: AlbumRef {
+                        source: reference.source,
+                        key: index.to_string(),
+                    },
+                    ..snapshot.album.clone()
+                })
+                .collect(),
+        });
+        assert!(c.apply(
+            Reply {
+                auth: 1,
+                generation: 0,
+                result: Ok(Update::Open(snapshot)),
+                info: Info::default()
+            },
+            1
+        ));
+        let references = c.artwork_references();
+        assert_eq!(references.len(), 100);
+        assert_eq!(references[0], reference);
+        assert_eq!(references.iter().filter(|r| **r == reference).count(), 1);
+        assert!(c.apply(
+            Reply {
+                auth: 1,
+                generation: 0,
+                result: Err(ProviderError::AccessDenied),
+                info: Info::default()
+            },
+            1
+        ));
+        assert!(c.artwork_references().is_empty());
     }
     #[test]
     fn cached_album_cannot_queue_until_live_refresh_and_old_revisions_remain_rejected() {
