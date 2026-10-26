@@ -37,3 +37,10 @@ failures, version refusal before byte reads, budget/deadline checks, stale accou
 session/revision/generation refusal, cancellation and a synthetic WAV loaded into
 libmpv's null output at the retained position. No Plex account, real music or
 physical output is used for automated recovery checks.
+
+
+The [owned Plex matrix](../plex-support-matrix.md) now includes one controlled
+client-side transfer interruption with real original-media/Range requests: the
+same occurrence/session/visit/version recovers on a fresh render at retained
+positive position under null output. This is distinct from a physical network
+outage, and from the earlier Range-only baseline.

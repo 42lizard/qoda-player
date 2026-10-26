@@ -32,7 +32,8 @@ continuous converted DSP across track boundaries #41, and safe checkpointed
 updates/schema-aware rollback #46. Existing code must still satisfy its contracts;
 the proposal does not turn defects or failed tests into exclusions.
 
-The owned-server path still needs its remaining controlled live checks under #16.
+The owned-server path now has its controlled cases and limitations consolidated in
+[the support matrix for #16](plex-support-matrix.md).
 Playlist occurrence identity/mutation results, credential lifecycle, recovery and
 reporting may only receive a live-qualified label after being observed. Synthetic
 fixtures remain evidence for implementation, not a replacement for those results.
@@ -49,7 +50,7 @@ backend/keyring boundary.
   status. Remove final device/continuity measurement as a first-release blocker;
   record those measurements as future qualification, with no analog claim.
 - #16: narrow the required server/account matrix to the owned browser-PIN sign-in path.
-  Finish its remaining in-scope owned-server cases; do not declare all Plex
+  The in-scope owned-server cases are consolidated in the support matrix; do not declare all Plex
   versions, authentication paths or permissions supported.
 - #45/#33: retain installed services as experimental pending actual qualification;
   complete remaining implementation and ownership requirements. Do not claim the
