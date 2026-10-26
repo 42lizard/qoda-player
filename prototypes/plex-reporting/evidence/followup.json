@@ -1,0 +1,129 @@
+{
+  "scope": "same intact owned-library track; one duplicate-handoff null-output run of at most 60 seconds",
+  "completed": false,
+  "observations": [
+    {
+      "name": "Preflight",
+      "owned_server": true,
+      "tls_verified": true,
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "timeline_discovered": true,
+      "metadata_discovered": true,
+      "production_gates_unchanged": true,
+      "output": "libmpv ao=null",
+      "maximum_runs": 1,
+      "per_run_wall_seconds": 60
+    },
+    {
+      "name": "Subject selected",
+      "owned_library": true,
+      "track_duration_ms": 19737,
+      "short_enough_for_complete_second_run": true,
+      "private_library_track_names_and_ids_exported": false,
+      "existing_item_preserved": true
+    },
+    {
+      "name": "Server observation",
+      "phase": "before",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Server observation",
+      "phase": "first-playing",
+      "matching_client_sessions": 1,
+      "client_states": [
+        "playing"
+      ],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Native successor staged",
+      "same_track": true,
+      "distinct_local_occurrences": true,
+      "source_scope_matches": true,
+      "phase": "staged"
+    },
+    {
+      "name": "Confirmed duplicate handoff",
+      "distinct_occurrence": true,
+      "distinct_render_generation": true,
+      "successor_nominal_position_ms": 235,
+      "source_and_track_match": true
+    },
+    {
+      "name": "Server observation",
+      "phase": "successor-playing",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Owned backend cleanup",
+      "process_stopped": true
+    },
+    {
+      "name": "Sanitized transport audit",
+      "events": [
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 370,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 10633,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": true,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 19124,
+          "state": "stopped"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        }
+      ],
+      "backend_exit": 0,
+      "exact_production_transport": true,
+      "validation_build": true
+    },
+    {
+      "name": "Stopped",
+      "stage": "duplicate-handoff",
+      "error_class": "RuntimeError",
+      "raw_error_omitted": true
+    }
+  ],
+  "limits": [
+    "No universal server/account compatibility claim",
+    "No speaker/DAC/analog or final-device continuity claim",
+    "No scrobble/completion rule/history import",
+    "History row device attribution requires separate proof"
+  ]
+}
