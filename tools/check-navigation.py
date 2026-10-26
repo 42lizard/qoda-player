@@ -130,6 +130,30 @@ def check(unavailable=False):
                     connection.close(); connection = None
 
                 start()
+                # Output discovery uses control/sysfs metadata only. Applying a
+                # route keeps this fictional queue paused and never opens PCM.
+                command("refresh_outputs")
+                until(lambda value: bool(value.get("output", {}).get("ready")))
+                before_output_queue = state["queue"]
+                command("set_output", mode="fidelity", device="plughw:0", **fences())
+                until(lambda value: bool(value.get("error")))
+                assert state["output"]["selection"] == {"mode": "desktop"}
+                assert state["queue"] == before_output_queue and state["intent"] == "paused"
+                devices = state["output"]["devices"]
+                if devices and state["output"]["fidelity_available"]:
+                    choice = {"mode": "fidelity", "device": devices[0]["id"]}
+                    command("set_output", **choice, **fences())
+                    until(lambda value: value["output"]["selection"] == choice and value["output"]["ready"])
+                    assert not state.get("error"), state.get("error")
+                    assert state["queue"] == before_output_queue and state["intent"] == "paused"
+                    assert state["output"]["observed"] is None and state["output"]["qualification"] == "unverified"
+                    quit_backend(); start()
+                    assert state["output"]["selection"] == choice and state["intent"] == "paused"
+                    assert state["queue"] == before_output_queue and state["output"]["observed"] is None
+                command("set_output", mode="desktop", **fences())
+                until(lambda value: not value.get("error") and value["output"]["selection"] == {"mode": "desktop"})
+                assert state["intent"] == "paused" and state["queue"] == before_output_queue
+                print("Output discovery, route validation and explicit paused switching preserved the saved queue; available Fidelity selection survived paused restart without PCM opens", flush=True)
                 if unavailable:
                     assert len(state["queue"]["unavailable_entries"]) == 2
                     before = state["queue"]

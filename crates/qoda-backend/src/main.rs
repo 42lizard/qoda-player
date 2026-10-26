@@ -1,4 +1,5 @@
 mod albums;
+mod alsa_guard;
 mod artwork;
 mod artwork_store;
 mod cache_files;
@@ -7,10 +8,12 @@ mod gain;
 mod gapless;
 mod metadata_cache;
 mod mpris;
+mod output;
 mod player;
 mod playlists;
 mod proxy;
 mod queue;
+mod source_format;
 mod storage;
 mod vault;
 use player::{Command, Player};
@@ -43,6 +46,7 @@ enum Event {
     Albums(albums::Reply),
     Gapless(gapless::Reply),
     Artwork,
+    OutputDevices(Vec<output::Device>),
     CacheDone(u64, bool, Result<(), String>),
     MetadataCacheDone(u64, Result<(), String>),
     Connected(
@@ -56,7 +60,7 @@ enum Event {
         Result<qoda_provider::CatalogPage, qoda_provider::ProviderError>,
         metadata_cache::Info,
     ),
-    Media(u64, Result<gain::Prepared, qoda_provider::ProviderError>),
+    Media(u64, Result<gain::Prepared, gain::PrepareError>),
     Pin(u64, Result<BrowserPin, qoda_provider::ProviderError>),
     Credential(u64, Result<Credential, qoda_provider::ProviderError>),
 }
@@ -187,6 +191,7 @@ async fn prepare_track(
         task.abort();
     }
     generation.current = next;
+    player.invalidate_load(next);
     player.send(Command::Pause(true));
     player.send(Command::Stop);
     proxy.revoke().await;
@@ -196,7 +201,9 @@ async fn prepare_track(
             gain::prepare(provider.as_ref(), request),
         )
         .await
-        .unwrap_or(Err(qoda_provider::ProviderError::Network));
+        .unwrap_or(Err(gain::PrepareError::Provider(
+            qoda_provider::ProviderError::Network,
+        )));
         let _ = tx.send(Event::Media(next, result)).await;
     }));
     Ok(())
@@ -249,6 +256,23 @@ fn gain_view(settings: &gain::Settings, audio: &player::Status, generation: u64)
     let mut view = settings.view();
     if audio.generation == generation && audio.entry_ready && !audio.idle && audio.error.is_none() {
         view["applied"] = json!(audio.gain);
+    }
+    view
+}
+fn output_view(
+    settings: &output::Settings,
+    devices: &[output::Device],
+    audio: &player::Status,
+    generation: u64,
+) -> Value {
+    let mut view = settings.view(devices);
+    view["ready"] =
+        json!(settings.selection.is_some() && settings.selection == audio.output_selection);
+    if view["ready"] == true && audio.generation == generation {
+        view["source"] = json!(audio.source);
+        if audio.entry_ready && !audio.idle && audio.error.is_none() {
+            view["observed"] = json!(audio.output);
+        }
     }
     view
 }
@@ -349,6 +373,7 @@ fn guarded_queue_command(op: &str) -> bool {
             | "set_repeat"
             | "set_gapless"
             | "set_replaygain"
+            | "set_output"
             | "album_enqueue"
             | "playlist_enqueue"
             | "disconnect"
@@ -376,6 +401,7 @@ fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
             | "disconnect"
             | "forget_signin"
             | "quit"
+            | "set_output"
     ) || op == "queue_remove"
         && serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
             == queue.selected()
@@ -521,6 +547,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut gain_settings = gain::Settings::load(
         identities_path().and_then(|p| p.parent().map(std::path::Path::to_owned)),
     );
+    let mut output_settings = output::Settings::load(
+        identities_path().and_then(|p| p.parent().map(std::path::Path::to_owned)),
+    );
+    let mut output_devices = tokio::task::spawn_blocking(output::discover)
+        .await
+        .unwrap_or_default();
+    let output_init_error =
+        if !matches!(output_settings.selection, Some(output::Selection::Desktop)) {
+            player
+                .configure(output_settings.selection.clone())
+                .await
+                .err()
+        } else {
+            None
+        };
     let proxy = proxy::Proxy::start().await?;
     let instance = uuid::Uuid::new_v4().to_string();
     let mut revision = 0_u64;
@@ -533,6 +574,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut catalog_revision = 0_u64;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
     state["replaygain"] = gain_settings.view();
+    state["output"] = output_view(&output_settings, &output_devices, &player.status(), 0);
+    if let Some(error) = output_init_error {
+        state["error"] = json!(error);
+    }
     let (tx, mut events) = mpsc::channel(64);
     let artwork = artwork::Artwork::persistent(tx.clone()).await?;
     state["artwork_cache"] = artwork.view().await;
@@ -600,6 +645,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut automatic_preparation = None;
     let mut ui_peers = HashSet::new();
     state["ui"] = json!({"can_raise":false,"raise_token":null});
+    let mut output_refresh = tokio::time::interval(std::time::Duration::from_secs(5));
+    let mut output_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut last_audio = player.status();
     let mut last_stream_failed = false;
@@ -631,6 +678,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let event = tokio::select! {
             event = events.recv() => match event { Some(event) => event, None => break },
+            _ = output_refresh.tick(), if output_task.as_ref().is_none_or(|task|task.is_finished()) => {
+                let tx=tx.clone();output_task=Some(tokio::spawn(async move{let devices=tokio::task::spawn_blocking(output::discover).await.unwrap_or_default();let _=tx.send(Event::OutputDevices(devices)).await;}));
+                continue;
+            },
             _ = audio_tick.tick() => {
                 let audio = player.status();
                 let mut gapless_changed=false;
@@ -775,6 +826,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             state["error"] = json!(error);
             event = Event::Checkpoint;
+        }
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
+            && request["op"] == "set_output"
+        {
+            match output_settings.request(request, &output_devices) {
+                Ok(selection)
+                    if output_settings.selection.as_ref() == Some(&selection)
+                        && player.status().output_selection.as_ref() == Some(&selection) =>
+                {
+                    state["error"] = Value::Null;
+                    event = Event::Checkpoint;
+                }
+                Ok(selection) => {
+                    if let Err(error) = output_settings.set(selection) {
+                        state["error"] = json!(error);
+                        event = Event::Checkpoint;
+                    }
+                }
+                Err(error) => {
+                    state["error"] = json!(error);
+                    event = Event::Checkpoint;
+                }
+            }
         }
         // Validate and persist before touching speculative output. A failed
         // save or an unchanged mode must not cancel/rebuild a staged successor.
@@ -1139,6 +1214,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         .await;
                                 }));
                             }
+                        }
+                    }
+                    "set_output" => {
+                        desired_playing = false;
+                        automatic_preparation = None;
+                        if let Some(task) = prepare_task.take() {
+                            task.abort();
+                        }
+                        match player.barrier().await {
+                            Ok(before) => {
+                                record_clock(
+                                    &mut queue,
+                                    &before,
+                                    epochs.current,
+                                    &mut presented_generation,
+                                    last_stream_failed || last_clock_stale,
+                                );
+                            }
+                            Err(error) => state["error"] = json!(error),
+                        }
+                        epochs.reset()?;
+                        player.invalidate_load(epochs.current);
+                        gapless.invalidate();
+                        proxy.revoke().await;
+                        presented_generation = None;
+                        if let Err(error) =
+                            player.configure(output_settings.selection.clone()).await
+                        {
+                            state["error"] = json!(error);
+                        }
+                        state["audio"] = Value::Null;
+                        state["intent"] = json!("paused");
+                        state["status"] =
+                            json!("Output changed; position retained. Choose Resume explicitly.");
+                    }
+                    "refresh_outputs" => {
+                        if output_task.as_ref().is_none_or(|task| task.is_finished()) {
+                            let tx = tx.clone();
+                            output_task = Some(tokio::spawn(async move {
+                                let devices = tokio::task::spawn_blocking(output::discover)
+                                    .await
+                                    .unwrap_or_default();
+                                let _ = tx.send(Event::OutputDevices(devices)).await;
+                            }));
                         }
                     }
                     "set_replaygain" => {} // Persisted before the speculative-output guard.
@@ -1897,9 +2016,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            Event::OutputDevices(devices) => {
+                output_devices = devices;
+            }
             Event::Media(g, r) if g == epochs.current => match r {
                 Ok(prepared) => {
-                    let gain::Prepared { media, gain } = prepared;
+                    let gain::Prepared {
+                        media,
+                        gain,
+                        source,
+                    } = prepared;
                     if let Err(error) = queue.update_selected(media.track.clone(), &media.version) {
                         let reason = version_failure(&error, &media.version);
                         match preparation_failure(
@@ -1924,15 +2050,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         state["selection"] = json!(media.track);
                         let url = proxy.grant(media.stream).await;
-                        player.send(Command::LoadGain(g, url, queue.position(), gain));
-                        player.send(Command::Pause(!desired_playing));
+                        if let Err(error) = player.load_prepared(player::Load {
+                            generation: g,
+                            url,
+                            position: queue.position(),
+                            gain,
+                            source,
+                            output: output_settings.selection.clone(),
+                            playing: desired_playing,
+                        }) {
+                            desired_playing = false;
+                            state["intent"] = json!("paused");
+                            state["error"] = json!(error);
+                        }
                         state["status"] = json!("Track selected; playback requested");
                     }
                 }
                 Err(e) => {
                     match preparation_failure(
                         &mut queue,
-                        queue::Unavailable::from_provider(e),
+                        e.provider().and_then(queue::Unavailable::from_provider),
                         automatic_preparation == Some(g),
                         desired_playing,
                     ) {
@@ -1950,6 +2087,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     desired_playing = automatic_next;
                     state["status"] = json!(if automatic_next {
                         "Skipping unavailable entry"
+                    } else if e.provider().is_none() {
+                        "Fidelity verification failed; review audio settings and explicitly retry"
                     } else {
                         "Playback preparation failed; review unavailable entries or retry"
                     });
@@ -1979,6 +2118,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     reference: track.reference,
                     mode: gain_settings.mode,
                     album_session: queue.album_gain_eligible(),
+                    fidelity: output_settings
+                        .selection
+                        .as_ref()
+                        .is_some_and(output::Selection::fidelity),
                 },
                 tx.clone(),
             )
@@ -2003,12 +2146,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 provider,
                 tx.clone(),
                 gain_settings.mode,
+                output_settings
+                    .selection
+                    .as_ref()
+                    .is_some_and(output::Selection::fidelity),
             )
         {
             state["error"] = json!(error);
         }
         state["gapless"] = json!(gapless.view);
         state["replaygain"] = gain_view(&gain_settings, &audio, epochs.current);
+        state["output"] = output_view(&output_settings, &output_devices, &audio, epochs.current);
         let view = mpris::View::capture(
             &queue,
             &player.status(),
@@ -2142,6 +2290,45 @@ mod tests {
         audio.idle = false;
         audio.error = Some("Synthetic failure");
         assert!(gain_view(&settings, &audio, 7)["applied"].is_null());
+    }
+    #[test]
+    fn output_projection_does_not_reuse_stale_or_failed_negotiation() {
+        let path = std::env::temp_dir().join(format!("qoda-output-view-{}", uuid::Uuid::new_v4()));
+        let settings = output::Settings::load(Some(path.clone()));
+        let mut audio = player::Status {
+            generation: 7,
+            entry_ready: true,
+            output_selection: Some(output::Selection::Desktop),
+            source: Some(source_format::Format {
+                rate: 48000,
+                bits: 24,
+            }),
+            output: Some(alsa_guard::Observed {
+                rate: 48000,
+                channels: 2,
+                container_bits: 32,
+                valid_bits: 24,
+                format: output::Sample::S32,
+                stereo_layout: true,
+            }),
+            ..Default::default()
+        };
+        assert!(!output_view(&settings, &[], &audio, 7)["observed"].is_null());
+        assert!(output_view(&settings, &[], &audio, 8)["observed"].is_null());
+        assert!(output_view(&settings, &[], &audio, 8)["source"].is_null());
+        audio.entry_ready = false;
+        assert!(output_view(&settings, &[], &audio, 7)["observed"].is_null());
+        audio.entry_ready = true;
+        audio.error = Some("Synthetic device loss");
+        assert!(output_view(&settings, &[], &audio, 7)["observed"].is_null());
+        audio.output_selection = None;
+        assert_eq!(output_view(&settings, &[], &audio, 7)["ready"], false);
+        assert!(
+            gain::PrepareError::Fidelity("Unsupported source header")
+                .provider()
+                .is_none()
+        );
+        std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
     fn only_individual_failures_advance_automatic_playing_preparations() {

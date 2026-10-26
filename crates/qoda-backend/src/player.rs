@@ -1,13 +1,14 @@
 //! Native ownership and playlist IDs stay on one thread. Decoder selection is
 //! distinct from a positive nominal clock; buffered predecessors can be unknown.
 use crate::gain::Applied;
+use crate::{alsa_guard, output, source_format::Format};
 use serde::Serialize;
 use std::{
     collections::HashMap,
     ffi::{CString, c_char, c_int, c_void},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     time::Duration,
@@ -51,10 +52,25 @@ pub enum StageResult {
     Ready,
     MissedWindow,
 }
+pub struct Load {
+    pub generation: u64,
+    pub url: String,
+    pub position: f64,
+    pub gain: Applied,
+    pub source: Option<Format>,
+    pub output: Option<output::Selection>,
+    pub playing: bool,
+}
 pub enum Command {
     #[cfg(test)]
     Load(u64, String, f64),
+    #[cfg(test)]
     LoadGain(u64, String, f64, Applied),
+    LoadPrepared(Load),
+    Configure(
+        Option<output::Selection>,
+        mpsc::Sender<Result<(), &'static str>>,
+    ),
     Pause(bool),
     Stop,
     Quit,
@@ -63,6 +79,7 @@ pub enum Command {
         next: u64,
         url: String,
         gain: Option<Applied>,
+        source: Option<Format>,
         reply: mpsc::Sender<Result<StageResult, &'static str>>,
     },
     Unstage {
@@ -92,6 +109,9 @@ pub struct Status {
     #[serde(serialize_with = "optional_decimal")]
     pub handoff_from: Option<u64>,
     pub gain: Option<Applied>,
+    pub source: Option<Format>,
+    pub output: Option<alsa_guard::Observed>,
+    pub output_selection: Option<output::Selection>,
 }
 fn decimal<S: serde::Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&value.to_string())
@@ -103,6 +123,7 @@ pub struct Player {
     tx: mpsc::SyncSender<Command>,
     status: Arc<Mutex<Status>>,
     desired_playing: Arc<AtomicBool>,
+    latest_load: Arc<AtomicU64>,
     join: Option<std::thread::JoinHandle<()>>,
 }
 unsafe fn property<T: Default>(h: *mut c_void, name: &str, format: c_int) -> Option<T> {
@@ -114,17 +135,146 @@ unsafe fn property<T: Default>(h: *mut c_void, name: &str, format: c_int) -> Opt
         Some(value)
     }
 }
+#[derive(Clone)]
+struct Entry {
+    generation: u64,
+    gain: Option<Applied>,
+    source: Option<Format>,
+}
+struct Active {
+    source: Format,
+    sample: output::Sample,
+}
+fn create_handle(output: &str, extra: &[(String, String)]) -> Result<*mut c_void, &'static str> {
+    let h = unsafe { mpv_create() };
+    if h.is_null() {
+        return Err("Audio engine could not start");
+    }
+    let configured = (|| {
+        let mut options = vec![
+            ("config".to_owned(), "no".to_owned()),
+            ("load-scripts".into(), "no".into()),
+            ("ytdl".into(), "no".into()),
+            ("access-references".into(), "no".into()),
+            ("vo".into(), "null".into()),
+            ("vid".into(), "no".into()),
+            ("audio-display".into(), "no".into()),
+            ("audio-fallback-to-null".into(), "no".into()),
+            ("idle".into(), "yes".into()),
+            ("pause".into(), "yes".into()),
+            ("ao".into(), output.to_owned()),
+            ("volume".into(), "100".into()),
+            ("replaygain".into(), "no".into()),
+            ("volume-gain".into(), "0".into()),
+            ("speed".into(), "1".into()),
+            ("audio-swresample-o".into(), "dither_method=none".into()),
+            ("terminal".into(), "no".into()),
+            ("gapless-audio".into(), "weak".into()),
+            ("prefetch-playlist".into(), "yes".into()),
+            ("demuxer-max-bytes".into(), "32MiB".into()),
+            ("demuxer-max-back-bytes".into(), "8MiB".into()),
+        ];
+
+        options.extend(extra.iter().cloned());
+        for (key, value) in options {
+            let key = CString::new(key).map_err(|_| "Invalid audio configuration")?;
+            let value = CString::new(value).map_err(|_| "Invalid audio configuration")?;
+            if unsafe { mpv_set_option_string(h, key.as_ptr(), value.as_ptr()) } < 0 {
+                return Err("Audio engine rejected output configuration");
+            }
+        }
+        if unsafe { mpv_initialize(h) } < 0 {
+            return Err("Audio engine could not initialize output");
+        }
+        Ok(())
+    })();
+    if let Err(error) = configured {
+        unsafe { mpv_terminate_destroy(h) };
+        return Err(error);
+    }
+    Ok(h)
+}
 struct Native {
     h: *mut c_void,
     current: Status,
     entry: Option<i64>,
-    entries: HashMap<i64, (u64, Option<Applied>)>,
+    entries: HashMap<i64, Entry>,
+    desktop_output: String,
+    extra: Vec<(String, String)>,
+    route: Option<output::Selection>,
+    active: Option<Active>,
     future: Option<(i64, u64)>,
     ended: Option<(i64, u64)>,
     intent: Arc<AtomicBool>,
+    latest_load: Arc<AtomicU64>,
 }
 impl Native {
+    fn replace_handle(&mut self, source: Option<Format>) -> Result<(), &'static str> {
+        let old = std::mem::replace(&mut self.h, std::ptr::null_mut());
+        if !old.is_null() {
+            unsafe { mpv_terminate_destroy(old) };
+        }
+        alsa_guard::disable();
+        self.active = None;
+        self.entry = None;
+        self.entries.clear();
+        self.future = None;
+        self.ended = None;
+        let mut extra = self.extra.clone();
+        let driver = match &self.route {
+            Some(output::Selection::Desktop) => self.desktop_output.as_str(),
+            Some(selection @ output::Selection::Fidelity { .. }) => {
+                if let Some(source) = source {
+                    let device = selection.resolve()?.ok_or("No fidelity output selected")?;
+                    let sample = output::preflight(&device, source)?;
+                    alsa_guard::arm(device.clone(), source, sample)?;
+                    extra.extend([
+                        ("audio-device".into(), format!("alsa/{}", device.route())),
+                        ("alsa-resample".into(), "no".into()),
+                        ("alsa-non-interleaved".into(), "no".into()),
+                        ("alsa-ignore-chmap".into(), "no".into()),
+                        ("audio-format".into(), sample.mpv().into()),
+                        ("audio-samplerate".into(), source.rate.to_string()),
+                        ("audio-channels".into(), "stereo".into()),
+                    ]);
+                    self.active = Some(Active { source, sample });
+                    "alsa"
+                } else {
+                    "null"
+                }
+            }
+            None => {
+                if source.is_some() {
+                    return Err("Output settings unavailable; playback stays paused.");
+                }
+                "null"
+            }
+        };
+        self.h = create_handle(driver, &extra)?;
+        Ok(())
+    }
+    fn configure(&mut self, route: Option<output::Selection>) -> Result<(), &'static str> {
+        let reset = self.reset();
+        // Retain the requested route even after a reset failure. A later load
+        // must never silently run through the previous Desktop output.
+        self.route = route;
+        let configured = self.replace_handle(None);
+        self.current = Status {
+            idle: true,
+            paused: true,
+            output_selection: if self.h.is_null() {
+                None
+            } else {
+                self.route.clone()
+            },
+            ..Default::default()
+        };
+        reset.and(configured)
+    }
     fn command(&self, args: &[String]) -> bool {
+        if self.h.is_null() {
+            return false;
+        }
         let Ok(strings) = args
             .iter()
             .map(|s| CString::new(s.as_str()))
@@ -140,6 +290,9 @@ impl Native {
         self.command(&args.iter().map(|s| (*s).into()).collect::<Vec<_>>())
     }
     fn playing(&self) -> Option<i64> {
+        if self.h.is_null() {
+            return None;
+        }
         let pos = unsafe { property::<i64>(self.h, "playlist-playing-pos", 4) }?;
         if pos < 0 {
             None
@@ -154,6 +307,30 @@ impl Native {
         )
     }
     fn sample(&mut self) {
+        if self.h.is_null() {
+            self.current.idle = true;
+            self.current.paused = true;
+            self.current.entry_ready = false;
+            self.current.position_seconds = None;
+            self.current.output = None;
+            self.current.output_selection = None;
+            return;
+        }
+        if self.active.is_some()
+            && let Some(error) = alsa_guard::error()
+            && self.current.error != Some(error)
+        {
+            self.current.error = Some(error);
+            self.intent.store(false, Ordering::Release);
+            self.call(&["set", "pause", "yes"]);
+            self.stop();
+        }
+        self.current.output_selection = self.route.clone();
+        if !self.intent.load(Ordering::Acquire)
+            && unsafe { property::<c_int>(self.h, "pause", 3) } == Some(0)
+        {
+            self.call(&["set", "pause", "yes"]);
+        }
         let before = self.playing();
         let pts = unsafe { property::<f64>(self.h, "audio-pts", 5) }
             .filter(|p| p.is_finite() && *p >= 0.0);
@@ -163,10 +340,16 @@ impl Native {
         let after = self.playing();
         self.current.entry_ready =
             !self.current.idle && before.is_some() && before == self.entry && after == self.entry;
+        self.current.output =
+            if self.active.is_some() && self.current.entry_ready && self.current.error.is_none() {
+                alsa_guard::observed()
+            } else {
+                None
+            };
         self.current.position_seconds = if self.current.entry_ready { pts } else { None };
     }
     fn stop(&mut self) -> bool {
-        let stopped = self.call(&["stop"]);
+        let stopped = self.h.is_null() || self.call(&["stop"]);
         self.entry = None;
         self.entries.clear();
         self.future = None;
@@ -176,9 +359,13 @@ impl Native {
         self.current.staged_generation = None;
         self.current.handoff_from = None;
         self.current.gain = None;
+        self.current.output = None;
         stopped
     }
     fn pump(&mut self) {
+        if self.h.is_null() {
+            return;
+        }
         loop {
             let event = unsafe { &*mpv_wait_event(self.h, 0.0) };
             if event.id == 0 {
@@ -186,7 +373,12 @@ impl Native {
             }
             if event.id == 6 && !event.data.is_null() {
                 let id = unsafe { (*event.data.cast::<StartFile>()).entry };
-                if let Some((generation, gain)) = self.entries.get(&id).cloned() {
+                if let Some(Entry {
+                    generation,
+                    gain,
+                    source,
+                }) = self.entries.get(&id).cloned()
+                {
                     let previous = self.current.generation;
                     let handoff = if generation != previous {
                         if self.ended != self.entry.map(|entry| (entry, previous)) {
@@ -204,6 +396,7 @@ impl Native {
                     self.current = Status {
                         generation,
                         gain,
+                        source,
                         handoff_from: handoff,
                         paused: self.current.paused,
                         ..Default::default()
@@ -257,7 +450,41 @@ impl Native {
             std::thread::sleep(Duration::from_millis(2));
         }
     }
-    fn load(&mut self, generation: u64, url: String, position: f64, gain: Option<Applied>) {
+    fn load(
+        &mut self,
+        generation: u64,
+        url: String,
+        position: f64,
+        gain: Option<Applied>,
+        source: Option<Format>,
+    ) {
+        if self.route.is_none()
+            || self.route.as_ref().is_some_and(output::Selection::fidelity) && source.is_none()
+        {
+            self.current = Status {
+                generation,
+                error: Some("Fidelity source/output could not be verified; playback stays paused."),
+                idle: true,
+                paused: true,
+                ..Default::default()
+            };
+            self.intent.store(false, Ordering::Release);
+            return;
+        }
+        if !matches!(self.route, Some(output::Selection::Desktop))
+            && let Err(error) = self.replace_handle(source)
+        {
+            self.current = Status {
+                generation,
+                source,
+                error: Some(error),
+                idle: true,
+                paused: true,
+                ..Default::default()
+            };
+            self.intent.store(false, Ordering::Release);
+            return;
+        }
         let options = match &gain {
             Some(gain) => format!("start={position},{}", gain.filter()),
             None => format!("start={position}"),
@@ -268,6 +495,7 @@ impl Native {
         self.ended = None;
         self.current = Status {
             generation,
+            source,
             paused: true,
             ..Default::default()
         };
@@ -280,7 +508,14 @@ impl Native {
         ]) {
             self.current.error = Some("The audio engine rejected a playback command");
         } else if let Some(id) = unsafe { property::<i64>(self.h, "playlist/0/id", 4) } {
-            self.entries.insert(id, (generation, gain));
+            self.entries.insert(
+                id,
+                Entry {
+                    generation,
+                    gain,
+                    source,
+                },
+            );
         } else {
             self.current.error = Some("The audio engine did not identify the loaded entry");
         }
@@ -291,6 +526,7 @@ impl Native {
         next: u64,
         url: String,
         gain: Option<Applied>,
+        source: Option<Format>,
     ) -> Result<StageResult, &'static str> {
         self.pump();
         self.sample();
@@ -303,6 +539,21 @@ impl Native {
             || self.entry.is_none()
         {
             return Ok(StageResult::MissedWindow);
+        }
+        if let Some(active) = &self.active {
+            let Some(source) = source else {
+                return Ok(StageResult::MissedWindow);
+            };
+            let Some(observed) = alsa_guard::observed() else {
+                return Ok(StageResult::MissedWindow);
+            };
+            if source.rate != active.source.rate
+                || source.bits > observed.valid_bits
+                || active.sample != observed.format
+            {
+                return Ok(StageResult::MissedWindow);
+            }
+            alsa_guard::raise_precision(source.bits)?;
         }
         let entry = self.entry.unwrap();
         if !self.call(&["playlist-clear"]) {
@@ -322,7 +573,14 @@ impl Native {
         }
         let id = unsafe { property::<i64>(self.h, "playlist/1/id", 4) }
             .ok_or("The next native entry was not identified")?;
-        self.entries.insert(id, (next, gain));
+        self.entries.insert(
+            id,
+            Entry {
+                generation: next,
+                gain,
+                source,
+            },
+        );
         self.future = Some((id, next));
         Ok(StageResult::Ready)
     }
@@ -358,7 +616,12 @@ impl Native {
 impl Drop for Native {
     fn drop(&mut self) {
         unsafe {
-            mpv_terminate_destroy(self.h);
+            if !self.h.is_null() {
+                mpv_terminate_destroy(self.h);
+            }
+            if self.route.as_ref().is_some_and(output::Selection::fidelity) {
+                alsa_guard::disable();
+            }
         }
     }
 }
@@ -381,6 +644,8 @@ impl Player {
             .collect::<Vec<_>>();
         let intent = Arc::new(AtomicBool::new(false));
         let worker_intent = intent.clone();
+        let latest_load = Arc::new(AtomicU64::new(0));
+        let worker_latest = latest_load.clone();
         let (tx, rx) = mpsc::sync_channel(64);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let status = Arc::new(Mutex::new(Status {
@@ -390,11 +655,13 @@ impl Player {
         }));
         let shared = status.clone();
         let join = std::thread::spawn(move || {
-            let h = unsafe { mpv_create() };
-            if h.is_null() {
-                let _ = ready_tx.send(false);
-                return;
-            }
+            let h = match create_handle(&output, &extra) {
+                Ok(h) => h,
+                Err(_) => {
+                    let _ = ready_tx.send(false);
+                    return;
+                }
+            };
             let mut native = Native {
                 h,
                 current: Status {
@@ -407,47 +674,12 @@ impl Player {
                 future: None,
                 ended: None,
                 intent: worker_intent,
+                latest_load: worker_latest,
+                desktop_output: output,
+                extra,
+                route: Some(output::Selection::Desktop),
+                active: None,
             };
-            let mut options = vec![
-                ("config".to_owned(), "no".to_owned()),
-                ("load-scripts".into(), "no".into()),
-                ("ytdl".into(), "no".into()),
-                ("access-references".into(), "no".into()),
-                ("vo".into(), "null".into()),
-                ("vid".into(), "no".into()),
-                ("audio-display".into(), "no".into()),
-                ("idle".into(), "yes".into()),
-                ("pause".into(), "yes".into()),
-                ("ao".into(), output),
-                ("volume".into(), "100".into()),
-                ("replaygain".into(), "no".into()),
-                ("volume-gain".into(), "0".into()),
-                ("speed".into(), "1".into()),
-                ("audio-swresample-o".into(), "dither_method=none".into()),
-                ("terminal".into(), "no".into()),
-                ("gapless-audio".into(), "weak".into()),
-                ("prefetch-playlist".into(), "yes".into()),
-                ("demuxer-max-bytes".into(), "32MiB".into()),
-                ("demuxer-max-back-bytes".into(), "8MiB".into()),
-            ];
-            options.extend(extra);
-            for (k, v) in options {
-                if unsafe {
-                    mpv_set_option_string(
-                        h,
-                        CString::new(k).unwrap().as_ptr(),
-                        CString::new(v).unwrap().as_ptr(),
-                    )
-                } < 0
-                {
-                    let _ = ready_tx.send(false);
-                    return;
-                }
-            }
-            if unsafe { mpv_initialize(h) } < 0 {
-                let _ = ready_tx.send(false);
-                return;
-            }
             let _ = ready_tx.send(true);
             loop {
                 native.pump();
@@ -458,7 +690,9 @@ impl Player {
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Ok(Command::Pause(p)) => {
                         let pause = p || !native.intent.load(Ordering::Acquire);
-                        if !native.call(&["set", "pause", if pause { "yes" } else { "no" }]) {
+                        if !native.h.is_null()
+                            && !native.call(&["set", "pause", if pause { "yes" } else { "no" }])
+                        {
                             native.current.error = Some("The audio engine rejected pause");
                         }
                     }
@@ -469,19 +703,65 @@ impl Player {
                     }
                     #[cfg(test)]
                     Ok(Command::Load(generation, url, position)) => {
-                        native.load(generation, url, position, None)
+                        native.load(generation, url, position, None, None)
                     }
+                    #[cfg(test)]
                     Ok(Command::LoadGain(generation, url, position, gain)) => {
-                        native.load(generation, url, position, Some(gain))
+                        native.load(generation, url, position, Some(gain), None)
+                    }
+                    Ok(Command::LoadPrepared(load)) => {
+                        if native.latest_load.load(Ordering::Acquire) != load.generation {
+                            continue;
+                        }
+                        if native.route != load.output {
+                            native.intent.store(false, Ordering::Release);
+                            native.call(&["set", "pause", "yes"]);
+                            native.stop();
+                            native.current = Status {
+                                generation: load.generation,
+                                source: load.source,
+                                error: Some(
+                                    "Output change was not acknowledged; reapply output before resuming.",
+                                ),
+                                idle: true,
+                                paused: true,
+                                ..Default::default()
+                            };
+                        } else {
+                            native.load(
+                                load.generation,
+                                load.url,
+                                load.position,
+                                Some(load.gain),
+                                load.source,
+                            );
+                            let stale =
+                                native.latest_load.load(Ordering::Acquire) != load.generation;
+                            if stale {
+                                native.stop();
+                            }
+                            let playing = !stale
+                                && native.current.error.is_none()
+                                && native.intent.load(Ordering::Acquire);
+                            if !native.h.is_null() {
+                                native.call(&["set", "pause", if playing { "no" } else { "yes" }]);
+                            }
+                        }
+                    }
+                    Ok(Command::Configure(route, reply)) => {
+                        let result = native.configure(route);
+                        *shared.lock().unwrap() = native.current.clone();
+                        let _ = reply.send(result);
                     }
                     Ok(Command::Stage {
                         owner,
                         next,
                         url,
                         gain,
+                        source,
                         reply,
                     }) => {
-                        let result = native.stage(owner, next, url, gain);
+                        let result = native.stage(owner, next, url, gain, source);
                         native.pump();
                         native.sample();
                         *shared.lock().unwrap() = native.current.clone();
@@ -509,7 +789,26 @@ impl Player {
             tx,
             status,
             desired_playing: intent,
+            latest_load,
             join: Some(join),
+        })
+    }
+    pub fn invalidate_load(&self, generation: u64) {
+        self.latest_load.fetch_max(generation, Ordering::AcqRel);
+        self.desired_playing.store(false, Ordering::Release);
+    }
+    pub fn load_prepared(&self, load: Load) -> Result<(), &'static str> {
+        if self
+            .latest_load
+            .fetch_max(load.generation, Ordering::AcqRel)
+            > load.generation
+        {
+            return Err("Stale playback preparation rejected");
+        }
+        self.desired_playing.store(load.playing, Ordering::Release);
+        self.tx.try_send(Command::LoadPrepared(load)).map_err(|_| {
+            self.desired_playing.store(false, Ordering::Release);
+            "Playback command queue is busy; selection stays paused. Retry explicitly."
         })
     }
     pub fn send(&self, command: Command) {
@@ -547,6 +846,7 @@ impl Player {
             next,
             url,
             gain: None,
+            source: None,
             reply,
         })
         .await
@@ -557,15 +857,25 @@ impl Player {
         next: u64,
         url: String,
         gain: Applied,
+        source: Option<Format>,
     ) -> Result<StageResult, &'static str> {
         self.reply(|reply| Command::Stage {
             owner,
             next,
             url,
             gain: Some(gain),
+            source,
             reply,
         })
         .await
+    }
+    pub async fn configure(
+        &self,
+        selection: Option<output::Selection>,
+    ) -> Result<(), &'static str> {
+        self.desired_playing.store(false, Ordering::Release);
+        self.reply(|reply| Command::Configure(selection, reply))
+            .await
     }
     pub async fn unstage(&self, owner: u64, next: u64) -> Result<Removal, &'static str> {
         self.reply(|reply| Command::Unstage { owner, next, reply })
@@ -623,6 +933,119 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+    #[test]
+    fn alsa_guard_catches_real_mpv_calls_before_pcm_open() {
+        let _serial = crate::alsa_guard::TEST_SERIAL.lock().unwrap();
+        crate::alsa_guard::disable();
+        let device = crate::output::Device {
+            id: "0".repeat(64),
+            name: "Fictional".into(),
+            card: 9999,
+            device: 0,
+            card_id: "qoda_no_such_card".into(),
+        };
+        crate::alsa_guard::arm(
+            device,
+            Format {
+                rate: 48000,
+                bits: 16,
+            },
+            crate::output::Sample::S16,
+        )
+        .unwrap();
+        let path = silent_file(1);
+        let player = Player::with_options("alsa", &[("audio-device", "alsa/null".into())]).unwrap();
+        player.send(Command::Load(1, path.to_str().unwrap().into(), 0.0));
+        wait_for(&player, |s| s.error.is_some());
+        assert!(
+            crate::alsa_guard::error()
+                .is_some_and(|e| e.contains("non-selected") || e.contains("indirect"))
+        );
+        drop(player);
+        std::fs::remove_file(path).unwrap();
+        crate::alsa_guard::disable();
+    }
+    fn prepared(generation: u64, output: Option<output::Selection>, url: &str) -> Load {
+        Load {
+            generation,
+            output,
+            url: url.into(),
+            position: 0.0,
+            gain: Applied::off(),
+            source: None,
+            playing: true,
+        }
+    }
+    #[test]
+    fn fidelity_placeholder_never_loads_without_verified_source_or_falls_back() {
+        let _serial = crate::alsa_guard::TEST_SERIAL.lock().unwrap();
+        let player = Player::with_output("null").unwrap();
+        let route = Some(output::Selection::Fidelity {
+            device: "0".repeat(64),
+        });
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(player.configure(route.clone())).unwrap();
+        assert!(player.status().idle && player.status().paused);
+        assert_eq!(player.status().output_selection, route);
+        // No source descriptor: do not even resolve/open the fictional device.
+        player
+            .load_prepared(prepared(1, route, "/must-not-be-opened.wav"))
+            .unwrap();
+        let status = wait_for(&player, |s| s.generation == 1 && s.error.is_some());
+        assert!(status.idle && status.paused);
+        assert!(status.error.unwrap().contains("verified"));
+        runtime
+            .block_on(player.configure(Some(output::Selection::Desktop)))
+            .unwrap();
+        let status = player.status();
+        assert!(status.idle && status.paused);
+        assert_eq!(status.output_selection, Some(output::Selection::Desktop));
+    }
+    #[test]
+    fn unacknowledged_route_and_stale_load_cannot_start_playback() {
+        let player = Player::with_output("null").unwrap();
+        let route = Some(output::Selection::Fidelity {
+            device: "0".repeat(64),
+        });
+        player
+            .load_prepared(prepared(1, route, "/must-not-be-opened.wav"))
+            .unwrap();
+        let status = wait_for(&player, |s| s.generation == 1 && s.error.is_some());
+        assert!(status.idle && status.paused);
+        assert!(status.error.unwrap().contains("acknowledged"));
+        player.invalidate_load(3);
+        assert!(
+            player
+                .load_prepared(prepared(
+                    2,
+                    Some(output::Selection::Desktop),
+                    "/must-not-be-opened.wav"
+                ))
+                .unwrap_err()
+                .contains("Stale")
+        );
+        assert!(!player.desired_playing.load(Ordering::Acquire));
+        assert_eq!(player.status().generation, 1);
+    }
+    #[test]
+    fn pause_after_prepared_load_stays_paused_on_null_output() {
+        let player = Player::with_output("null").unwrap();
+        let file = silent_file(4);
+        player
+            .load_prepared(prepared(
+                1,
+                Some(output::Selection::Desktop),
+                file.to_str().unwrap(),
+            ))
+            .unwrap();
+        player.send(Command::Pause(true));
+        let status = wait_for(&player, |s| s.generation == 1 && s.entry_ready && s.paused);
+        assert!(!status.idle);
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(player.status().paused);
+        drop(player);
+        std::fs::remove_file(file).unwrap();
     }
     #[test]
     fn restored_position_is_applied_before_unpause() {
@@ -859,7 +1282,13 @@ mod gapless_tests {
                         });
                         assert_eq!(
                             player
-                                .stage_gain(1, 2, files[1].to_str().unwrap().into(), gain(next_db))
+                                .stage_gain(
+                                    1,
+                                    2,
+                                    files[1].to_str().unwrap().into(),
+                                    gain(next_db),
+                                    None
+                                )
                                 .await
                                 .unwrap(),
                             StageResult::Ready

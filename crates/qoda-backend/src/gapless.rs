@@ -38,7 +38,7 @@ struct Key {
 }
 pub struct Reply {
     key: Key,
-    media: Result<crate::gain::Prepared, ProviderError>,
+    media: Result<crate::gain::Prepared, crate::gain::PrepareError>,
 }
 struct Plan {
     key: Key,
@@ -113,6 +113,7 @@ impl Controller {
         provider: Arc<dyn MusicProvider>,
         tx: mpsc::Sender<crate::Event>,
         mode: crate::gain::Mode,
+        fidelity: bool,
     ) -> Result<(), String> {
         if !self.view.enabled || self.plan.is_some() {
             return Ok(());
@@ -151,11 +152,14 @@ impl Controller {
                         reference: key.reference.clone(),
                         mode,
                         album_session,
+                        fidelity,
                     },
                 ),
             )
             .await
-            .unwrap_or(Err(ProviderError::Network));
+            .unwrap_or(Err(crate::gain::PrepareError::Provider(
+                ProviderError::Network,
+            )));
             let _ = tx.send(crate::Event::Gapless(Reply { key, media })).await;
         }));
         Ok(())
@@ -171,7 +175,7 @@ impl Controller {
         {
             return None;
         }
-        crate::queue::Unavailable::from_provider(reply.media.as_ref().err().copied()?)
+        crate::queue::Unavailable::from_provider(reply.media.as_ref().err().copied()?.provider()?)
             .map(|reason| (reply.key.next, reason))
     }
     pub async fn ready(
@@ -200,7 +204,11 @@ impl Controller {
                 return Ok(());
             }
         };
-        let crate::gain::Prepared { media, gain } = prepared;
+        let crate::gain::Prepared {
+            media,
+            gain,
+            source,
+        } = prepared;
         let mut candidate = successor(queue)?.ok_or("The natural successor changed")?.2;
         if let Err(error) = candidate.update_selected(media.track.clone(), &media.version) {
             self.failed = Some((reply.key.owner_gen, reply.key.next));
@@ -215,7 +223,13 @@ impl Controller {
             .map_err(str::to_owned)?;
         self.plan.as_mut().unwrap().prepared = Some((media.track, media.version, url.clone()));
         match player
-            .stage_gain(reply.key.owner_gen, reply.key.next_gen, url.clone(), gain)
+            .stage_gain(
+                reply.key.owner_gen,
+                reply.key.next_gen,
+                url.clone(),
+                gain,
+                source,
+            )
             .await
         {
             Ok(StageResult::Ready) => {
@@ -508,6 +522,7 @@ mod tests {
                 provider.clone(),
                 tx.clone(),
                 crate::gain::Mode::Off,
+                false,
             )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
@@ -528,6 +543,7 @@ mod tests {
                 provider.clone(),
                 tx,
                 crate::gain::Mode::Off,
+                false,
             )
             .unwrap();
         assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
@@ -565,6 +581,7 @@ mod tests {
                 provider.clone(),
                 tx,
                 crate::gain::Mode::Off,
+                false,
             )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
@@ -611,14 +628,16 @@ mod tests {
         let mut controller = Controller::default();
         let (tx, mut rx) = mpsc::channel(4);
         controller
-            .schedule(&q, &mut epochs, provider, tx, crate::gain::Mode::Off)
+            .schedule(&q, &mut epochs, provider, tx, crate::gain::Mode::Off, false)
             .unwrap();
         let Some(crate::Event::Gapless(mut reply)) = rx.recv().await else {
             panic!("No preparation reply")
         };
-        reply.media = Err(ProviderError::Network);
+        reply.media = Err(crate::gain::PrepareError::Provider(ProviderError::Network));
         assert!(controller.unavailable_reply(&reply, &q, &epochs).is_none());
-        reply.media = Err(ProviderError::MissingTrack);
+        reply.media = Err(crate::gain::PrepareError::Provider(
+            ProviderError::MissingTrack,
+        ));
         let (id, reason) = controller.unavailable_reply(&reply, &q, &epochs).unwrap();
         assert_eq!(id, q.pending()[0]);
         assert_eq!(reason, crate::queue::Unavailable::Missing);
@@ -643,6 +662,7 @@ mod tests {
                 provider.clone(),
                 tx,
                 crate::gain::Mode::Off,
+                false,
             )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
@@ -722,6 +742,7 @@ mod boundary_tests {
                 provider.clone(),
                 tx,
                 crate::gain::Mode::Off,
+                false,
             )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {

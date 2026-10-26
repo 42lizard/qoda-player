@@ -55,6 +55,8 @@ def fixture():
     return {
         "protocol": 1, "instance": "fixture", "revision": "1", "account_epoch": "0",
         "status": "Ready", "intent": "paused", "selection": track(0),
+        "replaygain": {"mode": "auto", "available": True, "message": "Upcoming preparations only", "metadata_scope": "Embedded FLAC tags"},
+        "output": {"selection": {"mode": "fidelity", "device": "fixture"}, "available": True, "ready": True, "fidelity_available": True, "devices": [{"id": "fixture", "name": "Fictional direct PCM"}], "message": "Changing output pauses; explicit Resume required", "qualification": "unverified"},
         "libraries": [{"id": "fixture", "title": "Music", "server": "Home library"}],
         "sign_in": {"connected": True, "saved": "present", "message": "",
                     "can_save": False, "keyring_action": None},
@@ -150,7 +152,9 @@ def check(output=None):
                     raise AssertionError("Capture did not complete: " + label)
 
                 for _ in range(80):
-                    assert process.poll() is None, "Fixture UI exited"
+                    if process.poll() is not None:
+                        log.flush(); log.seek(0)
+                        raise AssertionError("Fixture UI exited: " + log.read())
                     try:
                         if status()["instance"] == "fixture":
                             break
@@ -191,6 +195,12 @@ def check(output=None):
                 restored = status()
                 assert restored["geometry"]["queueVisible"] and restored["tab"] == 2
                 assert restored["queue"] == info["queue"]
+                ipc("showAudio")
+                time.sleep(0.15)
+                capture("audio-wide")
+                ipc("resize", 540, 760)
+                time.sleep(0.15)
+                capture("audio-small")
                 assert state["intent"] == "paused"
                 assert all(request["op"] == "hello" for request in requests), requests
                 log.flush()

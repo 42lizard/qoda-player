@@ -245,22 +245,62 @@ async fn probe(stream: &dyn MediaSource) -> Result<Tags, &'static str> {
 pub struct Prepared {
     pub media: PreparedMedia,
     pub gain: Applied,
+    pub source: Option<crate::source_format::Format>,
+}
+#[derive(Clone, Copy, Debug)]
+pub enum PrepareError {
+    Provider(ProviderError),
+    Fidelity(&'static str),
+}
+impl PrepareError {
+    pub fn provider(self) -> Option<ProviderError> {
+        match self {
+            Self::Provider(error) => Some(error),
+            Self::Fidelity(_) => None,
+        }
+    }
+}
+impl std::fmt::Display for PrepareError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Provider(error) => write!(f, "{error}"),
+            Self::Fidelity(error) => f.write_str(error),
+        }
+    }
 }
 pub struct Request {
     pub reference: TrackRef,
     pub mode: Mode,
     pub album_session: bool,
+    pub fidelity: bool,
 }
 pub async fn prepare(
     provider: &dyn MusicProvider,
     request: Request,
-) -> Result<Prepared, ProviderError> {
+) -> Result<Prepared, PrepareError> {
     let Request {
         reference,
         mode,
         album_session,
+        fidelity,
     } = request;
-    let media = provider.prepare(reference.source, reference.key).await?;
+    let media = provider
+        .prepare(reference.source, reference.key)
+        .await
+        .map_err(PrepareError::Provider)?;
+    let source = if fidelity {
+        Some(
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                crate::source_format::probe(media.stream.as_ref()),
+            )
+            .await
+            .unwrap_or(Err("Source verification timed out; fidelity stays paused."))
+            .map_err(PrepareError::Fidelity)?,
+        )
+    } else {
+        None
+    };
     let gain = if mode == Mode::Off {
         Applied::off()
     } else {
@@ -269,7 +309,11 @@ pub async fn prepare(
             .unwrap_or(Err("Embedded tag read timed out; unity gain"));
         select(mode, album_session, tags)
     };
-    Ok(Prepared { media, gain })
+    Ok(Prepared {
+        media,
+        gain,
+        source,
+    })
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -572,6 +616,7 @@ mod tests {
             reference: provider.track.reference.clone(),
             mode,
             album_session,
+            fidelity: false,
         };
         let album = prepare(&provider, request(Mode::Auto, true)).await.unwrap();
         assert_eq!(album.gain.db, -6.0);
