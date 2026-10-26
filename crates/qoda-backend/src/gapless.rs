@@ -320,7 +320,7 @@ impl Controller {
                 self.view.phase = if self.view.enabled { "idle" } else { "off" };
                 Ok(None)
             }
-            Removal::Reset(status) => Ok(Some(status)),
+            Removal::Reset(status) => Ok(Some(*status)),
         }
     }
 }

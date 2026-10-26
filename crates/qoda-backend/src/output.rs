@@ -105,7 +105,7 @@ fn device_name(card: &str, pcm: &str, pcm_id: &str, device: u32) -> String {
         .unwrap_or(&fallback);
     format!("{card} · {pcm}").chars().take(160).collect()
 }
-pub fn explain_preflight(error: &str, source: Option<Format>) -> String {
+pub fn explain_preflight(error: &str, source: Option<Format>, allow_conversion: bool) -> String {
     match source {
         Some(source)
             if matches!(
@@ -116,10 +116,15 @@ pub fn explain_preflight(error: &str, source: Option<Format>) -> String {
             ) =>
         {
             format!(
-                "{}. Source: {} Hz, {}-bit stereo. Choose Desktop/PipeWire or a compatible device; Fidelity does not resample or reduce precision.",
+                "{}. Source: {} Hz, {}-bit stereo. {}",
                 error.trim_end_matches('.'),
                 source.rate,
-                source.bits
+                source.bits,
+                if allow_conversion {
+                    "No supported direct output plan was found; choose Desktop/PipeWire or another device."
+                } else {
+                    "Choose Desktop/PipeWire, enable HQ conversion or choose a compatible device; strict Fidelity does not resample or reduce precision."
+                }
             )
         }
         _ => error.to_owned(),
@@ -183,18 +188,41 @@ pub enum Selection {
     Fidelity {
         device: String,
     },
+    FidelityResampled {
+        device: String,
+        #[serde(default)]
+        assume_stereo: bool,
+    },
 }
 impl Selection {
     pub fn fidelity(&self) -> bool {
-        matches!(self, Self::Fidelity { .. })
+        self.device().is_some()
+    }
+    pub fn conversion_allowed(&self) -> bool {
+        matches!(self, Self::FidelityResampled { .. })
+    }
+    pub fn assumes_stereo(&self) -> bool {
+        matches!(
+            self,
+            Self::FidelityResampled {
+                assume_stereo: true,
+                ..
+            }
+        )
+    }
+    pub fn device(&self) -> Option<&str> {
+        match self {
+            Self::Desktop => None,
+            Self::Fidelity { device } | Self::FidelityResampled { device, .. } => Some(device),
+        }
     }
     pub fn resolve(&self) -> Result<Option<Device>, &'static str> {
-        let Self::Fidelity { device } = self else {
+        let Some(device) = self.device() else {
             return Ok(None);
         };
         let matches = discover()
             .into_iter()
-            .filter(|d| d.id == *device)
+            .filter(|d| d.id == device)
             .collect::<Vec<_>>();
         if matches.len() != 1 {
             return Err(
@@ -235,10 +263,10 @@ impl Settings {
             }
             let prefs: Preferences = serde_json::from_reader(file.take(4097))
                 .map_err(|_| "Invalid output settings preserved; playback stays paused.")?;
-            if prefs.version != 1 {
+            if !matches!(prefs.version, 1 | 2) {
                 return Err("Newer output settings preserved; playback stays paused.");
             }
-            if let Selection::Fidelity { device } = &prefs.selection
+            if let Some(device) = prefs.selection.device()
                 && (device.len() != 64 || !device.bytes().all(|b| b.is_ascii_hexdigit()))
             {
                 return Err("Invalid fidelity identity preserved; playback stays paused.");
@@ -268,7 +296,7 @@ impl Settings {
         }
         match request["mode"].as_str() {
             Some("desktop") => Ok(Selection::Desktop),
-            Some("fidelity") => {
+            Some("fidelity" | "fidelity_resampled") => {
                 if !alsa_guard::available() {
                     return Err("ALSA submission guard unavailable; fidelity cannot be enabled.");
                 }
@@ -278,8 +306,23 @@ impl Settings {
                 if devices.iter().filter(|d| d.id == id).count() != 1 {
                     return Err("Select one currently discovered direct ALSA device.");
                 }
-                Ok(Selection::Fidelity {
-                    device: id.to_owned(),
+                Ok(if request["mode"] == "fidelity_resampled" {
+                    Selection::FidelityResampled {
+                        device: id.to_owned(),
+                        assume_stereo: request
+                            .get("assume_stereo")
+                            .map(|value| {
+                                value
+                                    .as_bool()
+                                    .ok_or("Stereo compatibility must be true or false.")
+                            })
+                            .transpose()?
+                            .unwrap_or(false),
+                    }
+                } else {
+                    Selection::Fidelity {
+                        device: id.to_owned(),
+                    }
                 })
             }
             _ => Err("Select Desktop or Fidelity output."),
@@ -293,7 +336,7 @@ impl Settings {
             self.path.as_ref().ok_or("Output settings unavailable")?,
         )?;
         let bytes = serde_json::to_vec(&Preferences {
-            version: 1,
+            version: 2,
             selection: selection.clone(),
         })
         .map_err(|_| "Output settings unavailable")?;
@@ -303,69 +346,159 @@ impl Settings {
     }
     pub fn view(&self, devices: &[Device]) -> serde_json::Value {
         let selected = self.selection.as_ref();
-        let missing = matches!(selected,Some(Selection::Fidelity{device}) if devices.iter().filter(|d|d.id==*device).count()!=1);
-        serde_json::json!({"selection":selected,"available":self.issue.is_none(),"devices":devices,"device_missing":missing,"qualification":"unverified","ready":false,"fidelity_available":alsa_guard::available(),"observed":null,"source":null,"message":self.issue.unwrap_or(if missing{"Selected device unavailable; no Desktop fallback. Refresh devices or choose another output."}else{"Changing output pauses, releases the old route and preserves position. Explicit Resume is required."})})
+        let missing = selected
+            .and_then(Selection::device)
+            .is_some_and(|device| devices.iter().filter(|d| d.id == device).count() != 1);
+        serde_json::json!({"selection":selected,"available":self.issue.is_none(),"devices":devices,"device_missing":missing,"qualification":"unverified","ready":false,"fidelity_available":alsa_guard::available(),"observed":null,"source":null,"processing":null,"message":self.issue.unwrap_or(if missing{"Selected device unavailable; no Desktop fallback. Refresh devices or choose another output."}else{"Changing output pauses, releases the old route and preserves position. Explicit Resume is required."})})
     }
+}
+// The ALSA guard is armed to this explicit output plan, never to an implicit
+// ALSA plugin conversion. Decoded source and negotiated output remain separate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Plan {
+    pub source: Format,
+    pub target: Format,
+    pub sample: Sample,
+}
+impl Plan {
+    pub fn converted(self) -> bool {
+        self.source.rate != self.target.rate || self.source.bits > self.target.bits
+    }
+    pub fn filter(self, gain: Option<&crate::gain::Applied>) -> String {
+        if !self.converted() {
+            return gain.map_or_else(|| "af=".into(), crate::gain::Applied::filter);
+        }
+        let mut graph = gain
+            .and_then(crate::gain::Applied::filter_graph)
+            .into_iter()
+            .collect::<Vec<_>>();
+        graph.push(format!("aresample={}:resampler=soxr:precision=28:cheby=1:osf={}:output_sample_bits={}:dither_method=triangular:async=0", self.target.rate, self.sample.mpv(), self.target.bits));
+        format!("af=lavfi=[{}]", graph.join(","))
+    }
+    pub fn successor(self, source: Format, allow_conversion: bool) -> Option<Self> {
+        // A format change is re-negotiated at EOF so exact playback can again
+        // win, rather than forcing a new source onto an earlier conversion.
+        if source.rate != self.source.rate
+            || allow_conversion && source.bits != self.source.bits
+            || !allow_conversion && source.bits > self.target.bits
+        {
+            return None;
+        }
+        Some(Self { source, ..self })
+    }
+}
+fn terminal(error: &str) -> bool {
+    ["busy", "unavailable", "mapping", "layout", "lost"]
+        .iter()
+        .any(|word| error.contains(word))
+}
+fn negotiate(
+    source: Format,
+    allow_conversion: bool,
+    mut probe: impl FnMut(Format, Sample) -> Result<u16, &'static str>,
+) -> Result<Plan, &'static str> {
+    let mut candidates = Vec::new();
+    for sample in [Sample::S32, Sample::S16] {
+        if sample.bits() >= source.bits {
+            candidates.push((source, sample));
+        }
+    }
+    if allow_conversion {
+        let mut rates = vec![source.rate];
+        rates.extend(
+            [44100, 48000, 96000]
+                .into_iter()
+                .filter(|rate| *rate > source.rate),
+        );
+        rates.extend(
+            [96000, 48000, 44100]
+                .into_iter()
+                .filter(|rate| *rate < source.rate),
+        );
+        // Preserve source precision before considering dithered reduction.
+        // Within each phase: exact rate, nearest higher, then lower rates.
+        for bits in [source.bits, 16] {
+            for &rate in &rates {
+                for sample in [Sample::S32, Sample::S16] {
+                    let candidate = (Format { rate, bits }, sample);
+                    if sample.bits() >= bits && !candidates.contains(&candidate) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+    }
+    let mut last_error = "Fidelity device does not support the exact source format.";
+    for (target, sample) in candidates {
+        let rate = target.rate;
+        match probe(target, sample) {
+            Ok(bits) if bits >= target.bits && bits <= sample.bits() => {
+                return Ok(Plan {
+                    source,
+                    target: Format { rate, bits },
+                    sample,
+                });
+            }
+            Ok(_) => last_error = "Fidelity device has insufficient native sample precision",
+            Err(error) if terminal(error) => return Err(error),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 // No frames are submitted during capability/parameter installation. The native
 // handle is opened later under a newly armed guard, and checked again there.
-pub fn preflight(device: &Device, source: Format) -> Result<Sample, &'static str> {
+pub fn preflight(
+    device: &Device,
+    source: Format,
+    allow_conversion: bool,
+    assume_stereo: bool,
+) -> Result<Plan, &'static str> {
     if !crate::alsa_guard::available() {
         return Err("ALSA submission guard is unavailable; fidelity output is disabled.");
     }
-    let attempt = |sample: Sample| -> Result<Sample, &'static str> {
-        alsa_guard::arm(device.clone(), source, sample)?;
-        let pcm = PCM::new(&device.route(), Direction::Playback, true).map_err(|e| {
-            if e.errno() == libc::EBUSY {
-                "Fidelity device is busy; release it elsewhere and explicitly Resume."
+    negotiate(source, allow_conversion, |target, sample| {
+        let attempt = || {
+            if assume_stereo {
+                alsa_guard::arm_with_stereo_policy(device.clone(), target, sample, true)?;
             } else {
-                "Fidelity device unavailable; playback stays paused."
+                alsa_guard::arm(device.clone(), target, sample)?;
             }
-        })?;
-        let params =
-            HwParams::any(&pcm).map_err(|_| "Fidelity hardware capabilities unavailable")?;
-        params
-            .set_rate_resample(false)
-            .map_err(|_| "Fidelity could not disable resampling")?;
-        params
-            .set_access(Access::RWInterleaved)
-            .map_err(|_| "Fidelity requires interleaved integer access")?;
-        params
-            .set_format(sample.alsa())
-            .map_err(|_| "Fidelity device has insufficient native sample precision")?;
-        params
-            .set_channels(2)
-            .map_err(|_| "Fidelity device cannot provide stereo without conversion")?;
-        params
-            .set_rate(source.rate, ValueOr::Nearest)
-            .map_err(|_| "Fidelity device does not support the exact source rate")?;
-        pcm.hw_params(&params)
-            .map_err(|_| "Fidelity rejected observed hardware parameters")?;
-        if alsa_guard::observed().is_none() {
-            return Err("Actual ALSA negotiation was not observed; fidelity stays paused.");
-        }
-        alsa_guard::verify_preflight()?;
-        Ok(sample)
-    };
-    let mut result = Err("Fidelity device does not support the exact source format.");
-    for sample in [Sample::S32, Sample::S16] {
-        if sample.bits() < source.bits {
-            continue;
-        }
-        result = attempt(sample);
+            let pcm = PCM::new(&device.route(), Direction::Playback, true).map_err(|e| {
+                if e.errno() == libc::EBUSY {
+                    "Fidelity device is busy; release it elsewhere and explicitly Resume."
+                } else {
+                    "Fidelity device unavailable; playback stays paused."
+                }
+            })?;
+            let params =
+                HwParams::any(&pcm).map_err(|_| "Fidelity hardware capabilities unavailable")?;
+            params
+                .set_rate_resample(false)
+                .map_err(|_| "Fidelity could not disable resampling")?;
+            params
+                .set_access(Access::RWInterleaved)
+                .map_err(|_| "Fidelity requires interleaved integer access")?;
+            params
+                .set_format(sample.alsa())
+                .map_err(|_| "Fidelity device has insufficient native sample precision")?;
+            params
+                .set_channels(2)
+                .map_err(|_| "Fidelity device cannot provide stereo without conversion")?;
+            params
+                .set_rate(target.rate, ValueOr::Nearest)
+                .map_err(|_| "Fidelity device does not support the exact source rate")?;
+            pcm.hw_params(&params)
+                .map_err(|_| "Fidelity rejected observed hardware parameters")?;
+            let observed = alsa_guard::observed()
+                .ok_or("Actual ALSA negotiation was not observed; fidelity stays paused.")?;
+            alsa_guard::verify_preflight()?;
+            Ok(observed.valid_bits)
+        };
+        let result = attempt();
         alsa_guard::disable();
-        if result.is_ok()
-            || result.as_ref().err().is_some_and(|e| {
-                e.contains("busy")
-                    || e.contains("unavailable")
-                    || e.contains("mapping")
-                    || e.contains("layout")
-            })
-        {
-            break;
-        }
-    }
-    result
+        result
+    })
 }
 
 #[cfg(test)]
@@ -386,7 +519,7 @@ mod tests {
         assert_eq!(view["device_missing"], true);
         assert_eq!(view["qualification"], "unverified");
         assert!(view["observed"].is_null());
-        let future = b"{\"version\":2,\"selection\":{\"mode\":\"desktop\"}}";
+        let future = b"{\"version\":3,\"selection\":{\"mode\":\"desktop\"}}";
         std::fs::write(path.join("output.json"), future).unwrap();
         let mut settings = Settings::load(Some(path.clone()));
         assert!(settings.selection.is_none());
@@ -422,6 +555,183 @@ mod tests {
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
+    #[ignore = "Explicit hardware opt-in: installs and closes parameters, never writes audio"]
+    fn selected_hardware_hq_preflight_submits_no_audio() {
+        let _serial = crate::alsa_guard::TEST_SERIAL.lock().unwrap();
+        let route =
+            std::env::var("QODA_TEST_ALSA_PCM").expect("Select a discovered route explicitly");
+        let device = discover()
+            .into_iter()
+            .find(|device| device.route() == route)
+            .expect("Route must be a discovered physical PCM");
+        let source = Format {
+            rate: 44100,
+            bits: 24,
+        };
+        assert!(preflight(&device, source, false, false).is_err());
+        assert!(preflight(&device, source, true, false).is_err());
+        let plan = preflight(&device, source, true, true).unwrap();
+        assert_eq!(
+            plan.target,
+            Format {
+                rate: 48000,
+                bits: 16
+            }
+        );
+        assert!(plan.converted());
+        assert!(crate::alsa_guard::observed().is_none());
+        println!(
+            "No-write preflight plan: {}",
+            serde_json::to_string(&plan).unwrap()
+        );
+    }
+    #[test]
+    fn hq_fallback_is_opt_in_and_exact_playback_wins() {
+        let source = Format {
+            rate: 44100,
+            bits: 16,
+        };
+        let only_48 = |format: Format, sample| {
+            if format.rate == 48000 && sample == Sample::S16 {
+                Ok(16)
+            } else {
+                Err("Unsupported exact format")
+            }
+        };
+        assert!(negotiate(source, false, only_48).is_err());
+        let plan = negotiate(source, true, only_48).unwrap();
+        assert_eq!(
+            plan.target,
+            Format {
+                rate: 48000,
+                bits: 16
+            }
+        );
+        assert!(plan.converted());
+        let exact = negotiate(source, true, |format, sample| {
+            assert_eq!(format.rate, 44100);
+            if sample == Sample::S16 {
+                Ok(16)
+            } else {
+                Err("Unsupported precision")
+            }
+        })
+        .unwrap();
+        assert!(!exact.converted());
+        assert_eq!(exact.filter(Some(&crate::gain::Applied::off())), "af=");
+        let high_precision = negotiate(
+            Format {
+                rate: 44100,
+                bits: 24,
+            },
+            true,
+            |format, sample| match (format.rate, sample) {
+                (44100, Sample::S16) => Ok(16),
+                (48000, Sample::S32) => Ok(32),
+                _ => Err("Unsupported format"),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            high_precision.target,
+            Format {
+                rate: 48000,
+                bits: 32
+            }
+        );
+        let mut attempts = 0;
+        assert!(
+            negotiate(source, true, |_, _| {
+                attempts += 1;
+                Err("Fidelity device is busy")
+            })
+            .is_err()
+        );
+        assert_eq!(attempts, 1);
+    }
+    #[test]
+    fn hq_precision_reduction_has_explicit_dither_and_gain_order() {
+        let source = Format {
+            rate: 96000,
+            bits: 24,
+        };
+        let plan = negotiate(source, true, |format, sample| {
+            if format.rate == 48000 && sample == Sample::S16 {
+                Ok(16)
+            } else {
+                Err("Unsupported exact format")
+            }
+        })
+        .unwrap();
+        let gain = crate::gain::Applied {
+            db: -6.0,
+            ..crate::gain::Applied::off()
+        };
+        let filter = plan.filter(Some(&gain));
+        assert!(filter.contains("resampler=soxr:precision=28"));
+        assert!(filter.contains("osf=s16:output_sample_bits=16:dither_method=triangular:async=0"));
+        assert!(filter.find("volume=").unwrap() < filter.find("aresample=").unwrap());
+        assert!(plan.successor(source, true).is_some());
+        assert!(
+            plan.successor(
+                Format {
+                    rate: 44100,
+                    bits: 24
+                },
+                true
+            )
+            .is_none()
+        );
+        assert!(
+            plan.successor(
+                Format {
+                    rate: 96000,
+                    bits: 16
+                },
+                true
+            )
+            .is_none()
+        );
+        assert!(plan.successor(source, false).is_none());
+        assert!(negotiate(source, true, |_, _| Ok(1)).is_err());
+    }
+    #[test]
+    fn output_preferences_keep_strict_v1_and_roundtrip_opt_in_v2() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("qoda-output-hq-{}", uuid::Uuid::new_v4()));
+        let mut settings = Settings::load(Some(path.clone()));
+        let file = path.join("output.json");
+        std::fs::write(
+            &file,
+            format!(
+                r#"{{"version":1,"selection":{{"mode":"fidelity","device":"{}"}}}}"#,
+                "1".repeat(64)
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(
+            !Settings::load(Some(path.clone()))
+                .selection
+                .unwrap()
+                .conversion_allowed()
+        );
+        let selection = Selection::FidelityResampled {
+            device: "1".repeat(64),
+            assume_stereo: true,
+        };
+        settings.set(selection.clone()).unwrap();
+        assert_eq!(
+            Settings::load(Some(path.clone())).selection,
+            Some(selection)
+        );
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(file).unwrap()).unwrap()["version"],
+            2
+        );
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
     fn unnamed_driver_pcms_keep_speaker_hdmi_and_headset_labels_distinct() {
         assert_eq!(
             device_name("Sound card", "", "Built-in Speakers (*)", 1),
@@ -449,6 +759,7 @@ mod tests {
                 rate: 44100,
                 bits: 16,
             }),
+            false,
         );
         assert!(error.contains("44100 Hz"));
         assert!(error.contains("16-bit"));
@@ -460,14 +771,16 @@ mod tests {
                 Some(Format {
                     rate: 48000,
                     bits: 24
-                })
+                }),
+                false
             ),
             "Fidelity device is busy"
         );
         assert_eq!(
             explain_preflight(
                 "Fidelity device does not support the exact source rate",
-                None
+                None,
+                false
             ),
             "Fidelity device does not support the exact source rate"
         );

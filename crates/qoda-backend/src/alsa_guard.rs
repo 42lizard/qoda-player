@@ -38,6 +38,7 @@ struct Expected {
     source: Format,
     sample: Sample,
     epoch: u64,
+    assume_stereo: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Observed {
@@ -47,6 +48,7 @@ pub struct Observed {
     pub valid_bits: u16,
     pub format: Sample,
     pub stereo_layout: bool,
+    pub stereo_assumed: bool,
 }
 #[derive(Default)]
 struct Gate {
@@ -70,6 +72,14 @@ pub fn disable() {
     g.error = None;
 }
 pub fn arm(device: Device, source: Format, sample: Sample) -> Result<(), &'static str> {
+    arm_with_stereo_policy(device, source, sample, false)
+}
+pub fn arm_with_stereo_policy(
+    device: Device,
+    source: Format,
+    sample: Sample,
+    assume_stereo: bool,
+) -> Result<(), &'static str> {
     let mut g = gate();
     let epoch = g
         .epoch
@@ -81,6 +91,7 @@ pub fn arm(device: Device, source: Format, sample: Sample) -> Result<(), &'stati
         source,
         sample,
         epoch,
+        assume_stereo,
     });
     g.handles.clear();
     g.observed = None;
@@ -181,6 +192,7 @@ fn checked_parameters(source: Format, sample: Sample, p: Parameters) -> Option<O
         valid_bits: p.bits as u16,
         format: sample,
         stereo_layout: false,
+        stereo_assumed: false,
     })
 }
 fn params(pcm: *mut c_void, raw: *mut c_void, expected: &Expected) -> Option<Observed> {
@@ -205,6 +217,13 @@ fn params(pcm: *mut c_void, raw: *mut c_void, expected: &Expected) -> Option<Obs
         checked_parameters(expected.source, expected.sample, p)
     }
 }
+fn stereo_policy(mapping: Option<[u32; 2]>, assume: bool) -> Option<bool> {
+    match mapping {
+        Some([3, 4]) => Some(true),
+        None | Some([0, 0]) if assume => Some(false),
+        _ => None,
+    }
+}
 fn permit(pcm: *mut c_void) -> bool {
     let mut g = gate();
     if g.expected.is_none() {
@@ -217,25 +236,37 @@ fn permit(pcm: *mut c_void) -> bool {
         g.error = Some("Fidelity negotiation was not verified before sample submission.");
         return false;
     };
-    // Channel layout is checked after mpv has had a chance to set it, but before
-    // any data is forwarded. Missing/ambiguous layouts do not receive a pass.
+    // Only the separate explicit compatibility policy may accept wholly
+    // unreported stereo. A reported wrong/reversed/partial map still fails.
+    let assume = g
+        .expected
+        .as_ref()
+        .is_some_and(|expected| expected.assume_stereo);
     let map = unsafe { snd_pcm_get_chmap(pcm) };
-    let stereo = if map.is_null() {
-        false
+    let mapping = if map.is_null() {
+        None
     } else {
         unsafe {
-            let correct = *map == 2 && *map.add(1) == 3 && *map.add(2) == 4;
+            let mapping = if *map == 2 {
+                [*map.add(1), *map.add(2)]
+            } else {
+                [u32::MAX; 2]
+            };
             libc::free(map.cast());
-            correct
+            Some(mapping)
         }
     };
-    if !stereo {
-        g.error =
-            Some("Fidelity stereo channel mapping could not be verified; no samples submitted.");
+    let Some(reported) = stereo_policy(mapping, assume) else {
+        g.error = Some(if mapping.is_none() || mapping == Some([0, 0]) {
+            "Fidelity driver does not report stereo mapping. Enable the separate stereo compatibility option or choose Desktop."
+        } else {
+            "Fidelity stereo channel mapping is incompatible; no samples submitted."
+        });
         return false;
-    }
+    };
     let mut observed = observed;
-    observed.stereo_layout = true;
+    observed.stereo_layout = reported;
+    observed.stereo_assumed = !reported;
     g.observed = Some(observed);
     true
 }
@@ -520,6 +551,18 @@ mod tests {
             card: 9999,
             device: 0,
             card_id: "qoda_no_such_card".into(),
+        }
+    }
+    #[test]
+    fn unreported_stereo_requires_explicit_policy_and_wrong_maps_never_pass() {
+        assert_eq!(stereo_policy(None, false), None);
+        assert_eq!(stereo_policy(Some([0, 0]), false), None);
+        assert_eq!(stereo_policy(None, true), Some(false));
+        assert_eq!(stereo_policy(Some([0, 0]), true), Some(false));
+        for assume in [false, true] {
+            assert_eq!(stereo_policy(Some([3, 4]), assume), Some(true));
+            assert_eq!(stereo_policy(Some([4, 3]), assume), None);
+            assert_eq!(stereo_policy(Some([3, 0]), assume), None);
         }
     }
     #[test]

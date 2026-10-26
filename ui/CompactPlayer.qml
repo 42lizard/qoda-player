@@ -81,7 +81,8 @@ PanelWindow {
                     ProgressBar { from: 0; to: panel.known && panel.track.duration_seconds > 0 ? panel.track.duration_seconds : 1; value: panel.known ? panel.presentation.position_seconds || 0 : 0; Layout.fillWidth: true }
                     Label { text: panel.timestamp(panel.known ? panel.track.duration_seconds : null); color: "#a4b0a7" }
                 }
-                Label { visible: !!panel.snapshot.output && !!panel.snapshot.output.selection && panel.snapshot.output.selection.mode === "fidelity"; text: panel.snapshot.output && panel.snapshot.output.ready === false ? "Fidelity · unavailable" : "Fidelity · configured · PCM qualification pending"; color: "#a4b0a7"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                OutputPresentation { id: compactOutput; output: panel.snapshot.output || null }
+                Label { visible: compactOutput.fidelity; text: compactOutput.text; color: "#a4b0a7"; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label { visible: !!panel.gain; text: panel.gain ? (panel.known ? "" : "Prepared · ") + "ReplayGain " + panel.gain.basis + " · " + panel.gain.db.toFixed(2) + " dB" : ""; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 RowLayout {
                     Button { text: "Previous"; enabled: panel.connected && !!panel.presentation.can_previous; onClicked: panel.queueRequested("previous") }

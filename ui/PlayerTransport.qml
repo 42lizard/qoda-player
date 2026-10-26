@@ -13,7 +13,8 @@ Rectangle {
     readonly property real duration: known && track && track.duration_seconds > 0 ? track.duration_seconds : selectedTrack && selectedTrack.duration_ms > 0 ? selectedTrack.duration_ms / 1000 : 0
     readonly property real position: known && presentation.position_seconds !== null ? presentation.position_seconds : snapshot.queue ? snapshot.queue.position_seconds || 0 : 0
     readonly property var gain: snapshot.replaygain && snapshot.replaygain.applied ? snapshot.replaygain.applied : null
-    readonly property string outputText: snapshot.output && snapshot.output.selection && snapshot.output.selection.mode === "fidelity" ? (snapshot.output.ready === false ? "Fidelity · unavailable" : snapshot.output.observed ? "Fidelity · direct ALSA" : "Fidelity · configured") : snapshot.output && !snapshot.output.available ? "Output unavailable" : "Desktop · PipeWire"
+    OutputPresentation { id: outputView; output: transport.snapshot.output || null }
+    readonly property string outputText: outputView.text
     readonly property string gainText: gain ? (known ? "" : "Prepared · ") + (gain.basis === "off" ? "ReplayGain off" : "ReplayGain " + gain.basis + " · " + gain.db.toFixed(2) + " dB") : "ReplayGain " + (snapshot.replaygain ? snapshot.replaygain.mode : "off") + " · awaiting preparation"
     signal transportRequested(string op)
     signal queueRequested(string op)
@@ -39,6 +40,7 @@ Rectangle {
             Label { text: transport.track ? transport.track.title : "Choose something to play"; color: "#e8eee8"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
             Label { text: transport.track ? transport.track.artist + (transport.track.album ? " · " + transport.track.album : "") : "Browse your Plex music library"; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
             Label { visible: transport.width < 800; text: transport.gainText; color: "#a4b0a7"; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: smallGainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: smallGainHover } }
+            Label { visible: transport.width < 800 && outputView.fidelity; text: transport.outputText; color: "#a4b0a7"; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { visible: !!transport.track && !transport.known; text: "Selected · playback unconfirmed"; color: "#a4b0a7"; font.pixelSize: 11 }
         }
         ColumnLayout {
@@ -72,7 +74,7 @@ Rectangle {
             visible: transport.width >= 800
             Layout.fillWidth: true
             Layout.preferredWidth: 210
-            Label { text: transport.outputText; color: "#e8eee8"; Layout.alignment: Qt.AlignRight }
+            Label { text: transport.outputText; color: "#e8eee8"; Layout.alignment: Qt.AlignRight; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: outputHover.hovered; ToolTip.text: transport.outputText + " · Hardware qualification pending"; HoverHandler { id: outputHover } }
             Label { text: transport.gainText; color: "#a4b0a7"; Layout.alignment: Qt.AlignRight; ToolTip.visible: gainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: gainHover } }
         }
     }

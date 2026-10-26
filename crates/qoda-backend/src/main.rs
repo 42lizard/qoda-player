@@ -275,6 +275,9 @@ fn output_view(
         json!(settings.selection.is_some() && settings.selection == audio.output_selection);
     if view["ready"] == true && audio.generation == generation {
         view["source"] = json!(audio.source);
+        if audio.entry_ready && audio.error.is_none() {
+            view["processing"] = json!(audio.processing);
+        }
         if audio.entry_ready && !audio.idle && audio.error.is_none() {
             view["observed"] = json!(audio.output);
         }
@@ -727,7 +730,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     last_audio = audio.clone();
                     state["audio"] = json!(audio);
                     if let Some(error) = audio.error.filter(|_|audio.generation==epochs.current).or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
-                        state["error"] = json!(output::explain_preflight(error, audio.source));
+                        state["error"] = json!(output::explain_preflight(error, audio.source, output_settings.selection.as_ref().is_some_and(output::Selection::conversion_allowed)));
                         desired_playing = false;
                         state["intent"] = json!("paused");
                         player.send(Command::Pause(true));
@@ -2526,6 +2529,7 @@ mod tests {
                 valid_bits: 24,
                 format: output::Sample::S32,
                 stereo_layout: true,
+                stereo_assumed: false,
             }),
             ..Default::default()
         };

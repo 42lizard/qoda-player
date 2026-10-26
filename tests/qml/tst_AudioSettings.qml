@@ -65,6 +65,25 @@ TestCase {
         settings.outputDeviceDraft = "fixture"; settings.connected = false;
         verify(!findChild(settings, "applyOutput").enabled); compare(outputs.count, 0);
     }
+    function test_hq_conversion_is_an_explicit_persisted_output_choice() {
+        settings.output = {selection: {mode: "fidelity", device: "fixture"}, ready: true, available: true, fidelity_available: true, devices: [{id: "fixture", name: "Fictional direct PCM"}]};
+        verify(!settings.allowConversionDraft); verify(!settings.canApplyOutput);
+        const toggle = findChild(settings, "allowHqConversion");
+        toggle.forceActiveFocus(); keyClick(Qt.Key_Space);
+        verify(settings.allowConversionDraft); verify(settings.canApplyOutput);
+        verify(!settings.assumeStereoDraft);
+        const stereo = findChild(settings, "assumeStereo");
+        stereo.forceActiveFocus(); keyClick(Qt.Key_Space); verify(settings.assumeStereoDraft);
+        const apply = findChild(settings, "applyOutput");
+        apply.forceActiveFocus(); keyClick(Qt.Key_Space);
+        compare(outputs.count, 1); compare(outputs.signalArguments[0][0], "fidelity_resampled"); compare(outputs.signalArguments[0][1], "fixture"); compare(outputs.signalArguments[0][2], true);
+        settings.output = {selection: {mode: "fidelity_resampled", device: "fixture", assume_stereo: true}, ready: true, available: true, fidelity_available: true, devices: [{id: "fixture", name: "Fictional direct PCM"}], processing: {source: {rate: 44100, bits: 24}, target: {rate: 48000, bits: 16}}};
+        compare(settings.outputModeDraft, 1); verify(settings.allowConversionDraft); verify(!settings.canApplyOutput);
+        verify(findChild(settings, "outputProcessing").text.includes("SoXR VHQ"));
+        verify(findChild(settings, "outputProcessing").text.includes("TPDF dither"));
+        toggle.forceActiveFocus(); keyClick(Qt.Key_Space);
+        verify(!settings.allowConversionDraft); compare(settings.requestedOutputMode, "fidelity"); verify(settings.canApplyOutput);
+    }
     function test_mode_is_keyboard_accessible_without_implicit_playback() {
         const combo = findChild(settings, "replaygainMode");
         compare(combo.currentIndex, 3);

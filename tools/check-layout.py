@@ -64,6 +64,11 @@ HOOKS = """
         }
 
         function scrollRail(): void { railScroll.contentItem.contentY = Math.max(0, railScroll.contentHeight - railScroll.availableHeight); }
+        function conversionFixture(): void {
+            const next = Object.assign({}, root.snapshot);
+            next.output = Object.assign({}, next.output, {selection: {mode: "fidelity_resampled", device: "fixture", assume_stereo: true}, processing: {source: {rate: 44100, bits: 24}, target: {rate: 48000, bits: 16}, sample: "s16"}, source: {rate: 44100, bits: 24}, observed: {rate: 48000, format: "s16", valid_bits: 16, stereo_layout: false, stereo_assumed: true}});
+            root.snapshot = next; root.showSettings("audio");
+        }
         function searchFixture(): void {
             const next = Object.assign({}, root.snapshot);
             next.search = {revision: "9007199254740993", query: "fixture", busy: false, partial: true, message: "2 matches · 2/3 libraries ready · partial results", sources: [{library: "Archive", server: "Studio", phase: "timeout", count: 0, has_more: false, error: "Fixture server unavailable", cache: {stale: false}}], results: [
@@ -253,6 +258,15 @@ def check(output=None):
                 ipc("showCache")
                 time.sleep(0.15)
                 capture("cache-small", settings=True)
+                ipc("conversionFixture")
+                time.sleep(0.15)
+                capture("hq-conversion-small", settings=True)
+                ipc("resize", 540, 440)
+                time.sleep(0.15)
+                assert status()["settings"]["scrollable"]
+                capture("hq-conversion-short", settings=True)
+                ipc("resize", 540, 760)
+                time.sleep(0.15)
                 ipc("scrollRail")
                 time.sleep(0.15)
                 rail = status()["geometry"]

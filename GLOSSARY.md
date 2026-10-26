@@ -128,7 +128,10 @@ Account access whose authentication secrets are retained only for the running ap
 Listening that can coexist with audio from other applications and supports ordinary application volume control. Output conversion may be part of the desktop audio path.
 
 **Fidelity playback**:
-Listening intended to preserve decoded PCM sample values at a declared output boundary, except for selected ReplayGain processing and its output quantization. Unsupported conversion stops playback; configured intent and verified output are reported separately.
+Direct output that prefers decoded PCM sample values unchanged except for selected ReplayGain processing. Strict Fidelity refuses unsupported conversion; optional high-quality fallback permits explicitly reported rate or precision conversion without calling the result sample-perfect.
+
+**High-quality fallback**:
+An opt-in Fidelity policy that prefers an exact supported format, then permits high-quality conversion to a supported output format when necessary. It is separate from the choice to assume conventional stereo when a driver cannot report channel positions.
 
 **ReplayGain mode**:
 The selected loudness adjustment policy: Off, Track, Album, or Auto. Auto preserves album-level differences for an unshuffled album session and otherwise selects track-level adjustment, with missing-data fallbacks made explicit.

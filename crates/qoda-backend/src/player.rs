@@ -66,6 +66,16 @@ pub enum Command {
     Load(u64, String, f64),
     #[cfg(test)]
     LoadGain(u64, String, f64, Applied),
+    #[cfg(test)]
+    LoadProcessed(u64, String, Applied, output::Plan),
+    #[cfg(test)]
+    StageProcessed(
+        u64,
+        String,
+        Applied,
+        output::Plan,
+        mpsc::Sender<Result<StageResult, &'static str>>,
+    ),
     LoadPrepared(Load),
     Configure(
         Option<output::Selection>,
@@ -92,7 +102,7 @@ pub enum Command {
 #[derive(Clone, Debug)]
 pub enum Removal {
     Untouched,
-    Reset(Status),
+    Reset(Box<Status>),
 }
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
 pub struct Status {
@@ -112,6 +122,7 @@ pub struct Status {
     pub source: Option<Format>,
     pub output: Option<alsa_guard::Observed>,
     pub output_selection: Option<output::Selection>,
+    pub processing: Option<output::Plan>,
 }
 fn decimal<S: serde::Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&value.to_string())
@@ -148,8 +159,7 @@ struct PendingStart {
     deadline: std::time::Instant,
 }
 struct Active {
-    source: Format,
-    sample: output::Sample,
+    plan: output::Plan,
 }
 fn create_handle(output: &str, extra: &[(String, String)]) -> Result<*mut c_void, &'static str> {
     let h = unsafe { mpv_create() };
@@ -215,6 +225,22 @@ struct Native {
     intent: Arc<AtomicBool>,
     latest_load: Arc<AtomicU64>,
 }
+fn file_options(position: f64, gain: Option<&Applied>, plan: Option<output::Plan>) -> String {
+    let filter = match plan {
+        Some(plan) => Some(plan.filter(gain)),
+        None => gain.map(Applied::filter),
+    };
+    filter.map_or_else(
+        || format!("start={position}"),
+        |filter| {
+            // loadfile's outer key/value parser needs its own escaping; lavfi's
+            // brackets only protect the inner filter-list parser.
+            let value = filter.strip_prefix("af=").unwrap_or(&filter);
+            format!("start={position},af=%{}%{value}", value.len())
+        },
+    )
+}
+
 impl Native {
     fn replace_handle(&mut self, source: Option<Format>) -> Result<(), &'static str> {
         let old = std::mem::replace(&mut self.h, std::ptr::null_mut());
@@ -231,27 +257,49 @@ impl Native {
         let mut extra = self.extra.clone();
         let driver = match &self.route {
             Some(output::Selection::Desktop) => self.desktop_output.as_str(),
-            Some(selection @ output::Selection::Fidelity { .. }) => {
+            Some(selection) if selection.fidelity() => {
                 if let Some(source) = source {
                     let device = selection.resolve()?.ok_or("No fidelity output selected")?;
-                    let sample = output::preflight(&device, source)?;
-                    alsa_guard::arm(device.clone(), source, sample)?;
+                    let plan = output::preflight(
+                        &device,
+                        source,
+                        selection.conversion_allowed(),
+                        selection.assumes_stereo(),
+                    )?;
+                    if selection.assumes_stereo() {
+                        alsa_guard::arm_with_stereo_policy(
+                            device.clone(),
+                            plan.target,
+                            plan.sample,
+                            true,
+                        )?;
+                    } else {
+                        alsa_guard::arm(device.clone(), plan.target, plan.sample)?;
+                    }
                     extra.extend([
                         ("audio-device".into(), format!("alsa/{}", device.route())),
                         ("alsa-resample".into(), "no".into()),
                         ("alsa-non-interleaved".into(), "no".into()),
-                        ("alsa-ignore-chmap".into(), "no".into()),
-                        ("audio-format".into(), sample.mpv().into()),
-                        ("audio-samplerate".into(), source.rate.to_string()),
+                        (
+                            "alsa-ignore-chmap".into(),
+                            if selection.assumes_stereo() {
+                                "yes"
+                            } else {
+                                "no"
+                            }
+                            .into(),
+                        ),
+                        ("audio-format".into(), plan.sample.mpv().into()),
+                        ("audio-samplerate".into(), plan.target.rate.to_string()),
                         ("audio-channels".into(), "stereo".into()),
                     ]);
-                    self.active = Some(Active { source, sample });
+                    self.active = Some(Active { plan });
                     "alsa"
                 } else {
                     "null"
                 }
             }
-            None => {
+            _ => {
                 if source.is_some() {
                     return Err("Output settings unavailable; playback stays paused.");
                 }
@@ -378,6 +426,16 @@ impl Native {
             } else {
                 None
             };
+        self.current.processing = if self.current.entry_ready && self.current.error.is_none() {
+            self.active.as_ref().and_then(|active| {
+                self.current.source.map(|source| output::Plan {
+                    source,
+                    ..active.plan
+                })
+            })
+        } else {
+            None
+        };
         self.current.position_seconds = if self.current.entry_ready && self.pending_start.is_none()
         {
             pts
@@ -398,6 +456,7 @@ impl Native {
         self.current.handoff_from = None;
         self.current.gain = None;
         self.current.output = None;
+        self.current.processing = None;
         stopped
     }
     fn pump(&mut self) {
@@ -529,16 +588,48 @@ impl Native {
             self.intent.store(false, Ordering::Release);
             return;
         }
+        let processing = self.active.as_ref().map(|active| active.plan);
+        self.load_file(generation, url, position, gain, source, processing);
+    }
+    // The post-negotiation file pipeline is shared by production loads and
+    // synthetic PCM-file qualification, without opening a physical device.
+    fn load_file(
+        &mut self,
+        generation: u64,
+        url: String,
+        position: f64,
+        gain: Option<Applied>,
+        source: Option<Format>,
+        processing: Option<output::Plan>,
+    ) {
         self.call(&["set", "pause", "yes"]);
+        if let Some(plan) = processing {
+            let filter = plan.filter(gain.as_ref());
+            let value = filter.strip_prefix("af=").unwrap_or(&filter);
+            // Validate and install the mandatory graph before the file can
+            // unpause. mpv can otherwise ignore malformed per-file options.
+            if !self.call(&["set", "af", value]) {
+                self.stop();
+                self.current = Status {
+                    generation,
+                    source,
+                    error: Some(
+                        "The planned audio processing filter was rejected; playback stays paused.",
+                    ),
+                    idle: true,
+                    paused: true,
+                    ..Default::default()
+                };
+                self.intent.store(false, Ordering::Release);
+                return;
+            }
+        }
         self.pending_start = (position > 0.0).then(|| PendingStart {
             target: position,
             loaded: false,
             deadline: std::time::Instant::now() + Duration::from_secs(5),
         });
-        let options = match &gain {
-            Some(gain) => format!("start={position},{}", gain.filter()),
-            None => format!("start={position}"),
-        };
+        let options = file_options(position, gain.as_ref(), processing);
         self.entries.clear();
         self.entry = None;
         self.future = None;
@@ -590,22 +681,51 @@ impl Native {
         {
             return Ok(StageResult::MissedWindow);
         }
-        if let Some(active) = &self.active {
+        let processing = if let Some(active) = &self.active {
             let Some(source) = source else {
                 return Ok(StageResult::MissedWindow);
             };
             let Some(observed) = alsa_guard::observed() else {
                 return Ok(StageResult::MissedWindow);
             };
-            if source.rate != active.source.rate
-                || source.bits > observed.valid_bits
-                || active.sample != observed.format
+            let Some(plan) = active.plan.successor(
+                source,
+                self.route
+                    .as_ref()
+                    .is_some_and(output::Selection::conversion_allowed),
+            ) else {
+                return Ok(StageResult::MissedWindow);
+            };
+            if observed.rate != plan.target.rate
+                || observed.valid_bits < plan.target.bits
+                || observed.format != plan.sample
             {
                 return Ok(StageResult::MissedWindow);
             }
-            alsa_guard::raise_precision(source.bits)?;
-        }
-        let entry = self.entry.unwrap();
+            if plan.converted()
+                && plan.filter(gain.as_ref()) != active.plan.filter(self.current.gain.as_ref())
+            {
+                // A changed conversion graph/gain is installed under pause
+                // on the ordinary EOF load rather than risking an unverified
+                // future filter transition at the submission boundary.
+                return Ok(StageResult::MissedWindow);
+            }
+            alsa_guard::raise_precision(plan.target.bits)?;
+            Some(plan)
+        } else {
+            None
+        };
+        self.append_file(next, url, gain, source, processing)
+    }
+    fn append_file(
+        &mut self,
+        next: u64,
+        url: String,
+        gain: Option<Applied>,
+        source: Option<Format>,
+        processing: Option<output::Plan>,
+    ) -> Result<StageResult, &'static str> {
+        let entry = self.entry.ok_or("The current native entry disappeared")?;
         if !self.call(&["playlist-clear"]) {
             return Err("The native playlist could not be bounded");
         }
@@ -615,9 +735,7 @@ impl Native {
             url,
             "append".into(),
             "-1".into(),
-            gain.as_ref()
-                .map(|gain| format!("start=0,{}", gain.filter()))
-                .unwrap_or_else(|| "start=0".into()),
+            file_options(0.0, gain.as_ref(), processing),
         ]) {
             return Err("The audio engine rejected next-file preparation");
         }
@@ -660,7 +778,7 @@ impl Native {
                 return Ok(Removal::Untouched);
             }
         }
-        self.reset().map(Removal::Reset)
+        self.reset().map(|status| Removal::Reset(Box::new(status)))
     }
 }
 impl Drop for Native {
@@ -761,6 +879,32 @@ impl Player {
                     #[cfg(test)]
                     Ok(Command::LoadGain(generation, url, position, gain)) => {
                         native.load(generation, url, position, Some(gain), None)
+                    }
+                    #[cfg(test)]
+                    Ok(Command::LoadProcessed(generation, url, gain, plan)) => {
+                        assert_eq!(native.desktop_output, "pcm");
+                        assert_eq!(native.route, Some(output::Selection::Desktop));
+                        native.load_file(
+                            generation,
+                            url,
+                            0.0,
+                            Some(gain),
+                            Some(plan.source),
+                            Some(plan),
+                        );
+                    }
+                    #[cfg(test)]
+                    Ok(Command::StageProcessed(next, url, gain, plan, reply)) => {
+                        assert_eq!(native.desktop_output, "pcm");
+                        assert!(native.current.entry_ready && native.current.paused);
+                        let result = native.append_file(
+                            next,
+                            url,
+                            Some(gain),
+                            Some(plan.source),
+                            Some(plan),
+                        );
+                        let _ = reply.send(result);
                     }
                     Ok(Command::LoadPrepared(load)) => {
                         if native.latest_load.load(Ordering::Acquire) != load.generation {
@@ -1569,5 +1713,247 @@ mod successor_failure_tests {
         assert!(!status.natural_eof);
         drop(player);
         std::fs::remove_file(file).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod hq_conversion_tests {
+    use super::*;
+    #[test]
+    fn unavailable_conversion_filter_cannot_silently_use_default_resampling() {
+        let root = std::env::temp_dir().join(format!("qoda-hq-failure-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let capture = root.join("capture.pcm");
+        let input = super::tests::silent_file(1);
+        if let Ok(player) = Player::with_options(
+            "pcm",
+            &[
+                ("ao-pcm-file", capture.to_str().unwrap().into()),
+                ("ao-pcm-waveheader", "no".into()),
+                ("audio-format", "s16".into()),
+                ("audio-samplerate", "48000".into()),
+                (
+                    "af",
+                    "lavfi=[aresample=48000:resampler=qoda_unavailable_engine]".into(),
+                ),
+            ],
+        ) {
+            player.send(Command::Load(1, input.to_str().unwrap().into(), 0.0));
+            super::tests::wait_for(&player, |state| state.error.is_some() || state.entry_ready);
+            player.send(Command::Pause(false));
+            let state = super::tests::wait_for(&player, |state| {
+                state.error.is_some() || state.idle && state.natural_eof
+            });
+            assert!(
+                state.error.is_some(),
+                "Rejected filter fell back to unprocessed playback: {state:?}"
+            );
+            drop(player);
+        }
+        assert!(std::fs::read(&capture).unwrap_or_default().is_empty());
+        std::fs::remove_file(input).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn planned_soxr_pipeline_preserves_duration_gain_and_rejects_aliasing_at_pcm_boundary() {
+        // Actual per-file mpv options, synthetic input and PCM-file output only.
+        // This does not open a physical PCM or qualify downstream hardware.
+        for (rate, bits, frequency, db) in [
+            (44100_u32, 16_u16, 1000.0, 0.0),
+            (96000, 24, 1000.0, -6.0),
+            (96000, 24, 30000.0, 0.0),
+            (48000, 24, 0.0, 0.0),
+        ] {
+            let root = std::env::temp_dir().join(format!("qoda-hq-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&root).unwrap();
+            let input = root.join("source.wav");
+            let capture = root.join("capture.pcm");
+            let diagnostic = root.join("mpv.log");
+            let frames = rate * 2;
+            let mut pcm = Vec::new();
+            for frame in 0..frames {
+                let sample = (0.25
+                    * (2.0 * std::f64::consts::PI * frequency * f64::from(frame) / f64::from(rate))
+                        .sin()
+                    * (2_f64.powi(i32::from(bits) - 1) - 1.0))
+                    .round() as i32;
+                for _ in 0..2 {
+                    pcm.extend_from_slice(&sample.to_le_bytes()[..usize::from(bits / 8)]);
+                }
+            }
+            let mut wav = b"RIFF".to_vec();
+            wav.extend((36 + pcm.len() as u32).to_le_bytes());
+            wav.extend(b"WAVEfmt ");
+            wav.extend(16_u32.to_le_bytes());
+            wav.extend(1_u16.to_le_bytes());
+            wav.extend(2_u16.to_le_bytes());
+            wav.extend(rate.to_le_bytes());
+            wav.extend((rate * u32::from(bits) / 4).to_le_bytes());
+            wav.extend((bits / 4).to_le_bytes());
+            wav.extend(bits.to_le_bytes());
+            wav.extend(b"data");
+            wav.extend((pcm.len() as u32).to_le_bytes());
+            wav.extend(pcm);
+            std::fs::write(&input, wav).unwrap();
+            let plan = output::Plan {
+                source: Format { rate, bits },
+                target: Format {
+                    rate: 48000,
+                    bits: 16,
+                },
+                sample: output::Sample::S16,
+            };
+            let gain = Applied {
+                db,
+                ..Applied::off()
+            };
+            let player = Player::with_options(
+                "pcm",
+                &[
+                    ("log-file", diagnostic.to_str().unwrap().into()),
+                    ("ao-pcm-file", capture.to_str().unwrap().into()),
+                    ("ao-pcm-waveheader", "no".into()),
+                    ("audio-format", "s16".into()),
+                    ("audio-samplerate", "48000".into()),
+                    ("audio-channels", "stereo".into()),
+                ],
+            )
+            .unwrap();
+            player.send(Command::LoadProcessed(
+                1,
+                input.to_str().unwrap().into(),
+                gain.clone(),
+                plan,
+            ));
+            super::tests::wait_for(&player, |s| s.error.is_some() || s.entry_ready && s.paused);
+            let status = player.status();
+            assert!(
+                status.error.is_none(),
+                "{status:?}: {}",
+                std::fs::read_to_string(&diagnostic).unwrap_or_default()
+            );
+            let streams = if rate == 44100 {
+                let (reply, result) = mpsc::channel();
+                player.send(Command::StageProcessed(
+                    2,
+                    input.to_str().unwrap().into(),
+                    gain,
+                    plan,
+                    reply,
+                ));
+                assert_eq!(
+                    result
+                        .recv_timeout(Duration::from_secs(2))
+                        .unwrap()
+                        .unwrap(),
+                    StageResult::Ready
+                );
+                2
+            } else {
+                1
+            };
+            player.send(Command::Pause(false));
+            super::tests::wait_for(&player, |s| s.error.is_some() || s.idle && s.natural_eof);
+            assert!(player.status().error.is_none());
+            drop(player);
+            let bytes = std::fs::read(&capture).unwrap();
+            assert!(
+                bytes.len() as i64 == 96000 * 4 * streams,
+                "Resampling changed duration: {} bytes; {}",
+                bytes.len(),
+                std::fs::read_to_string(&diagnostic).unwrap_or_default()
+            );
+            let samples = bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .skip(1024)
+                .take(90000)
+                .map(|frame| f64::from(i16::from_le_bytes([frame[0], frame[1]])))
+                .collect::<Vec<_>>();
+            let rms = (samples.iter().map(|sample| sample * sample).sum::<f64>()
+                / samples.len() as f64)
+                .sqrt();
+            if frequency == 1000.0 {
+                let expected = 32768.0 * 0.25 * 10_f64.powf(db / 20.0) / 2_f64.sqrt();
+                assert!(
+                    (rms / expected - 1.0).abs() < 0.002,
+                    "Gain changed: {rms} vs {expected}"
+                );
+            } else if frequency == 30000.0 {
+                assert!(
+                    rms < 2.0,
+                    "Out-of-band signal aliased into output: {rms} LSB rms"
+                );
+            } else {
+                assert!(
+                    (0.3..0.8).contains(&rms),
+                    "Expected TPDF quantization dither, got {rms} LSB rms"
+                );
+                let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+                assert!(mean.abs() < 0.03, "Dither has a DC bias: {mean}");
+            }
+            if streams == 2 {
+                // mpv drains/resets its resampler per file. Compare the join
+                // with two independently converted files, not a continuous
+                // album resampler (tracked separately in the audio scope).
+                let reference_path = root.join("reference.pcm");
+                let filter = plan.filter(Some(&Applied::off()));
+                let graph = filter
+                    .strip_prefix("af=lavfi=[")
+                    .unwrap()
+                    .strip_suffix(']')
+                    .unwrap();
+                let result = std::process::Command::new("/usr/bin/ffmpeg")
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(&input)
+                    .args(["-af", graph, "-f", "s16le", "-c:a", "pcm_s16le"])
+                    .arg(&reference_path)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                let reference = std::fs::read(reference_path).unwrap();
+                assert_eq!(reference.len(), 96000 * 4);
+                let maximum_error = bytes
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .enumerate()
+                    .skip(96000 - 256)
+                    .take(512)
+                    .map(|(index, frame)| {
+                        let actual = i32::from(i16::from_le_bytes([frame[0], frame[1]]));
+                        let offset = (index % 96000) * 4;
+                        let expected = i32::from(i16::from_le_bytes([
+                            reference[offset],
+                            reference[offset + 1],
+                        ]));
+                        (actual - expected).abs()
+                    })
+                    .max()
+                    .unwrap();
+                assert!(
+                    maximum_error <= 2,
+                    "Per-file conversion join differs from reference: {maximum_error} LSB"
+                );
+                println!(
+                    "44100→48000 chain: {} frames, per-file reference join error {maximum_error} LSB",
+                    bytes.len() / 4
+                );
+            }
+            let log = std::fs::read_to_string(&diagnostic).unwrap();
+            assert!(
+                !log.contains("Error parsing option"),
+                "Per-file filter was ignored: {log}"
+            );
+            println!(
+                "HQ {rate} Hz/{bits} bit → 48000 Hz/16 bit, {db} dB, {frequency} Hz tone: {rms:.6} LSB rms"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 }

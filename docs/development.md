@@ -286,3 +286,15 @@ Unavailable-entry and album-origin persistence use session schema/payload 4. Ope
 Validation covers duplicate-isolated failures, explicit retry with pinned media versions, retained/removable traversed failures, unknown-member refusal, missing-field legacy restoration, bounded all-unavailable scans in both repeat modes, pause/explicit-selection gates, source-wide failure non-consumption, malformed-version refusal, stale request fences and stale gapless-preparation replies. `python tools/check-navigation.py --unavailable` additionally checks native inspection, disabled offline Retry, compact/full retention, paused failure restoration and identity-fenced removal without provider requests or audio.
 
 Raise validation covers role-gated IPC attachment/detachment, root-interface CanRaise signals, desktop command routing without playback, token deduplication and reconnect suppression. Native checks invoke Raise while compact/hidden, verify the surface returns with the same paused queue, remove/restart the UI and observe CanRaise update while the backend stays running.
+
+### Optional high-quality conversion
+
+The linked libmpv/FFmpeg runtime must provide SoXR for the opt-in direct-output
+conversion path. See [policy, processing, compatibility and measurement scope](audio/hq-conversion.md).
+The default check runs synthetic PCM-file conversion measurements and leaves the
+physical preflight test ignored. A no-write physical check requires explicitly
+setting `QODA_TEST_ALSA_PCM` to a discovered `hw:CARD=...,DEV=...,SUBDEV=0` route
+and running `cargo test -p qoda-backend selected_hardware_hq_preflight_submits_no_audio -- --ignored --nocapture`.
+That test currently asserts the measured development speaker's 48 kHz/S16 result,
+not arbitrary devices; it installs/closes parameters and writes no audio frames.
+Do not run it as part of general CI or assume it qualifies physical playback.

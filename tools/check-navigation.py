@@ -150,6 +150,13 @@ def check(unavailable=False):
                     quit_backend(); start()
                     assert state["output"]["selection"] == choice and state["intent"] == "paused"
                     assert state["queue"] == before_output_queue and state["output"]["observed"] is None
+                    choice = {"mode": "fidelity_resampled", "device": devices[0]["id"], "assume_stereo": True}
+                    command("set_output", **choice, **fences())
+                    until(lambda value: value["output"]["selection"] == choice and value["output"]["ready"])
+                    assert state["intent"] == "paused" and state["queue"] == before_output_queue
+                    quit_backend(); start()
+                    assert state["output"]["selection"] == choice and state["intent"] == "paused"
+                    assert state["queue"] == before_output_queue and state["output"]["observed"] is None
                 command("set_output", mode="desktop", **fences())
                 until(lambda value: not value.get("error") and value["output"]["selection"] == {"mode": "desktop"})
                 assert state["intent"] == "paused" and state["queue"] == before_output_queue

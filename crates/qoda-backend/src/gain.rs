@@ -35,15 +35,17 @@ impl Applied {
             reason: "ReplayGain off",
         }
     }
-    pub fn filter(&self) -> String {
-        if self.db == 0.0 {
-            "af=".into()
-        } else {
+    pub fn filter_graph(&self) -> Option<String> {
+        (self.db != 0.0).then(|| {
             format!(
-                "af=lavfi=[volume={:.17e}:precision=double]",
+                "volume={:.17e}:precision=double",
                 10_f64.powf(self.db / 20.0)
             )
-        }
+        })
+    }
+    pub fn filter(&self) -> String {
+        self.filter_graph()
+            .map_or_else(|| "af=".into(), |graph| format!("af=lavfi=[{graph}]"))
     }
 }
 #[derive(Clone, Debug, Default)]

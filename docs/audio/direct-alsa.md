@@ -1,6 +1,6 @@
 # Direct ALSA output
 
-Desktop/PipeWire remains the default. Menu → Audio settings offers an explicit
+Desktop/PipeWire remains the default. Strict Fidelity remains the default direct-output policy. The optional [HQ conversion policy](hq-conversion.md) permits explicitly reported resampling/precision reduction; a separate stereo compatibility choice covers wholly unreported maps. Menu → Audio settings offers an explicit
 Fidelity mode and a discovered direct hardware PCM. Choosing a mode/device is a
 draft until **Apply output**. Apply pauses playback, revokes prepared streams,
 releases the old native instance, retains the queue and nominal position, and
@@ -11,7 +11,7 @@ Discovery reads ALSA control and sysfs metadata; it does not open playback PCMs.
 The persisted device identity is a SHA-256 fingerprint of physical sysfs topology,
 card/PCM identity and available hardware attributes, rather than an ALSA index.
 Changing ports/topology may require explicitly selecting the device again. The
-private `$XDG_CONFIG_HOME/qoda/output.json` file uses version 1. Invalid, unsafe or
+private `$XDG_CONFIG_HOME/qoda/output.json` file accepts version 1 and writes version 2; existing selections remain strict. Invalid, unsafe or
 newer settings are preserved and disable playback until repaired; they do not
 select Desktop as a fallback. Device names/serial attributes are not published.
 
@@ -38,7 +38,9 @@ ALSA functions through checked `RTLD_NEXT` lookups, catches Rust panics at each
 C ABI boundary and never reads or retains sample buffers. Before forwarding a
 write it requires the selected hardware PCM, installed exact rate, adequate
 valid precision, and observed FL/FR mapping. Unknown handles and incompatible
-negotiation cannot submit frames. Partial/failed writes latch a failure and
+negotiation cannot submit frames. With optional HQ conversion, the guard checks
+the explicit output plan; a separately selected unreported-stereo assumption is
+labelled unverified, while reported wrong maps remain blocked. Partial/failed writes latch a failure and
 require explicit Resume because buffered position may be uncertain. Hardware
 mixer write APIs are blocked in Fidelity. No `LD_PRELOAD` library is installed
 or injected into any process.
@@ -65,8 +67,9 @@ These checks establish submission policy, not hardware fidelity. The UI reports
 and never labels a discovered device bit-perfect. The player-side PCM matrix in
 [ReplayGain measurements](replaygain.md) remains separate from final ALSA-boundary
 capture. Issue #27 retains physical PCM/device qualification, per-profile rate,
-precision, channel ordering, gain and gapless boundary measurements. No physical
-PCM was opened or sound played for the implementation checks.
+precision, channel ordering, gain and gapless boundary measurements. The original implementation checks submitted no physical audio. Later
+[HQ compatibility checks](hq-conversion.md) opened/closed hardware parameters
+without submitting frames; physical audio qualification remains open.
 
 ## Built-in output compatibility observation (2026-10-26)
 

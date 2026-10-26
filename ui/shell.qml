@@ -286,7 +286,7 @@ ShellRoot {
                 output: root.snapshot.output || null
                 connected: socket.connected
                 onModeRequested: mode => root.send("set_replaygain", {mode: mode})
-                onOutputRequested: (mode, device) => root.send("set_output", {mode: mode, device: device})
+                onOutputRequested: (mode, device, assumeStereo) => root.send("set_output", {mode: mode, device: device, assume_stereo: assumeStereo})
                 onRefreshOutputsRequested: root.send("refresh_outputs")
             }
             ColumnLayout {
