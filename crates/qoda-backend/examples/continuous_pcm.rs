@@ -9,6 +9,10 @@ mod ring;
 use std::{path::PathBuf, sync::atomic::Ordering};
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args == ["--horizon"] {
+        println!("{}", native::horizon()?);
+        return Ok(());
+    }
     if args.len() != 4 {
         return Err("Expected synthetic manifest, new capture, graph, output bits".into());
     }

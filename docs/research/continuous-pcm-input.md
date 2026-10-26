@@ -122,3 +122,18 @@ Very short tracks may require more lookahead than one authorized successor can
 supply; the integration must explicitly fall back or resolve that horizon rather
 than invent EOF/silence or authorize arbitrary future tracks. Physical output
 remains unmeasured. #41 stays open.
+
+
+### Paced short-successor horizon measurement
+
+The follow-up command `cargo run -p qoda-backend --example continuous_pcm -- --horizon`
+uses timed `ao=null` (no sound device), one 44100-frame current and only a
+one-frame successor, with a third input withheld and no final EOF. In a 2.3-second
+window the maximum positive nominal `audio-pts` was **0.9157916667 s**, below the
+1.0 s handoff boundary; releasing the third input allowed completion. No silence
+was injected. This demonstrates a real lookahead/ownership stall for this
+44.1→48 kHz profile, not a universal latency bound. PCM admission cannot stand in
+for nominal ownership to sidestep the authorization horizon. The
+[concrete integration choices](../continuous-conversion-boundary-proposal.md)
+are pending a support/access-boundary decision; this experiment changes no
+production grant policy or playback route.

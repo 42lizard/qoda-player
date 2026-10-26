@@ -1,4 +1,4 @@
-//! Experiment-only final libmpv. Every instance has a PCM-file AO; no device AO.
+//! Experiment-only final libmpv: PCM-file capture or paced null, never a device AO.
 use super::ring::Ring;
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
@@ -37,6 +37,12 @@ unsafe extern "C" {
     fn mpv_set_option_string(h: *mut c_void, k: *const c_char, v: *const c_char) -> c_int;
     fn mpv_initialize(h: *mut c_void) -> c_int;
     fn mpv_command(h: *mut c_void, args: *const *const c_char) -> c_int;
+    fn mpv_get_property(
+        h: *mut c_void,
+        key: *const c_char,
+        format: c_int,
+        value: *mut c_void,
+    ) -> c_int;
     fn mpv_wait_event(h: *mut c_void, timeout: f64) -> *const Event;
     fn mpv_terminate_destroy(h: *mut c_void);
     fn mpv_stream_cb_add_ro(
@@ -115,6 +121,16 @@ impl Native {
         graph: &str,
         bits: u16,
     ) -> Result<Self, &'static str> {
+        Self::configured(ring, capture, rate, graph, bits, false)
+    }
+    fn configured(
+        ring: Arc<Ring>,
+        capture: &str,
+        rate: u32,
+        graph: &str,
+        bits: u16,
+        clocked: bool,
+    ) -> Result<Self, &'static str> {
         // cancel_fn was added with 1.106. Do not write a newer struct to older APIs.
         if unsafe { mpv_client_api_version() } < ((1 << 16) | 106) {
             return Err("mpv stream cancellation API unavailable");
@@ -138,7 +154,8 @@ impl Native {
             ("idle", "yes".into()),
             ("vo", "null".into()),
             ("vid", "no".into()),
-            ("ao", "pcm".into()),
+            ("ao", if clocked { "null" } else { "pcm" }.into()),
+            ("ao-null-untimed", "no".into()),
             ("ao-pcm-file", capture.to_owned()),
             ("ao-pcm-waveheader", "no".into()),
             ("gapless-audio", "no".into()),
@@ -201,7 +218,7 @@ impl Native {
         }
         Ok(())
     }
-    pub fn run(&self) -> Result<(), &'static str> {
+    fn start(&self) -> Result<(), &'static str> {
         let args = [
             CString::new("loadfile").unwrap(),
             CString::new("qodapcm://session").unwrap(),
@@ -210,6 +227,13 @@ impl Native {
         if unsafe { mpv_command(self.handle, pointers.as_ptr()) } < 0 {
             return Err("raw load rejected");
         }
+        Ok(())
+    }
+    pub fn run(&self) -> Result<(), &'static str> {
+        self.start()?;
+        self.wait()
+    }
+    fn wait(&self) -> Result<(), &'static str> {
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             let event = unsafe { &*mpv_wait_event(self.handle, 0.02) };
@@ -265,4 +289,60 @@ mod tests {
         assert_eq!(Arc::strong_count(&ring), 1);
         std::fs::remove_dir_all(directory).unwrap();
     }
+}
+
+/// Bounded paced-null experiment: only one one-frame successor is available.
+/// The third input is withheld until the measurement window ends. No sound AO.
+pub fn horizon() -> Result<serde_json::Value, &'static str> {
+    let ring = Ring::new();
+    let graph = "aresample=48000:resampler=soxr:precision=28:cheby=1:osf=s16:output_sample_bits=16:dither_method=triangular:async=0";
+    let native = Native::configured(ring.clone(), "", 44100, graph, 16, true)?;
+    let copy = ring.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let producer = std::thread::spawn(move || {
+        let first = [0.25_f64.to_ne_bytes(), 0.125_f64.to_ne_bytes()]
+            .concat()
+            .repeat(44101);
+        copy.write(&first)?;
+        rx.recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "horizon release timed out")?;
+        copy.write(&first[..44100 * 16])?;
+        copy.finish()
+    });
+    let measured = (|| {
+        native.start()?;
+        let key = CString::new("audio-pts").map_err(|_| "clock key invalid")?;
+        let started = Instant::now();
+        let mut maximum = None::<f64>;
+        while started.elapsed() < Duration::from_millis(2300) {
+            let _event = unsafe { mpv_wait_event(native.handle, 0.0) };
+            let mut pts = 0_f64;
+            if unsafe {
+                mpv_get_property(
+                    native.handle,
+                    key.as_ptr(),
+                    5,
+                    (&mut pts as *mut f64).cast(),
+                )
+            } >= 0
+                && pts.is_finite()
+                && pts > 0.0
+            {
+                maximum = Some(maximum.unwrap_or(0.0).max(pts));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        tx.send(()).map_err(|_| "horizon producer ended")?;
+        native.wait()?;
+        Ok(
+            serde_json::json!({"sink":"paced null", "source_rate":44100,"first_frames":44100,
+            "only_successor_frames":1,"nominal_boundary_seconds":1.0,
+            "maximum_observed_before_third_input":maximum.ok_or("No positive nominal clock")?,
+            "completed_after_third_input":true}),
+        )
+    })();
+    drop(native);
+    let produced = producer.join().map_err(|_| "horizon producer panicked")?;
+    produced?;
+    measured
 }
