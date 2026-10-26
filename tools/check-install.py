@@ -81,14 +81,15 @@ def check():
                     process.send_signal(signal.SIGINT)
                     if process.wait(timeout=15) != 0:
                         raise AssertionError("Installed backend failed its graceful stop")
-                installed_data = sorted(path.relative_to(base / "data") for path in (base / "data").rglob("*") if path.is_file())
-                if not installed_data:
-                    raise AssertionError("Graceful stop did not retain session data")
+                installed_data = sorted(path.relative_to(base) for directory in ["data", "state", "cache"]
+                                        for path in (base / directory).rglob("*") if path.is_file())
+                if not (base / "state/qoda/session.sqlite3").is_file():
+                    raise AssertionError("Graceful stop did not retain session state")
                 installer.install(prefix, config)
                 if current.resolve().name != release:
                     raise AssertionError("Identical locked rebuild changed the release identity")
                 installer.remove(prefix, config)
-                if not all((base / "data" / path).exists() for path in installed_data):
+                if not all((base / path).exists() for path in installed_data):
                     raise AssertionError("Uninstall removed private session data")
                 print("Isolated release install/rebuild, native syntax, installed launcher, paused backend, active-switch refusal, graceful stop and retained-data uninstall passed")
                 print("No Plex, credentials, music or host service/configuration changes; owned test processes stopped")
