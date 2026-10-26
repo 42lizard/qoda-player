@@ -33,7 +33,7 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         text: "Last known individual failures stay in this session. Automatic progression skips these entries; server or sign-in failures pause for recovery."
-        color: "#acb8c8"; textFormat: Text.PlainText; wrapMode: Text.Wrap
+        color: "#a4b0a7"; textFormat: Text.PlainText; wrapMode: Text.Wrap
     }
     Button {
         objectName: "skipUnavailable"
@@ -42,7 +42,7 @@ ColumnLayout {
         enabled: failures.connected && failures.canRetry
         onClicked: failures.act("skip_unavailable", null)
     }
-    Label { visible: failures.rows.length === 0; text: "No unavailable entries."; color: "#acb8c8" }
+    Label { visible: failures.rows.length === 0; text: "No unavailable entries."; color: "#a4b0a7" }
     ListView {
         id: entries
         Layout.fillWidth: true; Layout.fillHeight: true
@@ -51,11 +51,11 @@ ColumnLayout {
         delegate: Rectangle {
             required property var modelData
             width: entries.width; height: 150; radius: 5
-            color: modelData.selected ? "#344354" : "#202735"
+            color: modelData.selected ? "#303f32" : "#191f1c"
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 8; spacing: 3
-                Label { text: modelData.track.title; font.bold: true; color: "#f2e9db"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                Label { text: modelData.track.artist; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { text: modelData.track.title; font.bold: true; color: "#e8eee8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { text: modelData.track.artist; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 Label { text: failures.reason(modelData.unavailable); color: "#f2a89b"; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 RowLayout {
                     Button { objectName: "retryUnavailable"; text: "Retry"; enabled: failures.connected && failures.canRetry; onClicked: failures.act("retry_unavailable", modelData) }

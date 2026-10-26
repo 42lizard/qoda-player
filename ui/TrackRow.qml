@@ -14,7 +14,7 @@ Rectangle {
     signal playlistRequested()
     height: 68
     radius: 5
-    color: selected ? "#344354" : index % 2 ? "#1a202a" : "#202735"
+    color: selected ? "#303f32" : index % 2 ? "#161c18" : "#191f1c"
     RowLayout {
         anchors.fill: parent
         anchors.margins: 10
@@ -28,8 +28,8 @@ Rectangle {
             objectName: "trackDetails"
             Layout.fillWidth: true
             TapHandler { onTapped: row.selectionRequested(point.modifiers) }
-            Label { text: row.track.title; color: "#f2e9db"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-            Label { text: row.track.artist + " · " + row.track.album; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { text: row.track.title; color: "#e8eee8"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { text: row.track.artist + " · " + row.track.album; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
         }
         Button { objectName: "playNow"; text: "Play now"; onClicked: row.actionRequested("play") }
         Button { text: "Next"; onClicked: row.actionRequested("play_next") }

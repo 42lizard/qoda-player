@@ -14,7 +14,11 @@ From the repository:
 ./tools/dev.py
 ```
 
-Select **Connect Plex (this session)**, open the browser sign-in, authorize Qoda, then choose a library. The initial **Albums** tab searches album titles in that library. The **Tracks** tab retains track browsing/search: browse pages contain at most 100 tracks; track search returns up to 100 matches. **Play now** replaces the listening session with the selected track and starts it. Pause, resume and seek in seconds act on the backend. Resume retries a stopped selected track, starts pending content after completion, or offers Replay when the retained queue is exhausted.
+Select **Connect Plex**, open the browser sign-in, authorize Qoda, then choose a library in the left sidebar. **Menu → Account** exposes sign-in saving, restoration and disconnect controls. The initial **Albums** view searches album titles in that library. **Tracks** retains track browsing/search: browse pages contain at most 100 tracks; track search returns up to 100 matches. **Play now** replaces the listening session with the selected track and starts it. The bottom transport controls playback; its position slider supports mouse and keyboard seeking once current playback and duration are confirmed. Play retries a stopped selected track or starts pending content after completion; Replay restarts a retained exhausted selection.
+
+The right queue stays visible from 1100 logical pixels wide. In narrower windows, **Queue** opens a modal drawer without replacing the browser or its search/scroll state. Close, Escape or an outside click dismisses it. **Menu** also contains cache settings, the session gapless toggle, Hide and explicit Quit. Compact opens the separate overlay. Save and desktop-control failures keep their recovery actions visible.
+
+`python tools/check-layout.py --output /tmp/qoda-layout` renders the production full window at wide, narrow and small sizes with fictional data and verifies the drawer and retained state. It runs offscreen without a backend, Plex, credentials, audio or compositor changes. Test-only resize/capture hooks and a compact-surface stub exist only in a temporary UI copy; compact layer-shell behavior still requires the native surface checks. The script requires Quickshell and Qt's offscreen/software platform, and writes PNGs only when `--output` is given.
 
 ### Track selection and bulk actions
 

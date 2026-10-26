@@ -52,14 +52,14 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: !albums.showDetails || albums.busy || !!albums.selected && (!albums.coverReady || !!snapshot.cache && snapshot.cache.origin !== "live")
         text: snapshot ? snapshot.message : "Choose a music library."
-        color: "#acb8c8"
+        color: "#a4b0a7"
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
     }
     RowLayout {
         visible: !!albums.page && !!albums.page.artist && !albums.showDetails
         Button { text: "All albums"; onClicked: albums.allAlbums() }
-        Label { text: albums.page && albums.page.artist ? albums.page.artist.title : ""; Layout.fillWidth: true; textFormat: Text.PlainText; elide: Text.ElideRight; color: "#f2e9db"; font.bold: true }
+        Label { text: albums.page && albums.page.artist ? albums.page.artist.title : ""; Layout.fillWidth: true; textFormat: Text.PlainText; elide: Text.ElideRight; color: "#e8eee8"; font.bold: true }
     }
     RowLayout {
         Layout.fillWidth: true
@@ -67,8 +67,8 @@ ColumnLayout {
         spacing: 16
         Rectangle {
             Layout.preferredWidth: 92; Layout.preferredHeight: 92
-            color: "#202735"; radius: 5
-            Label { anchors.centerIn: parent; text: "♪"; font.pixelSize: 44; color: "#acb8c8"; visible: cover.status !== Image.Ready }
+            color: "#191f1c"; radius: 5
+            Label { anchors.centerIn: parent; text: "♪"; font.pixelSize: 44; color: "#a4b0a7"; visible: cover.status !== Image.Ready }
             Image {
                 id: cover
                 anchors.fill: parent
@@ -81,15 +81,15 @@ ColumnLayout {
         }
         ColumnLayout {
             Layout.fillWidth: true
-            Label { text: albums.selected ? albums.selected.album.title : ""; color: "#f2e9db"; font.bold: true; font.pixelSize: 20; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+            Label { text: albums.selected ? albums.selected.album.title : ""; color: "#e8eee8"; font.bold: true; font.pixelSize: 20; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
             Button {
                 Layout.fillWidth: true
                 flat: true
                 enabled: !!albums.selected && !!albums.selected.album.artist_ref && !albums.busy
-                contentItem: Text { text: albums.selected ? albums.selected.album.artist + (albums.selected.album.year ? " · " + albums.selected.album.year : "") + "  ›" : ""; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight }
+                contentItem: Text { text: albums.selected ? albums.selected.album.artist + (albums.selected.album.year ? " · " + albums.selected.album.year : "") + "  ›" : ""; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight }
                 onClicked: albums.openArtist(albums.selected.album.artist_ref)
             }
-            Label { text: albums.trackModel.length + " tracks · disc and track order"; color: "#acb8c8" }
+            Label { text: albums.trackModel.length + " tracks · disc and track order"; color: "#a4b0a7" }
             Flow {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
@@ -119,15 +119,15 @@ ColumnLayout {
             width: albumGrid.cellWidth; height: albumGrid.cellHeight
             Rectangle {
                 anchors.fill: parent; anchors.margins: 4
-                color: albumTap.hovered ? "#344354" : "#202735"; radius: 6
+                color: albumTap.hovered ? "#303f32" : "#191f1c"; radius: 6
                 HoverHandler { id: albumTap }
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 12; spacing: 5
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 142
-                        color: "#141820"; radius: 4
-                        Label { anchors.centerIn: parent; text: "♪"; font.pixelSize: 44; color: "#acb8c8"; visible: tileCover.status !== Image.Ready }
+                        color: "#111513"; radius: 4
+                        Label { anchors.centerIn: parent; text: "♪"; font.pixelSize: 44; color: "#a4b0a7"; visible: tileCover.status !== Image.Ready }
                         Image {
                             id: tileCover
                             anchors.fill: parent
@@ -137,9 +137,9 @@ ColumnLayout {
                             fillMode: Image.PreserveAspectFit
                         }
                     }
-                    Label { text: modelData.title; font.bold: true; color: "#f2e9db"; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
-                    Label { text: modelData.artist; color: "#acb8c8"; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
-                    Label { text: (modelData.year ? modelData.year + " · " : "") + (modelData.track_count !== null ? modelData.track_count + " tracks" : "Album"); color: "#acb8c8" }
+                    Label { text: modelData.title; font.bold: true; color: "#e8eee8"; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
+                    Label { text: modelData.artist; color: "#a4b0a7"; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
+                    Label { text: (modelData.year ? modelData.year + " · " : "") + (modelData.track_count !== null ? modelData.track_count + " tracks" : "Album"); color: "#a4b0a7" }
                 }
                 // A focusable control gives the same action to keyboard users.
                 Button {
@@ -165,14 +165,14 @@ ColumnLayout {
             required property var modelData
             required property int index
             width: albumTracks.width; height: 68
-            radius: 5; color: index % 2 ? "#1a202a" : "#202735"
+            radius: 5; color: index % 2 ? "#161c18" : "#191f1c"
             RowLayout {
                 anchors.fill: parent; anchors.margins: 8
-                Label { text: modelData.disc + "." + modelData.number; color: "#acb8c8"; Layout.preferredWidth: 36 }
+                Label { text: modelData.disc + "." + modelData.number; color: "#a4b0a7"; Layout.preferredWidth: 36 }
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Label { text: modelData.track.title; font.bold: true; color: "#f2e9db"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                    Label { text: modelData.track.artist; color: "#acb8c8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.track.title; font.bold: true; color: "#e8eee8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.track.artist; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
                 Button { objectName: "playAlbumFromHere"; text: "Play from here"; enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
                 Button { objectName: "enqueueAlbumTrack"; text: "+ Queue"; enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }
@@ -182,7 +182,7 @@ ColumnLayout {
     }
     RowLayout {
         visible: !albums.showDetails
-        Label { text: albums.page ? albums.albumModel.length + " albums on this page" : "Choose a library to browse albums"; color: "#acb8c8"; Layout.fillWidth: true }
+        Label { text: albums.page ? albums.albumModel.length + " albums on this page" : "Choose a library to browse albums"; color: "#a4b0a7"; Layout.fillWidth: true }
         Button { text: "Previous"; enabled: !!albums.page && albums.page.offset !== "0" && !albums.busy; onClicked: albums.pageRequested("previous") }
         Button { text: "Next"; enabled: !!albums.page && albums.page.has_more && !albums.busy; onClicked: albums.pageRequested("next") }
     }

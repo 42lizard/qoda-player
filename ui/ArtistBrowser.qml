@@ -18,7 +18,7 @@ ColumnLayout {
     }
     onSnapshotChanged: updateModel()
     Component.onCompleted: updateModel()
-    Label { text: artists.snapshot ? artists.snapshot.message : "Choose a music library."; Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#acb8c8"; textFormat: Text.PlainText }
+    Label { text: artists.snapshot ? artists.snapshot.message : "Choose a music library."; Layout.fillWidth: true; wrapMode: Text.Wrap; color: "#a4b0a7"; textFormat: Text.PlainText }
     ListView {
         id: list
         Layout.fillWidth: true; Layout.fillHeight: true
@@ -29,13 +29,13 @@ ColumnLayout {
             required property var modelData
             width: list.width; height: 58
             enabled: !artists.busy
-            contentItem: Text { text: modelData.title + "  ›"; color: "#f2e9db"; textFormat: Text.PlainText; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
-            background: Rectangle { color: parent.hovered || parent.visualFocus ? "#344354" : "#202735"; radius: 5 }
+            contentItem: Text { text: modelData.title + "  ›"; color: "#e8eee8"; textFormat: Text.PlainText; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+            background: Rectangle { color: parent.hovered || parent.visualFocus ? "#303f32" : "#191f1c"; radius: 5 }
             onClicked: artists.openArtist(modelData.reference)
         }
     }
     RowLayout {
-        Label { text: artists.page ? artists.artistModel.length + " artists on this page" : "Choose a library to browse artists"; Layout.fillWidth: true; color: "#acb8c8" }
+        Label { text: artists.page ? artists.artistModel.length + " artists on this page" : "Choose a library to browse artists"; Layout.fillWidth: true; color: "#a4b0a7" }
         Button { text: "Previous"; enabled: !!artists.page && artists.page.offset !== "0" && !artists.busy; onClicked: artists.pageRequested("previous") }
         Button { text: "Next"; enabled: !!artists.page && artists.page.has_more && !artists.busy; onClicked: artists.pageRequested("next") }
     }
