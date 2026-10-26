@@ -1,6 +1,6 @@
 # Qoda in the Omarchy bar
 
-The optional `qoda.player` plugin adds a Q icon to the bar. Click it to drop down
+The optional `qoda.player` plugin adds a music-note icon to the bar. Click it to drop down
 the compact controls anchored to that icon. Click again, press Escape, or click
 outside to dismiss. The icon stays available while Qoda is hidden or stopped.
 Its playing indicator follows confirmed backend playback status.

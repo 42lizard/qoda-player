@@ -70,11 +70,18 @@ class Installer(unittest.TestCase):
         shell.parent.mkdir(parents=True)
         original = b'{"bar":{"layout":{"right":[{"id":"omarchy.audio"}]}},"version":1}\n'
         shell.write_bytes(original)
-        with mock.patch.object(widget, "config_home", return_value=self.config), mock.patch.object(widget.subprocess, "run") as run:
+        enabled = False
+        def cli(command, **kwargs):
+            nonlocal enabled
+            if command[:3] == ["omarchy", "plugin", "enable"]:
+                enabled = True
+            if command[:3] == ["omarchy", "bar", "set"] and not enabled:
+                raise RuntimeError("Omarchy cannot configure a widget before it has a bar entry")
+        with mock.patch.object(widget, "config_home", return_value=self.config), mock.patch.object(widget.subprocess, "run", side_effect=cli) as run:
             widget.activate(self.config, ROOT)
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(commands[1], ["omarchy", "bar", "set", "qoda.player", "playerPath", str(ROOT), "--section", "right"])
-        self.assertEqual(commands[2], ["omarchy", "plugin", "enable", "qoda.player", "--section", "right", "--before", "omarchy.audio"])
+        self.assertEqual(commands[2], ["omarchy", "bar", "set", "qoda.player", "playerPath", str(ROOT), "--section", "right"])
+        self.assertEqual(commands[1], ["omarchy", "plugin", "enable", "qoda.player", "--section", "right", "--before", "omarchy.audio"])
         backups = list((self.config / "omarchy/qoda-widget-backups").glob("*/shell.json"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)

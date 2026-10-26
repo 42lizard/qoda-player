@@ -63,9 +63,12 @@ def activate(config, root):
     placement = ["--section", "right"]
     if any(isinstance(entry, dict) and entry.get("id") == "omarchy.audio" for entry in right):
         placement += ["--before", "omarchy.audio"]
-    subprocess.run(["omarchy-shell", "shell", "rescanPlugins"], check=True, timeout=15)
-    subprocess.run(["omarchy", "bar", "set", PLUGIN_ID, "playerPath", str(root), "--section", "right"], check=True, timeout=15)
-    subprocess.run(["omarchy", "plugin", "enable", PLUGIN_ID, *placement], check=True, timeout=15)
+    # First-time QML loading can outlast the shell wrapper's two-second default.
+    shell_env = dict(os.environ, OMARCHY_SHELL_IPC_TIMEOUT="10s")
+    subprocess.run(["omarchy-shell", "shell", "rescanPlugins"], check=True, timeout=15, env=shell_env)
+    subprocess.run(["omarchy", "plugin", "enable", PLUGIN_ID, *placement], check=True, timeout=15, env=shell_env)
+    subprocess.run(["omarchy", "bar", "set", PLUGIN_ID, "playerPath", str(root), "--section", "right"], check=True, timeout=15, env=shell_env)
+
 
 
 def install(config, root=ROOT, enable=False):

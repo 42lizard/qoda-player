@@ -47,9 +47,13 @@ BarWidget {
         anchors.centerIn: parent
         width: 22; height: 22
         opacity: client.connected ? 1 : 0.55
-        Rectangle { x: 3; y: 2; width: 15; height: 15; radius: 8; color: "transparent"; border.width: 2; border.color: root.bar ? root.bar.barForeground : Commons.Color.foreground }
-        Rectangle { x: 14; y: 16; width: 8; height: 2; rotation: 45; color: root.bar ? root.bar.barForeground : Commons.Color.foreground }
-        Rectangle { x: 0; y: 18; width: 4; height: 4; radius: 2; color: Commons.Color.accent; visible: client.connected && client.playing }
+        readonly property color ink: root.bar ? root.bar.barForeground : Commons.Color.foreground
+        Rectangle { x: 5; y: 4; width: 2; height: 13; color: parent.ink; antialiasing: true }
+        Rectangle { x: 15; y: 2; width: 2; height: 13; color: parent.ink; antialiasing: true }
+        Rectangle { x: 5; y: 4; width: 12; height: 3; rotation: -10; transformOrigin: Item.TopLeft; color: parent.ink; antialiasing: true }
+        Rectangle { x: 0; y: 14; width: 7; height: 5; radius: 3; rotation: -15; color: parent.ink; antialiasing: true }
+        Rectangle { x: 10; y: 12; width: 7; height: 5; radius: 3; rotation: -15; color: parent.ink; antialiasing: true }
+        Rectangle { x: 19; y: 18; width: 4; height: 4; radius: 2; color: Commons.Color.accent; visible: client.connected && client.playing }
     }
     WidgetButton {
         id: iconButton
