@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn cancelling_activation_kills_its_owned_helper() {
         let fixture = Fixture::new(
-            "import os,time\nfrom pathlib import Path\nPath(__file__).with_name('pid').write_text(str(os.getpid()))\ntime.sleep(30)",
+            "import os,time\nfrom pathlib import Path\nready=Path(__file__).with_name('pid')\nstaged=ready.with_suffix('.ready')\nstaged.write_text(str(os.getpid()))\nstaged.replace(ready)\ntime.sleep(30)",
         );
         let mut controller = fixture.controller();
         let (events, _received) = mpsc::channel(8);
