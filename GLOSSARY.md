@@ -133,6 +133,9 @@ Listening that can coexist with audio from other applications and supports ordin
 **Fidelity playback**:
 Direct output that prefers decoded PCM sample values unchanged except for selected ReplayGain processing. Strict Fidelity refuses unsupported conversion; optional high-quality fallback permits explicitly reported rate or precision conversion without calling the result sample-perfect.
 
+**Continuous conversion group**:
+Compatible consecutive listening occurrences whose audio conversion retains its history across nominal track boundaries. An explicit reset or unsupported boundary ends the group.
+
 **High-quality fallback**:
 An opt-in Fidelity policy that prefers an exact supported format, then permits high-quality conversion to a supported output format when necessary. It is separate from the choice to assume conventional stereo when a driver cannot report channel positions.
 

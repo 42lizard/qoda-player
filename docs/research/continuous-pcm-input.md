@@ -135,5 +135,6 @@ was injected. This demonstrates a real lookahead/ownership stall for this
 44.1→48 kHz profile, not a universal latency bound. PCM admission cannot stand in
 for nominal ownership to sidestep the authorization horizon. The
 [concrete integration choices](../continuous-conversion-boundary-proposal.md)
-are pending a support/access-boundary decision; this experiment changes no
-production grant policy or playback route.
+record the already delegated recommended default: retain one successor and
+explicitly fall back when the qualified horizon is unavailable. This experiment
+changes no production grant policy or playback route.

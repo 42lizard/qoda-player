@@ -1,6 +1,9 @@
-# Continuous conversion: short-track lookahead decision
+# Continuous conversion: short-track lookahead boundary
 
-Proposed integration boundary for #41; production is not changed by this file.
+Accepted recommended default for #41, 2026-10-26, under the human's standing
+delegation to accept recommended planning defaults. Retain one successor and use
+explicit short/unknown/incompatible-input fallback. Production is not changed by
+this record; qualification and integration remain required.
 The bounded Rust continuous-input experiment matches nine uninterrupted PCM
 references, including unequal gains, and passes cancellation/fault checks.
 
@@ -17,7 +20,7 @@ sufficiently short successor, keeping exactly current plus one future grant and
 waiting for nominal handoff before preparing another source can therefore stall.
 Silently ending the stream or inserting silence would defeat the continuity claim.
 
-## Recommended: retain the existing one-successor access boundary
+## Decision: retain the existing one-successor access boundary
 
 Use continuous conversion only for verified compatible source/output formats
 with enough frames for the qualified lookahead horizon. Start conservatively at
@@ -29,7 +32,7 @@ across that boundary. There is no additional provider access beyond current/next
 Seek, recovery, queue edits affecting committed input and output changes remain
 explicit reset/rebuild boundaries with preserved occurrence/visit and pause fences.
 
-## Alternative: broaden authorized lookahead
+## Considered alternative: broaden authorized lookahead
 
 Prepare as many very short future occurrences as needed, subject to explicit
 frame/occurrence/byte/time caps and account/source/queue revision fences. This
