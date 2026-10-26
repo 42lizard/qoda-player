@@ -38,6 +38,28 @@ HOOKS = """
         function capture(path: string): void { fullFrame.grabToImage(result => result.saveToFile(path)); }
         function captureQueue(path: string): void { queuePane.grabToImage(result => result.saveToFile(path)); }
         function closeQueue(): void { queueDrawer.close(); }
+        function queueDragStart(id: string): bool { queueTabs.currentIndex = 0; return queueReorder.begin(id); }
+        function queueDragDrop(id: string, after: bool): bool { return queueReorder.propose(id, after) && queueReorder.finish(true); }
+        function queueFenceChange(): void { const next = Object.assign({}, root.snapshot); next.queue = Object.assign({}, next.queue, {revision: "2"}); root.snapshot = next; }
+        function playlistDragFixture(): void {
+            const next = Object.assign({}, root.snapshot);
+            next.playlists = {busy: false, uncertain: false, list: null, message: "Fixture playlist", selected: {revision: "fixture-r1", playlist: {reference: {source: "fixture", key: "playlist"}, title: "Fixture playlist", can_edit: true, smart: false}, entries: [
+                {id: "item-1", title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry", track: {reference: {source: "fixture", key: "42"}}},
+                {id: "item-2", title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry", track: {reference: {source: "fixture", key: "42"}}},
+                {id: "item-3", title: "Night walking", artist: "Mira Vale", album: "Soft geometry", track: {reference: {source: "fixture", key: "43"}}}]}};
+            root.snapshot = next; root.playlistEntries = next.playlists.selected.entries;
+            const library = root.libraryId; root.libraryId = ""; libraryTabs.currentIndex = 1; root.libraryId = library;
+        }
+        function playlistDragStart(id: string): bool { return playlistReorder.begin(id); }
+        function playlistDragDrop(id: string, after: bool): bool { return playlistReorder.propose(id, after) && playlistReorder.finish(true); }
+        function playlistDragRestricted(mode: string): void {
+            const next = JSON.parse(JSON.stringify(root.snapshot));
+            next.playlists.busy = mode === "busy"; next.playlists.uncertain = mode === "uncertain";
+            next.playlists.selected.playlist.can_edit = mode !== "readonly";
+            next.playlists.selected.playlist.smart = mode === "smart";
+            root.snapshot = next;
+        }
+
         function scrollRail(): void { railScroll.contentItem.contentY = Math.max(0, railScroll.contentHeight - railScroll.availableHeight); }
         function searchFixture(): void {
             const next = Object.assign({}, root.snapshot);
@@ -81,7 +103,7 @@ def fixture():
             "covers": {str(index): (ROOT / "crates/qoda-provider/tests/fixtures/cover.jpg").as_uri()
                        for index in range(9)}},
         "queue": {
-            "entries": [{"id": str(index), "selected": index == 0, "can_move": True,
+            "entries": [{"id": str(index), "selected": index == 0, "can_move": index > 0,
                          "track": track(index)} for index in range(3)],
             "session": "fixture", "revision": "1", "position_seconds": 42,
             "membership_count": 3, "shuffled": False, "repeat": "off",
@@ -231,6 +253,51 @@ def check(output=None):
                 capture("search-small")
                 assert state["intent"] == "paused"
                 assert all(request["op"] == "hello" for request in requests), requests
+                ipc("resize", 1320, 820)
+                time.sleep(0.15)
+                assert ipc("queueDragStart", "0") == "false"
+                assert ipc("queueDragStart", "1") == "true"
+                capture("queue-drag-proposal", queue=True)
+                assert ipc("queueDragDrop", "2", "true") == "true"
+                deadline = time.monotonic() + 3
+                while len([request for request in requests if request["op"] == "queue_move"]) < 1:
+                    assert time.monotonic() < deadline
+                    time.sleep(0.01)
+                move = [request for request in requests if request["op"] == "queue_move"][0]
+                assert move["occurrence"] == "1" and move["before"] is None
+                assert move["queue_revision"] == "1" and move["queue_session"] == "fixture"
+                assert move["account_epoch"] == "0" and move["instance"] == "fixture"
+                assert [entry["id"] for entry in status()["queue"]["entries"]] == ["0", "1", "2"]
+                assert ipc("queueDragStart", "1") == "true"
+                ipc("queueFenceChange")
+                assert not status()["reorder"]["queueActive"]
+                assert ipc("queueDragDrop", "2", "true") == "false"
+                ipc("playlistDragFixture")
+                time.sleep(0.15)
+                capture("playlist-drag-wide")
+                assert ipc("playlistDragStart", "item-3") == "true"
+                assert ipc("playlistDragDrop", "item-1", "false") == "true"
+                deadline = time.monotonic() + 3
+                while len([request for request in requests if request["op"] == "playlist_edit"]) < 1:
+                    assert time.monotonic() < deadline
+                    time.sleep(0.01)
+                edit = [request for request in requests if request["op"] == "playlist_edit"][0]
+                assert edit["reference"] == {"source": "fixture", "key": "playlist"}
+                assert edit["expected_revision"] == "fixture-r1"
+                assert edit["edit"] == {"action": "move", "item_id": "item-3", "after": None}
+                assert edit["account_epoch"] == "0" and edit["instance"] == "fixture"
+                assert status()["playlists"]["order"] == ["item-1", "item-2", "item-3"]
+                for restriction in ["readonly", "smart", "busy", "uncertain"]:
+                    ipc("playlistDragRestricted", restriction)
+                    assert not status()["reorder"]["playlistEnabled"]
+                    assert ipc("playlistDragStart", "item-1") == "false"
+                ipc("playlistDragRestricted", "ready")
+                ipc("resize", 540, 760)
+                time.sleep(0.15)
+                capture("playlist-drag-small")
+                assert len([request for request in requests if request["op"] == "queue_move"]) == 1
+                assert len([request for request in requests if request["op"] == "playlist_edit"]) == 1
+                assert all(request["op"] in ["hello", "queue_move", "playlist_edit"] for request in requests), requests
                 log.flush()
                 log.seek(0)
                 errors = [line for line in log.read().splitlines() if any(text in line for text in
@@ -238,6 +305,7 @@ def check(output=None):
                            "Failed to load", "SyntaxError", "Binding loop"])]
                 assert not errors, "QML runtime errors: " + repr(errors)
                 print("Wide/narrow/small full-window rendering, queue drawer, Previous viewport and retained browser/queue state passed")
+                print("Production queue/playlist drag wiring preserved frozen fences and backend-owned order; stale/restricted moves refused")
                 print("Fictional socket only; no backend, credentials, Plex, audio or compositor changes")
                 if output != base / "captures":
                     print("Captures: " + str(output))
