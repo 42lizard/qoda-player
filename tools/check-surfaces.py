@@ -27,6 +27,8 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   db.execute('INSERT INTO pages VALUES(?,?,?,?,?,?)',('fixture',source,payload,int(time.time()),1,len(payload)+128))
  database.chmod(0o600)
 
+ # Reproduce the pre-audio-settings config directory created under umask 022.
+ legacy_config=Path(temp+'/config/qoda');legacy_config.mkdir(parents=True);legacy_config.chmod(0o755)
  p=None;ui=None;f=None;s=None;hung=None;log=open(temp+'/ui.log','w+')
  try:
   def start(unavailable=False):
@@ -48,7 +50,8 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
    while not predicate(state):
     assert time.monotonic()<end,'Operation timed out'
     state=json.loads(f.readline(2**24));assert allow_error or not state.get('error'),'Controlled error: '+str(state.get('error'))
-  start();assert state['intent']=='paused' and not state['sign_in']['connected'];assert bus('get-property',name,path,player,'PlaybackStatus').stdout.strip()=='s "Stopped"'
+  start();assert state['output']['available'] and state['replaygain']['available'];assert legacy_config.stat().st_mode & 0o777 == 0o700
+  assert state['intent']=='paused' and not state['sign_in']['connected'];assert bus('get-property',name,path,player,'PlaybackStatus').stdout.strip()=='s "Stopped"'
   assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('Native desktop bus registered with stopped, metadata-free, unsigned-in state',flush=True)
 
   assert bus('get-property',name,path,'org.mpris.MediaPlayer2','CanRaise').stdout.strip()=='b false'

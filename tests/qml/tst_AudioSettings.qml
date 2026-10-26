@@ -34,6 +34,31 @@ TestCase {
         settings.output = {selection: {mode: "fidelity", device: "fixture"}, available: true, fidelity_available: true, devices: [{id: "fixture", name: "Fictional direct PCM"}], message: "Paused; Resume explicitly"};
         verify(!apply.enabled);
     }
+    function test_pointer_output_selection_and_apply() {
+        const mode = findChild(settings, "outputMode");
+        mouseClick(mode, mode.width / 2, mode.height / 2);
+        tryCompare(mode.popup, "opened", true);
+        const fidelity = mode.popup.contentItem.itemAtIndex(1);
+        verify(!!fidelity);
+        mouseClick(fidelity, fidelity.width / 2, fidelity.height / 2);
+        tryCompare(settings, "outputModeDraft", 1);
+        tryCompare(mode.popup, "visible", false);
+        waitForPolish(settings);
+        const device = findChild(settings, "outputDevice");
+        verify(waitForRendering(settings));
+        mouseClick(device, device.width / 2, device.height / 2);
+        tryCompare(device.popup, "opened", true);
+        const pcm = device.popup.contentItem.itemAtIndex(0);
+        verify(!!pcm);
+        mouseClick(pcm, pcm.width / 2, pcm.height / 2);
+        tryCompare(settings, "outputDeviceDraft", "fixture");
+        const apply = findChild(settings, "applyOutput");
+        verify(apply.enabled);
+        mouseClick(apply, apply.width / 2, apply.height / 2);
+        compare(outputs.count, 1);
+        compare(outputs.signalArguments[0][0], "fidelity");
+        compare(outputs.signalArguments[0][1], "fixture");
+    }
     function test_missing_device_and_disconnected_output_cannot_be_applied() {
         settings.outputModeDraft = 1; settings.outputDeviceDraft = "not-discovered";
         verify(!findChild(settings, "applyOutput").enabled);

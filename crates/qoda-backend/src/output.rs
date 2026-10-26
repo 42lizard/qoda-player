@@ -190,7 +190,7 @@ impl Settings {
             let root = path
                 .as_ref()
                 .ok_or("Output settings directory unavailable; playback stays paused.")?;
-            let dir = crate::cache_files::Directory::open(root)?;
+            let dir = crate::cache_files::Directory::open_settings(root)?;
             let Some(file) = dir.file("output.json")? else {
                 return Ok(Selection::Desktop);
             };
@@ -258,7 +258,7 @@ impl Settings {
         if let Some(issue) = Self::load(self.path.clone()).issue.or(self.issue) {
             return Err(issue);
         }
-        let dir = crate::cache_files::Directory::open(
+        let dir = crate::cache_files::Directory::open_settings(
             self.path.as_ref().ok_or("Output settings unavailable")?,
         )?;
         let bytes = serde_json::to_vec(&Preferences {
@@ -361,6 +361,33 @@ mod tests {
         assert!(settings.selection.is_none());
         assert!(settings.set(Selection::Desktop).is_err());
         assert_eq!(std::fs::read(path.join("output.json")).unwrap(), future);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn legacy_readable_config_keeps_output_and_gain_available() {
+        use std::os::unix::fs::PermissionsExt;
+        let path =
+            std::env::temp_dir().join(format!("qoda-legacy-config-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let identities = path.join("source-identities.json");
+        std::fs::write(&identities, b"preserve existing identities").unwrap();
+        std::fs::set_permissions(&identities, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let settings = Settings::load(Some(path.clone()));
+        assert_eq!(settings.view(&[])["available"], true);
+        assert_eq!(settings.selection, Some(Selection::Desktop));
+        assert_eq!(
+            crate::gain::Settings::load(Some(path.clone())).view()["available"],
+            true
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::read(&identities).unwrap(),
+            b"preserve existing identities"
+        );
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]

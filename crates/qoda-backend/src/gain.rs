@@ -334,7 +334,7 @@ impl Settings {
     pub fn load(path: Option<PathBuf>) -> Self {
         let read = || {
             let path = path.as_ref().ok_or("No audio settings directory")?;
-            let dir = crate::cache_files::Directory::open(path)?;
+            let dir = crate::cache_files::Directory::open_settings(path)?;
             let Some(file) = dir.file("audio.json")? else {
                 return Ok(Mode::Auto);
             };
@@ -373,7 +373,7 @@ impl Settings {
         if let Some(issue) = self.issue {
             return Err(issue);
         }
-        let dir = crate::cache_files::Directory::open(
+        let dir = crate::cache_files::Directory::open_settings(
             self.path.as_ref().ok_or("No audio settings directory")?,
         )?;
         let bytes = serde_json::to_vec(&Preferences { version: 1, mode })

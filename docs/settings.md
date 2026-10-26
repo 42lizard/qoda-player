@@ -23,3 +23,11 @@ fixtures cover wide/narrow settings, content bounds, browser space and deferred
 Search focus. Isolated native surface checks cover compact/full category
 retention and Search focus after dismissal. Physical keyboard and multiple-output
 qualification remain tracked in issue #18.
+
+Older installations may have a `0755` Qoda configuration directory created by
+the source-identity saver. Audio/output settings safely tighten an owned directory
+to `0700` before loading, provided it is not writable by others. The operation
+uses the opened directory descriptor and preserves existing files. Symlinked,
+foreign-owned or group/world-writable directories remain unavailable; cache
+directory validation stays strict. This migration prevents valid legacy installs
+from silently disabling both output selection and ReplayGain.

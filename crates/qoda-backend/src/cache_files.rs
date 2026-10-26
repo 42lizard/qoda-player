@@ -14,6 +14,15 @@ type Result<T> = std::result::Result<T, &'static str>;
 pub(crate) struct Directory(pub File);
 impl Directory {
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_private(path, false)
+    }
+    // Earlier source-identity persistence created the Qoda config directory
+    // with the process umask (usually 0755). Tighten only owned directories
+    // that nobody else can write, using the opened descriptor, not the path.
+    pub fn open_settings(path: &Path) -> Result<Self> {
+        Self::open_private(path, true)
+    }
+    fn open_private(path: &Path, migrate_readable_settings: bool) -> Result<Self> {
         match std::fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -31,6 +40,18 @@ impl Directory {
         let m = file
             .metadata()
             .map_err(|_| "Cache directory could not be inspected.")?;
+        if migrate_readable_settings
+            && m.is_dir()
+            && m.uid() == unsafe { libc::getuid() }
+            && m.permissions().mode() & 0o022 == 0
+            && m.permissions().mode() & 0o077 != 0
+        {
+            file.set_permissions(std::fs::Permissions::from_mode(0o700))
+                .map_err(|_| "Settings directory could not be made private.")?;
+        }
+        let m = file
+            .metadata()
+            .map_err(|_| "Directory could not be inspected.")?;
         if !m.is_dir()
             || m.uid() != unsafe { libc::getuid() }
             || m.permissions().mode() & 0o077 != 0
@@ -103,4 +124,41 @@ pub(crate) fn private_file(m: &Metadata) -> bool {
         && m.uid() == unsafe { libc::getuid() }
         && m.permissions().mode() & 0o077 == 0
         && m.nlink() == 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn settings_migration_does_not_relax_cache_or_unsafe_directory_checks() {
+        let root = std::env::temp_dir().join(format!("qoda-directory-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        for mode in [0o755, 0o750] {
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(Directory::open(&root).is_err());
+            assert!(Directory::open_settings(&root).is_ok());
+            assert_eq!(
+                std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        for mode in [0o775, 0o777] {
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(Directory::open_settings(&root).is_err());
+            assert_eq!(
+                std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+                mode
+            );
+        }
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link = root.with_extension("link");
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+        assert!(Directory::open_settings(&link).is_err());
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        std::fs::remove_file(link).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
 }
