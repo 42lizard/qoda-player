@@ -15,6 +15,7 @@ PanelWindow {
     readonly property var presentation: snapshot.presentation || ({})
     readonly property bool known: connected && !!presentation.known
     readonly property var track: known ? presentation.track : selectedTrack
+    readonly property var gain: snapshot.replaygain ? snapshot.replaygain.applied : null
     readonly property int keyboardMode: WlrLayershell.keyboardFocus
     signal searchRequested()
     signal expandRequested()
@@ -80,6 +81,7 @@ PanelWindow {
                     ProgressBar { from: 0; to: panel.known && panel.track.duration_seconds > 0 ? panel.track.duration_seconds : 1; value: panel.known ? panel.presentation.position_seconds || 0 : 0; Layout.fillWidth: true }
                     Label { text: panel.timestamp(panel.known ? panel.track.duration_seconds : null); color: "#a4b0a7" }
                 }
+                Label { visible: !!panel.gain; text: panel.gain ? (panel.known ? "" : "Prepared · ") + "ReplayGain " + panel.gain.basis + " · " + panel.gain.db.toFixed(2) + " dB" : ""; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 RowLayout {
                     Button { text: "Previous"; enabled: panel.connected && !!panel.presentation.can_previous; onClicked: panel.queueRequested("previous") }
                     Button { id: play; text: panel.snapshot.intent === "playing" ? "Pause" : "Resume"; enabled: panel.connected && (panel.snapshot.intent === "playing" ? !!panel.presentation.can_pause : !!panel.presentation.can_play); onClicked: panel.transportRequested(panel.snapshot.intent === "playing" ? "pause" : "resume") }

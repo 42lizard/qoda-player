@@ -12,6 +12,8 @@ Rectangle {
     readonly property var track: known ? presentation.track : selectedTrack
     readonly property real duration: known && track && track.duration_seconds > 0 ? track.duration_seconds : selectedTrack && selectedTrack.duration_ms > 0 ? selectedTrack.duration_ms / 1000 : 0
     readonly property real position: known && presentation.position_seconds !== null ? presentation.position_seconds : snapshot.queue ? snapshot.queue.position_seconds || 0 : 0
+    readonly property var gain: snapshot.replaygain && snapshot.replaygain.applied ? snapshot.replaygain.applied : null
+    readonly property string gainText: gain ? (known ? "" : "Prepared · ") + (gain.basis === "off" ? "ReplayGain off" : "ReplayGain " + gain.basis + " · " + gain.db.toFixed(2) + " dB") : "ReplayGain " + (snapshot.replaygain ? snapshot.replaygain.mode : "off") + " · awaiting preparation"
     signal transportRequested(string op)
     signal queueRequested(string op)
     signal seekRequested(real seconds)
@@ -35,6 +37,7 @@ Rectangle {
             spacing: 3
             Label { text: transport.track ? transport.track.title : "Choose something to play"; color: "#e8eee8"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
             Label { text: transport.track ? transport.track.artist + (transport.track.album ? " · " + transport.track.album : "") : "Browse your Plex music library"; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { visible: transport.width < 800; text: transport.gainText; color: "#a4b0a7"; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: smallGainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: smallGainHover } }
             Label { visible: !!transport.track && !transport.known; text: "Selected · playback unconfirmed"; color: "#a4b0a7"; font.pixelSize: 11 }
         }
         ColumnLayout {
@@ -69,7 +72,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredWidth: 210
             Label { text: "Desktop · PipeWire"; color: "#e8eee8"; Layout.alignment: Qt.AlignRight }
-            Label { text: "ReplayGain off"; color: "#a4b0a7"; Layout.alignment: Qt.AlignRight }
+            Label { text: transport.gainText; color: "#a4b0a7"; Layout.alignment: Qt.AlignRight; ToolTip.visible: gainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: gainHover } }
         }
     }
 }

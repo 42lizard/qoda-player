@@ -61,7 +61,7 @@ fn decode(value: &str) -> Result<Queue, Error> {
             }
             Queue::from_legacy(legacy.queue).map_err(|_| Error::Corrupt)
         }
-        2 | 3 => serde_json::from_str::<Document>(value)
+        2..=4 => serde_json::from_str::<Document>(value)
             .map(|d| d.queue)
             .map_err(|_| Error::Corrupt),
         _ => Err(Error::Newer),
@@ -137,7 +137,7 @@ fn schema(conn: &Connection) -> Result<i64, Error> {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .map_err(|_| Error::Corrupt)?;
-    if version > 3 {
+    if version > 4 {
         return Err(Error::Newer);
     }
     let id: i32 = conn
@@ -216,12 +216,12 @@ impl Store {
             tx.execute_batch("CREATE TABLE session(slot INTEGER PRIMARY KEY CHECK(slot=1),payload TEXT NOT NULL);").map_err(|_|Error::Unavailable)?;
             tx.pragma_update(None, "application_id", APP_ID)
                 .map_err(|_| Error::Unavailable)?;
-            tx.pragma_update(None, "user_version", 3)
+            tx.pragma_update(None, "user_version", 4)
                 .map_err(|_| Error::Unavailable)?;
             tx.commit().map_err(|_| Error::Unavailable)?;
         }
         let queue = load(&conn)?;
-        if (1..3).contains(&version) {
+        if (1..4).contains(&version) {
             // Copy a consistent pre-migration database before the transaction.
             let legacy_store = Self {
                 conn,
@@ -230,13 +230,13 @@ impl Store {
             legacy_store.backup(true)?;
             conn = legacy_store.conn;
             let payload = serde_json::to_string(&Document {
-                format: 3,
+                format: 4,
                 queue: queue.clone(),
             })
             .map_err(|_| Error::Corrupt)?;
             let tx = conn.transaction().map_err(|_| Error::Unavailable)?;
             tx.execute("INSERT INTO session(slot,payload) VALUES(1,?1) ON CONFLICT(slot) DO UPDATE SET payload=excluded.payload",[payload]).map_err(|_|Error::Unavailable)?;
-            tx.pragma_update(None, "user_version", 3)
+            tx.pragma_update(None, "user_version", 4)
                 .map_err(|_| Error::Unavailable)?;
             tx.commit().map_err(|_| Error::Unavailable)?;
         }
@@ -256,7 +256,7 @@ impl Store {
     }
     fn save(&mut self, queue: &Queue) -> Result<Option<Error>, Error> {
         let payload = serde_json::to_string(&Document {
-            format: 3,
+            format: 4,
             queue: queue.clone(),
         })
         .map_err(|_| Error::Corrupt)?;
@@ -404,7 +404,7 @@ pub fn restore_latest(path: &Path) -> Result<(), Error> {
         .pop()
         .ok_or(Error::Backup)?;
     let source = connection(&backup, true)?;
-    if !matches!(schema(&source)?, 1..=3) {
+    if !matches!(schema(&source)?, 1..=4) {
         return Err(Error::Corrupt);
     }
     load(&source)?;
@@ -632,6 +632,7 @@ mod tests {
             "recorded",
             "navigation_dropped",
             "unavailable",
+            "album_session",
         ] {
             fields.remove(key);
         }
@@ -678,7 +679,7 @@ mod tests {
                 .conn
                 .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
                 .unwrap(),
-            3
+            4
         );
         let backup = backup_files(&store.backups()).unwrap().pop().unwrap();
         let old = connection(&backup, true).unwrap();
@@ -706,7 +707,7 @@ mod tests {
         store.conn.pragma_update(None, "user_version", 2).unwrap();
         drop(store);
         let (mut store, restored) = Store::open(&f.path).unwrap();
-        assert_eq!(schema(&store.conn).unwrap(), 3);
+        assert_eq!(schema(&store.conn).unwrap(), 4);
         assert!(restored.snapshot().unavailable_entries.is_empty());
         let backup = backup_files(&store.backups()).unwrap().pop().unwrap();
         let old = connection(&backup, true).unwrap();
@@ -722,6 +723,32 @@ mod tests {
         drop(store);
         let (_, restored) = Store::open(&f.path).unwrap();
         assert_eq!(restored.snapshot().unavailable_entries[0].id, id);
+    }
+    #[test]
+    fn version_three_migrates_with_backup_and_no_invented_album_origin() {
+        let fixture = Fixture::new();
+        let (store, _) = Store::open(&fixture.path).unwrap();
+        let queue = queued("v3");
+        let mut old = serde_json::to_value(&queue).unwrap();
+        old.as_object_mut().unwrap().remove("album_session");
+        let payload = serde_json::json!({"format":3,"queue":old}).to_string();
+        store
+            .conn
+            .execute("INSERT INTO session VALUES(1,?1)", [payload.clone()])
+            .unwrap();
+        store.conn.pragma_update(None, "user_version", 3).unwrap();
+        drop(store);
+        let (store, restored) = Store::open(&fixture.path).unwrap();
+        assert_eq!(schema(&store.conn).unwrap(), 4);
+        assert!(!restored.album_gain_eligible());
+        let backup = backup_files(&store.backups()).unwrap().pop().unwrap();
+        let old = connection(&backup, true).unwrap();
+        assert_eq!(schema(&old).unwrap(), 3);
+        assert_eq!(
+            old.query_row("SELECT payload FROM session", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            payload
+        );
     }
     #[test]
     fn failed_migration_rolls_back_without_erasing_legacy_data() {
@@ -822,7 +849,7 @@ mod tests {
         assert_eq!(std::fs::read(&f.path).unwrap(), before);
         std::fs::remove_file(&f.path).unwrap();
         let (store, _) = Store::open(&f.path).unwrap();
-        store.conn.pragma_update(None, "user_version", 4).unwrap();
+        store.conn.pragma_update(None, "user_version", 5).unwrap();
         drop(store);
         let before = std::fs::read(&f.path).unwrap();
         assert!(matches!(Store::open(&f.path), Err(Error::Newer)));
@@ -833,7 +860,7 @@ mod tests {
         store.save(&queued("future")).unwrap();
         store
             .conn
-            .execute("UPDATE session SET payload='{\"format\":4}'", [])
+            .execute("UPDATE session SET payload='{\"format\":5}'", [])
             .unwrap();
         drop(store);
         let before = std::fs::read(&future.path).unwrap();

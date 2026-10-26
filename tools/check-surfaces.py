@@ -42,12 +42,12 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
    else:raise AssertionError('Backend socket did not start')
    f.write(b'{"op":"hello","protocol":1}\n');f.flush();state=json.loads(f.readline(2**24));instance=state['instance'];until(lambda v:v.get('mpris',{}).get('state')==('unavailable' if unavailable else 'available'))
   def command(op,**fields):f.write((json.dumps({'op':op,'instance':instance,**fields})+'\n').encode());f.flush()
-  def until(predicate):
+  def until(predicate,allow_error=False):
    global state
    end=time.monotonic()+8
    while not predicate(state):
     assert time.monotonic()<end,'Operation timed out'
-    state=json.loads(f.readline(2**24));assert not state.get('error'),'Controlled error: '+str(state.get('error'))
+    state=json.loads(f.readline(2**24));assert allow_error or not state.get('error'),'Controlled error: '+str(state.get('error'))
   start();assert state['intent']=='paused' and not state['sign_in']['connected'];assert bus('get-property',name,path,player,'PlaybackStatus').stdout.strip()=='s "Stopped"'
   assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('Native desktop bus registered with stopped, metadata-free, unsigned-in state',flush=True)
 
@@ -69,6 +69,15 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   command('set_gapless',enabled=True);until(lambda v:v['gapless']['enabled']);assert state['intent']=='paused'
   bus('set-property',name,path,player,'Shuffle','b','true');until(lambda v:v['queue']['shuffled'])
   bus('set-property',name,path,player,'LoopStatus','s','Playlist');until(lambda v:v['queue']['repeat']=='all')
+  before_gain_queue=state['queue']
+  for mode in ['off','track','album','auto']:
+   command('set_replaygain',mode=mode);until(lambda v:v['replaygain']['mode']==mode)
+   assert state['queue']==before_gain_queue and state['intent']=='paused'
+  command('set_replaygain',mode='invalid');until(lambda v:bool(v.get('error')),allow_error=True)
+  assert state['error']=='Choose Off, Track, Album or Auto ReplayGain.'
+  assert state['replaygain']['mode']=='auto' and state['queue']==before_gain_queue
+  command('set_replaygain',mode='track');until(lambda v:v['replaygain']['mode']=='track' and not v.get('error'),allow_error=True)
+  print('ReplayGain mode changes persisted without queue/playback changes; invalid mode rejected',flush=True)
   for method in ['Play','Pause','Stop','Next','Previous']:bus('call',name,path,player,method)
   bus('call',name,path,player,'Seek','x','1000000');bus('call',name,path,player,'SetPosition','ox','/org/mpris/MediaPlayer2/TrackList/NoTrack','1000000')
   assert bus('set-property',name,path,player,'Volume','d','0.5',ok=False).returncode!=0
@@ -90,6 +99,7 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   else:raise AssertionError('UI never connected')
   until(lambda v:v.get('ui',{}).get('can_raise'))
   assert bus('get-property',name,path,'org.mpris.MediaPlayer2','CanRaise').stdout.strip()=='b true'
+  ipc('showAudio');audio_settings=json.loads(ipc('status'));assert audio_settings['audioExpanded'] and audio_settings['replaygain']['mode']=='track'
   ipc('showCache');initial=json.loads(ipc('status'));assert initial['form']=='full' and initial['cacheExpanded'] and initial['artworkCache']['budget_mib']==1
   assert not initial['presentation']['known'] and initial['presentation']['track'] is None
   ipc('previewCompact');time.sleep(.3);compact=json.loads(ipc('status'))
@@ -135,7 +145,7 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   bus('set-property',name,path,player,'Shuffle','b','true');until(lambda v:v['queue']['shuffled']);print('Desktop controls remained active while native QML was hidden',flush=True)
   bus('call',name,path,'org.mpris.MediaPlayer2','Quit');p.wait(timeout=15);assert p.returncode==0;ui.wait(timeout=5);assert ui.returncode==0;f.close();f=None;s.close();s=None
   assert bus('get-property',name,path,player,'PlaybackStatus',ok=False).returncode!=0
-  start();assert state['metadata_cache']['budget_mib']==1;assert state['artwork_cache']['budget_mib']==1;assert state['queue']['shuffled'] and state['queue']['repeat']=='all' and state['intent']=='paused';assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('MPRIS Quit closed backend/UI and released the name; restart retained modes without sign-in or autoplay',flush=True)
+  start();assert state['replaygain']['mode']=='track';assert state['metadata_cache']['budget_mib']==1;assert state['artwork_cache']['budget_mib']==1;assert state['queue']['shuffled'] and state['queue']['repeat']=='all' and state['intent']=='paused';assert bus('get-property',name,path,player,'Metadata').stdout.strip()=='a{sv} 0';print('MPRIS Quit closed backend/UI and released the name; restart retained modes without sign-in or autoplay',flush=True)
   command('quit');p.wait(timeout=15);assert p.returncode==0;f.close();f=None;s.close();s=None
   start(unavailable=True);assert state['intent']=='paused'
   ui=subprocess.Popen(['quickshell','--path',str(root/'ui'),'--no-duplicate'],env=env,stdout=log,stderr=log)

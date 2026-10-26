@@ -1,5 +1,6 @@
 //! Native ownership and playlist IDs stay on one thread. Decoder selection is
 //! distinct from a positive nominal clock; buffered predecessors can be unknown.
+use crate::gain::Applied;
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -51,7 +52,9 @@ pub enum StageResult {
     MissedWindow,
 }
 pub enum Command {
+    #[cfg(test)]
     Load(u64, String, f64),
+    LoadGain(u64, String, f64, Applied),
     Pause(bool),
     Stop,
     Quit,
@@ -59,6 +62,7 @@ pub enum Command {
         owner: u64,
         next: u64,
         url: String,
+        gain: Option<Applied>,
         reply: mpsc::Sender<Result<StageResult, &'static str>>,
     },
     Unstage {
@@ -87,6 +91,7 @@ pub struct Status {
     pub staged_generation: Option<u64>,
     #[serde(serialize_with = "optional_decimal")]
     pub handoff_from: Option<u64>,
+    pub gain: Option<Applied>,
 }
 fn decimal<S: serde::Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&value.to_string())
@@ -113,7 +118,7 @@ struct Native {
     h: *mut c_void,
     current: Status,
     entry: Option<i64>,
-    entries: HashMap<i64, u64>,
+    entries: HashMap<i64, (u64, Option<Applied>)>,
     future: Option<(i64, u64)>,
     ended: Option<(i64, u64)>,
     intent: Arc<AtomicBool>,
@@ -170,6 +175,7 @@ impl Native {
         self.current.position_seconds = None;
         self.current.staged_generation = None;
         self.current.handoff_from = None;
+        self.current.gain = None;
         stopped
     }
     fn pump(&mut self) {
@@ -180,7 +186,7 @@ impl Native {
             }
             if event.id == 6 && !event.data.is_null() {
                 let id = unsafe { (*event.data.cast::<StartFile>()).entry };
-                if let Some(&generation) = self.entries.get(&id) {
+                if let Some((generation, gain)) = self.entries.get(&id).cloned() {
                     let previous = self.current.generation;
                     let handoff = if generation != previous {
                         if self.ended != self.entry.map(|entry| (entry, previous)) {
@@ -197,6 +203,7 @@ impl Native {
                     };
                     self.current = Status {
                         generation,
+                        gain,
                         handoff_from: handoff,
                         paused: self.current.paused,
                         ..Default::default()
@@ -250,7 +257,41 @@ impl Native {
             std::thread::sleep(Duration::from_millis(2));
         }
     }
-    fn stage(&mut self, owner: u64, next: u64, url: String) -> Result<StageResult, &'static str> {
+    fn load(&mut self, generation: u64, url: String, position: f64, gain: Option<Applied>) {
+        let options = match &gain {
+            Some(gain) => format!("start={position},{}", gain.filter()),
+            None => format!("start={position}"),
+        };
+        self.entries.clear();
+        self.entry = None;
+        self.future = None;
+        self.ended = None;
+        self.current = Status {
+            generation,
+            paused: true,
+            ..Default::default()
+        };
+        if !self.command(&[
+            "loadfile".into(),
+            url,
+            "replace".into(),
+            "-1".into(),
+            options,
+        ]) {
+            self.current.error = Some("The audio engine rejected a playback command");
+        } else if let Some(id) = unsafe { property::<i64>(self.h, "playlist/0/id", 4) } {
+            self.entries.insert(id, (generation, gain));
+        } else {
+            self.current.error = Some("The audio engine did not identify the loaded entry");
+        }
+    }
+    fn stage(
+        &mut self,
+        owner: u64,
+        next: u64,
+        url: String,
+        gain: Option<Applied>,
+    ) -> Result<StageResult, &'static str> {
         self.pump();
         self.sample();
         if self.current.generation != owner
@@ -273,13 +314,15 @@ impl Native {
             url,
             "append".into(),
             "-1".into(),
-            "start=0".into(),
+            gain.as_ref()
+                .map(|gain| format!("start=0,{}", gain.filter()))
+                .unwrap_or_else(|| "start=0".into()),
         ]) {
             return Err("The audio engine rejected next-file preparation");
         }
         let id = unsafe { property::<i64>(self.h, "playlist/1/id", 4) }
             .ok_or("The next native entry was not identified")?;
-        self.entries.insert(id, next);
+        self.entries.insert(id, (next, gain));
         self.future = Some((id, next));
         Ok(StageResult::Ready)
     }
@@ -378,6 +421,9 @@ impl Player {
                 ("ao".into(), output),
                 ("volume".into(), "100".into()),
                 ("replaygain".into(), "no".into()),
+                ("volume-gain".into(), "0".into()),
+                ("speed".into(), "1".into()),
+                ("audio-swresample-o".into(), "dither_method=none".into()),
                 ("terminal".into(), "no".into()),
                 ("gapless-audio".into(), "weak".into()),
                 ("prefetch-playlist".into(), "yes".into()),
@@ -421,39 +467,21 @@ impl Player {
                             native.current.error = Some("The audio engine rejected stop");
                         }
                     }
+                    #[cfg(test)]
                     Ok(Command::Load(generation, url, position)) => {
-                        native.entries.clear();
-                        native.entry = None;
-                        native.future = None;
-                        native.ended = None;
-                        native.current = Status {
-                            generation,
-                            paused: true,
-                            ..Default::default()
-                        };
-                        if !native.command(&[
-                            "loadfile".into(),
-                            url,
-                            "replace".into(),
-                            "-1".into(),
-                            format!("start={position}"),
-                        ]) {
-                            native.current.error =
-                                Some("The audio engine rejected a playback command");
-                        } else if let Some(id) = unsafe { property::<i64>(h, "playlist/0/id", 4) } {
-                            native.entries.insert(id, generation);
-                        } else {
-                            native.current.error =
-                                Some("The audio engine did not identify the loaded entry");
-                        }
+                        native.load(generation, url, position, None)
+                    }
+                    Ok(Command::LoadGain(generation, url, position, gain)) => {
+                        native.load(generation, url, position, Some(gain))
                     }
                     Ok(Command::Stage {
                         owner,
                         next,
                         url,
+                        gain,
                         reply,
                     }) => {
-                        let result = native.stage(owner, next, url);
+                        let result = native.stage(owner, next, url, gain);
                         native.pump();
                         native.sample();
                         *shared.lock().unwrap() = native.current.clone();
@@ -507,6 +535,7 @@ impl Player {
         .await
         .map_err(|_| "The native acknowledgement worker failed")?
     }
+    #[cfg(test)]
     pub async fn stage(
         &self,
         owner: u64,
@@ -517,6 +546,23 @@ impl Player {
             owner,
             next,
             url,
+            gain: None,
+            reply,
+        })
+        .await
+    }
+    pub async fn stage_gain(
+        &self,
+        owner: u64,
+        next: u64,
+        url: String,
+        gain: Applied,
+    ) -> Result<StageResult, &'static str> {
+        self.reply(|reply| Command::Stage {
+            owner,
+            next,
+            url,
+            gain: Some(gain),
             reply,
         })
         .await
@@ -709,6 +755,150 @@ mod gapless_tests {
                 "Gapless native timeout: {status:?}"
             );
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    // Named boundary: ao=pcm, 44.1/48/96 kHz, stereo signed 32-bit, no dither.
+    // This is player-side digital capture, not ALSA/DAC qualification.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn per_file_double_gain_and_unity_transitions_preserve_sample_count_within_one_output_lsb()
+     {
+        for rate in [44100_u32, 48000, 96000] {
+            for flac in [false, true] {
+                for bits in [16u16, 24] {
+                    for next_db in [0.0, -12.0, 20.0 * 2_f64.log10()] {
+                        let mut files = Vec::new();
+                        let mut expected = Vec::new();
+                        for (index, db) in [-6.0, next_db].into_iter().enumerate() {
+                            let path = std::env::temp_dir()
+                                .join(format!("qoda-gain-{}.wav", uuid::Uuid::new_v4()));
+                            let mut pcm = Vec::new();
+                            for sample in 0..rate * 4 * 2 {
+                                let value = ((sample % 997) as i32 - 498)
+                                    * if bits == 16 { 20 } else { 4000 }
+                                    + index as i32 * 123;
+                                if bits == 16 {
+                                    pcm.extend((value as i16).to_le_bytes());
+                                } else {
+                                    pcm.extend(&value.to_le_bytes()[..3]);
+                                }
+                                let decoded = value * if bits == 16 { 65536 } else { 256 };
+                                expected.push(
+                                    (f64::from(decoded) * 10_f64.powf(db / 20.0)).round_ties_even()
+                                        as i32,
+                                );
+                            }
+                            let mut wav = b"RIFF".to_vec();
+                            wav.extend((36 + pcm.len() as u32).to_le_bytes());
+                            wav.extend(b"WAVEfmt ");
+                            wav.extend(16_u32.to_le_bytes());
+                            wav.extend(1_u16.to_le_bytes());
+                            wav.extend(2_u16.to_le_bytes());
+                            wav.extend(rate.to_le_bytes());
+                            wav.extend((rate * 2 * u32::from(bits) / 8).to_le_bytes());
+                            wav.extend((2 * bits / 8).to_le_bytes());
+                            wav.extend(bits.to_le_bytes());
+                            wav.extend(b"data");
+                            wav.extend((pcm.len() as u32).to_le_bytes());
+                            wav.extend(pcm);
+                            std::fs::write(&path, wav).unwrap();
+                            let path = if flac {
+                                let encoded = path.with_extension("flac");
+                                let result = std::process::Command::new("/usr/bin/ffmpeg")
+                                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                                    .arg(&path)
+                                    .args([
+                                        "-c:a",
+                                        "flac",
+                                        "-metadata",
+                                        "REPLAYGAIN_TRACK_GAIN=12 dB",
+                                        "-metadata",
+                                        "REPLAYGAIN_TRACK_PEAK=0.8",
+                                    ])
+                                    .arg(&encoded)
+                                    .output()
+                                    .unwrap();
+                                assert!(result.status.success());
+                                std::fs::remove_file(path).unwrap();
+                                encoded
+                            } else {
+                                path
+                            };
+                            files.push(path);
+                        }
+                        let capture = std::env::temp_dir()
+                            .join(format!("qoda-gain-capture-{}.pcm", uuid::Uuid::new_v4()));
+                        let diagnostic = capture.with_extension("log");
+                        let player = Player::with_options(
+                            "pcm",
+                            &[
+                                ("log-file", diagnostic.to_str().unwrap().into()),
+                                ("ao-pcm-file", capture.to_str().unwrap().into()),
+                                ("ao-pcm-waveheader", "no".into()),
+                                ("ao-pcm-append", "yes".into()),
+                                ("audio-format", "s32".into()),
+                                ("audio-samplerate", rate.to_string()),
+                                ("audio-channels", "stereo".into()),
+                            ],
+                        )
+                        .unwrap();
+                        let gain = |db| Applied {
+                            mode: crate::gain::Mode::Track,
+                            basis: "track",
+                            db,
+                            limited: false,
+                            reason: "Synthetic capture",
+                        };
+                        player.send(Command::LoadGain(
+                            1,
+                            files[0].to_str().unwrap().into(),
+                            0.0,
+                            gain(-6.0),
+                        ));
+                        wait(&player, |s| {
+                            s.generation == 1 && s.entry_ready && !s.idle && s.paused
+                        });
+                        assert_eq!(
+                            player
+                                .stage_gain(1, 2, files[1].to_str().unwrap().into(), gain(next_db))
+                                .await
+                                .unwrap(),
+                            StageResult::Ready
+                        );
+                        player.send(Command::Pause(false));
+                        let status =
+                            wait(&player, |s| s.generation == 2 && s.idle && s.natural_eof);
+                        assert_eq!(status.gain.as_ref().unwrap().db, next_db);
+                        assert_eq!(status.handoff_from, Some(1));
+                        assert!(status.error.is_none());
+                        drop(player);
+                        let bytes = std::fs::read(&capture).unwrap();
+                        assert_eq!(
+                            bytes.len(),
+                            expected.len() * 4,
+                            "sample count changed: {}",
+                            std::fs::read_to_string(&diagnostic).unwrap_or_default()
+                        );
+                        for (index, (raw, reference)) in
+                            bytes.as_chunks::<4>().0.iter().zip(expected).enumerate()
+                        {
+                            let actual = i32::from_le_bytes(*raw);
+                            let tolerance = if next_db == 0.0 && index >= rate as usize * 4 * 2 {
+                                0
+                            } else {
+                                1
+                            };
+                            assert!(
+                                (i64::from(actual) - i64::from(reference)).abs() <= tolerance,
+                                "{bits}-bit, next={next_db}, sample={index}: actual {actual}, reference {reference}; {}",
+                                std::fs::read_to_string(&diagnostic).unwrap_or_default()
+                            );
+                        }
+                        for path in files.into_iter().chain([capture, diagnostic]) {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    }
+                }
+            }
         }
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

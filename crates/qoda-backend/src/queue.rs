@@ -1,7 +1,7 @@
 //! Session membership and its selected/upcoming projection. Traversed entries
 //! are retained as membership, not claimed as listening history.
 use qoda_core::{Counter, MembershipError, OccurrenceId, QueueMembership, SessionId};
-use qoda_provider::Track;
+use qoda_provider::{AlbumRef, Track};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use std::collections::{HashMap, HashSet};
 const LIMIT: usize = 500;
@@ -99,6 +99,12 @@ pub struct NavigationPage {
     pub following_latest: bool,
     pub entries: Vec<NavigationRow>,
 }
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AlbumSession {
+    album: AlbumRef,
+    members: Vec<qoda_core::TrackRef>,
+}
 #[derive(Clone, Serialize)]
 pub struct Queue {
     membership: QueueMembership,
@@ -119,6 +125,7 @@ pub struct Queue {
     recorded: bool,
     navigation_dropped: Counter,
     unavailable: HashMap<OccurrenceId, Unavailable>,
+    album_session: Option<AlbumSession>,
 }
 impl Default for Queue {
     fn default() -> Self {
@@ -141,6 +148,7 @@ impl Default for Queue {
             recorded: false,
             navigation_dropped: Counter::ZERO,
             unavailable: HashMap::new(),
+            album_session: None,
         }
     }
 }
@@ -374,6 +382,41 @@ impl Queue {
         }
         *self = staged;
         Ok(())
+    }
+    pub fn album_gain_eligible(&self) -> bool {
+        !self.shuffled
+            && self.album_session.as_ref().is_some_and(|context| {
+                !self.membership.entries().is_empty()
+                    && self.membership.entries().iter().all(|entry| {
+                        entry.track.source == context.album.source
+                            && context.members.contains(&entry.track)
+                    })
+            })
+    }
+    pub fn replace_album(
+        &mut self,
+        tracks: Vec<Track>,
+        album: AlbumRef,
+        members: Vec<qoda_core::TrackRef>,
+    ) -> Result<Option<Track>, Error> {
+        if album.key.trim().is_empty()
+            || album.key.len() > 512
+            || members.is_empty()
+            || members.len() > LIMIT
+            || members.iter().any(|track| {
+                track.source != album.source || String::from(track.key.clone()).len() > 512
+            })
+            || tracks
+                .iter()
+                .any(|track| !members.contains(&track.reference))
+        {
+            return Err(Error::Missing);
+        }
+        let mut candidate = self.clone();
+        let result = candidate.replace_many(tracks)?;
+        candidate.album_session = Some(AlbumSession { album, members });
+        *self = candidate;
+        Ok(result)
     }
     pub fn replace_many(&mut self, tracks: Vec<Track>) -> Result<Option<Track>, Error> {
         if tracks.is_empty() {
@@ -791,6 +834,7 @@ impl Queue {
                 "recorded",
                 "navigation_dropped",
                 "unavailable",
+                "album_session",
             ] {
                 if fields.contains_key(key) {
                     return Err(<serde_json::Error as serde::de::Error>::custom(
@@ -834,8 +878,22 @@ impl<'de> Deserialize<'de> for Queue {
             navigation_dropped: Counter,
             #[serde(default)]
             unavailable: HashMap<OccurrenceId, Unavailable>,
+            #[serde(default)]
+            album_session: Option<AlbumSession>,
         }
         let w = Wire::deserialize(d)?;
+        if let Some(context) = &w.album_session
+            && (context.members.is_empty()
+                || context.members.len() > LIMIT
+                || context.album.key.trim().is_empty()
+                || context.album.key.len() > 512
+                || context.members.iter().any(|track| {
+                    track.source != context.album.source
+                        || String::from(track.key.clone()).len() > 512
+                }))
+        {
+            return Err(D::Error::custom("invalid saved album session"));
+        }
         let entries = w.membership.entries();
         let ids: HashSet<_> = entries.iter().map(|e| e.id).collect();
         let invalid = || D::Error::custom("invalid saved session invariants");
@@ -919,6 +977,7 @@ impl<'de> Deserialize<'de> for Queue {
             recorded: w.recorded,
             navigation_dropped: w.navigation_dropped,
             unavailable: w.unavailable,
+            album_session: w.album_session,
         })
     }
 }
@@ -946,6 +1005,50 @@ mod tests {
     }
     fn observed(q: &mut Queue) {
         q.confirm_presented().unwrap();
+    }
+    #[test]
+    fn album_origin_is_source_scoped_survives_restore_and_is_not_inferred_from_titles() {
+        let mut a = track("A");
+        let mut b = track("B");
+        b.reference.source = a.reference.source;
+        let album = AlbumRef {
+            source: a.reference.source,
+            key: "album-id".into(),
+        };
+        let mut q = Queue::default();
+        q.replace_album(
+            vec![a.clone(), b.clone()],
+            album.clone(),
+            vec![a.reference.clone(), b.reference.clone()],
+        )
+        .unwrap();
+        assert!(q.album_gain_eligible());
+        q.set_shuffle(true).unwrap();
+        assert!(!q.album_gain_eligible());
+        q.set_shuffle(false).unwrap();
+        assert!(q.album_gain_eligible());
+        let restored: Queue = serde_json::from_value(serde_json::to_value(&q).unwrap()).unwrap();
+        assert!(restored.album_gain_eligible());
+        let other = q
+            .enqueue(track("same album title; different source"), false)
+            .unwrap();
+        assert!(!q.album_gain_eligible());
+        q.remove(other).unwrap();
+        assert!(q.album_gain_eligible());
+        q.replace_album(
+            vec![b.clone()],
+            album.clone(),
+            vec![a.reference.clone(), b.reference.clone()],
+        )
+        .unwrap();
+        q.enqueue(a.clone(), false).unwrap();
+        assert!(q.album_gain_eligible());
+        q.replace_many(vec![a.clone(), b]).unwrap();
+        assert!(!q.album_gain_eligible());
+        a.reference.source = qoda_core::SourceId::new();
+        let before = serde_json::to_value(&q).unwrap();
+        assert!(q.replace_album(vec![a], album, vec![]).is_err());
+        assert_eq!(serde_json::to_value(&q).unwrap(), before);
     }
     #[test]
     fn unavailable_occurrences_remain_inspectable_without_poisoning_duplicates_or_repeat() {

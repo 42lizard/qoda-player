@@ -5,7 +5,7 @@ use crate::{
     queue::Queue,
 };
 use qoda_core::{OccurrenceId, SessionId, TrackRef};
-use qoda_provider::{MusicProvider, PreparedMedia, ProviderError, Track};
+use qoda_provider::{MusicProvider, ProviderError, Track};
 use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -38,7 +38,7 @@ struct Key {
 }
 pub struct Reply {
     key: Key,
-    media: Result<PreparedMedia, ProviderError>,
+    media: Result<crate::gain::Prepared, ProviderError>,
 }
 struct Plan {
     key: Key,
@@ -112,6 +112,7 @@ impl Controller {
         epochs: &mut Epochs,
         provider: Arc<dyn MusicProvider>,
         tx: mpsc::Sender<crate::Event>,
+        mode: crate::gain::Mode,
     ) -> Result<(), String> {
         if !self.view.enabled || self.plan.is_some() {
             return Ok(());
@@ -140,10 +141,18 @@ impl Controller {
         });
         self.view.phase = "preparing";
         self.view.message = "Preparing one next occurrence without changing the queue.".into();
+        let album_session = queue.album_gain_eligible();
         self.task = Some(tokio::spawn(async move {
             let media = tokio::time::timeout(
                 std::time::Duration::from_secs(20),
-                provider.prepare(key.reference.source, key.reference.key.clone()),
+                crate::gain::prepare(
+                    provider.as_ref(),
+                    crate::gain::Request {
+                        reference: key.reference.clone(),
+                        mode,
+                        album_session,
+                    },
+                ),
             )
             .await
             .unwrap_or(Err(ProviderError::Network));
@@ -179,7 +188,7 @@ impl Controller {
             return Ok(());
         }
         self.task = None;
-        let media = match reply.media {
+        let prepared = match reply.media {
             Ok(media) => media,
             Err(error) => {
                 self.failed = Some((reply.key.owner_gen, reply.key.next));
@@ -191,6 +200,7 @@ impl Controller {
                 return Ok(());
             }
         };
+        let crate::gain::Prepared { media, gain } = prepared;
         let mut candidate = successor(queue)?.ok_or("The natural successor changed")?.2;
         if let Err(error) = candidate.update_selected(media.track.clone(), &media.version) {
             self.failed = Some((reply.key.owner_gen, reply.key.next));
@@ -205,7 +215,7 @@ impl Controller {
             .map_err(str::to_owned)?;
         self.plan.as_mut().unwrap().prepared = Some((media.track, media.version, url.clone()));
         match player
-            .stage(reply.key.owner_gen, reply.key.next_gen, url.clone())
+            .stage_gain(reply.key.owner_gen, reply.key.next_gen, url.clone(), gain)
             .await
         {
             Ok(StageResult::Ready) => {
@@ -303,7 +313,7 @@ mod tests {
     use futures_util::StreamExt;
     use qoda_core::{Counter, ProviderTrackKey, SourceId};
     use qoda_provider::{
-        ByteRange, CatalogPage, Library, MediaResponse, MediaSource, ProviderFuture,
+        ByteRange, CatalogPage, Library, MediaResponse, MediaSource, PreparedMedia, ProviderFuture,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     pub(super) struct Audio(pub(super) bytes::Bytes);
@@ -492,7 +502,13 @@ mod tests {
         let mut controller = Controller::default();
         let (tx, mut rx) = mpsc::channel(4);
         controller
-            .schedule(&q, &mut epochs, provider.clone(), tx.clone())
+            .schedule(
+                &q,
+                &mut epochs,
+                provider.clone(),
+                tx.clone(),
+                crate::gain::Mode::Off,
+            )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
             panic!("No speculative reply");
@@ -506,7 +522,13 @@ mod tests {
             .unwrap();
         assert_eq!(controller.view.phase, "fallback");
         controller
-            .schedule(&q, &mut epochs, provider.clone(), tx)
+            .schedule(
+                &q,
+                &mut epochs,
+                provider.clone(),
+                tx,
+                crate::gain::Mode::Off,
+            )
             .unwrap();
         assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
         assert_eq!(q.snapshot().revision, before.revision);
@@ -537,7 +559,13 @@ mod tests {
         crate::record_clock(&mut q, &audio, epochs.current, &mut presented, false);
         let (tx, mut rx) = mpsc::channel(4);
         controller
-            .schedule(&q, &mut epochs, provider.clone(), tx)
+            .schedule(
+                &q,
+                &mut epochs,
+                provider.clone(),
+                tx,
+                crate::gain::Mode::Off,
+            )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
             panic!("No future reply");
@@ -582,7 +610,9 @@ mod tests {
         epochs.reset().unwrap();
         let mut controller = Controller::default();
         let (tx, mut rx) = mpsc::channel(4);
-        controller.schedule(&q, &mut epochs, provider, tx).unwrap();
+        controller
+            .schedule(&q, &mut epochs, provider, tx, crate::gain::Mode::Off)
+            .unwrap();
         let Some(crate::Event::Gapless(mut reply)) = rx.recv().await else {
             panic!("No preparation reply")
         };
@@ -607,7 +637,13 @@ mod tests {
         let mut controller = Controller::default();
         let (tx, mut rx) = mpsc::channel(4);
         controller
-            .schedule(&q, &mut epochs, provider.clone(), tx)
+            .schedule(
+                &q,
+                &mut epochs,
+                provider.clone(),
+                tx,
+                crate::gain::Mode::Off,
+            )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
             panic!("No reply");
@@ -680,7 +716,13 @@ mod boundary_tests {
         crate::record_clock(&mut queue, &first, 1, &mut presented, false);
         let (tx, mut rx) = mpsc::channel(4);
         controller
-            .schedule(&queue, &mut epochs, provider.clone(), tx)
+            .schedule(
+                &queue,
+                &mut epochs,
+                provider.clone(),
+                tx,
+                crate::gain::Mode::Off,
+            )
             .unwrap();
         let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
             panic!("No future");
