@@ -55,3 +55,23 @@ python3 prototypes/plex-reporting/probe.py
 
 Keep this branch out of main. Follow-up cases need their own bounded plan and
 record; remaining #16/#26 acceptance is not implied by seven successful POSTs.
+
+## Handoff follow-up and diagnosis
+
+The initial handoff probe observed a distinct native occurrence/render and a
+Playing predecessor, but its successor session sample was empty. It stopped and
+retained [the incomplete result](evidence/followup.json), without qualifying it.
+
+The subsequent [bounded diagnostic](diagnostic-plan.md) used the same uniquely
+reidentified intact item. [Dispatch timing](evidence/diagnostic.json) showed both
+reports queued at 19,906 ms: old stop completed at 22,432 ms and successor playing
+completed at 25,032 ms. Capability discovery alone took about 2.4–2.6 seconds per
+call. At the later observation, the successor's matching Playing session existed.
+No ownership loss was demonstrated; the earlier early sample is consistent with
+this approximately five-second serialized discovery delay. The 35.67-second
+diagnostic completed with clean exit and no metadata/history changes observed.
+
+Temporary trace instrumentation is validation-only and contains state/position,
+monotonic elapsed time and sanitized typed outcomes, never headers/URLs/IDs.
+Caching validated source/provider capabilities is the next measured optimization;
+it must not increase the three-second request deadline or weaken identity fences.

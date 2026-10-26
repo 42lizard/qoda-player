@@ -1,0 +1,447 @@
+{
+  "scope": "same intact item, one diagnostic duplicate-handoff run, 60-second watchdog",
+  "completed": true,
+  "observations": [
+    {
+      "name": "Preflight",
+      "owned_server": true,
+      "tls_verified": true,
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "timeline_discovered": true,
+      "metadata_discovered": true,
+      "production_gates_unchanged": true,
+      "output": "libmpv ao=null",
+      "maximum_runs": 1,
+      "per_run_wall_seconds": 60
+    },
+    {
+      "name": "Subject selected",
+      "owned_library": true,
+      "track_duration_ms": 19737,
+      "short_enough_for_complete_second_run": true,
+      "private_library_track_names_and_ids_exported": false,
+      "existing_item_preserved": true
+    },
+    {
+      "name": "Server observation",
+      "phase": "before",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Server observation",
+      "phase": "first-playing",
+      "matching_client_sessions": 1,
+      "client_states": [
+        "playing"
+      ],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Native successor staged",
+      "same_track": true,
+      "distinct_local_occurrences": true,
+      "source_scope_matches": true,
+      "phase": "staged"
+    },
+    {
+      "name": "Confirmed duplicate handoff",
+      "distinct_occurrence": true,
+      "distinct_render_generation": true,
+      "successor_nominal_position_ms": 168,
+      "source_and_track_match": true
+    },
+    {
+      "name": "Successor reporting status",
+      "state": "accepted"
+    },
+    {
+      "name": "Server observation",
+      "phase": "successor-playing",
+      "matching_client_sessions": 1,
+      "client_states": [
+        "playing"
+      ],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Run stopped",
+      "run": 4,
+      "wall_seconds": 35.67,
+      "queue_ended": false,
+      "speaker_output_opened": false
+    },
+    {
+      "name": "Server observation",
+      "phase": "after-run-4",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Separate observed effects",
+      "run": 4,
+      "offset_changed": false,
+      "view_count_delta": null,
+      "view_count_missing_before": true,
+      "view_count_missing_after": true,
+      "last_viewed_changed": false,
+      "new_subject_history_rows": 0,
+      "history_attribution_to_client_proven": false
+    },
+    {
+      "name": "Owned backend cleanup",
+      "process_stopped": true
+    },
+    {
+      "name": "Sanitized transport audit",
+      "events": [
+        {
+          "elapsed_ms": 0,
+          "event": "render_fence",
+          "values": {
+            "generation": 1
+          }
+        },
+        {
+          "elapsed_ms": 0,
+          "event": "dispatch_abort",
+          "values": {
+            "pending": 0
+          }
+        },
+        {
+          "elapsed_ms": 401,
+          "event": "submit",
+          "values": {
+            "position_ms": 288,
+            "state": "Playing",
+            "worker": true
+          }
+        },
+        {
+          "elapsed_ms": 401,
+          "event": "dispatch",
+          "values": {
+            "position_ms": 288,
+            "state": "Playing"
+          }
+        },
+        {
+          "event": "transport_enter",
+          "position_ms": 288,
+          "state": "Playing"
+        },
+        {
+          "elapsed_ms": 2355,
+          "event": "discovery_response",
+          "http_status": 200
+        },
+        {
+          "elapsed_ms": 2367,
+          "event": "capability_ready"
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 288,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "elapsed_ms": 2782,
+          "event": "dispatch_result",
+          "values": {
+            "result": "Ok(Ok(Accepted))"
+          }
+        },
+        {
+          "elapsed_ms": 10402,
+          "event": "submit",
+          "values": {
+            "position_ms": 10303,
+            "state": "Playing",
+            "worker": true
+          }
+        },
+        {
+          "elapsed_ms": 10403,
+          "event": "dispatch",
+          "values": {
+            "position_ms": 10303,
+            "state": "Playing"
+          }
+        },
+        {
+          "event": "transport_enter",
+          "position_ms": 10303,
+          "state": "Playing"
+        },
+        {
+          "elapsed_ms": 2361,
+          "event": "discovery_response",
+          "http_status": 200
+        },
+        {
+          "elapsed_ms": 2370,
+          "event": "capability_ready"
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 10303,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "elapsed_ms": 12998,
+          "event": "dispatch_result",
+          "values": {
+            "result": "Ok(Ok(Accepted))"
+          }
+        },
+        {
+          "elapsed_ms": 19652,
+          "event": "render_fence",
+          "values": {
+            "generation": 2
+          }
+        },
+        {
+          "elapsed_ms": 19652,
+          "event": "dispatch_abort",
+          "values": {
+            "pending": 0
+          }
+        },
+        {
+          "elapsed_ms": 19906,
+          "event": "submit",
+          "values": {
+            "position_ms": 19288,
+            "state": "Stopped",
+            "worker": true
+          }
+        },
+        {
+          "elapsed_ms": 19906,
+          "event": "submit",
+          "values": {
+            "position_ms": 419,
+            "state": "Playing",
+            "worker": true
+          }
+        },
+        {
+          "elapsed_ms": 19907,
+          "event": "dispatch",
+          "values": {
+            "position_ms": 19288,
+            "state": "Stopped"
+          }
+        },
+        {
+          "event": "transport_enter",
+          "position_ms": 19288,
+          "state": "Stopped"
+        },
+        {
+          "elapsed_ms": 2495,
+          "event": "discovery_response",
+          "http_status": 200
+        },
+        {
+          "elapsed_ms": 2507,
+          "event": "capability_ready"
+        },
+        {
+          "continuing": true,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 19288,
+          "state": "stopped"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "elapsed_ms": 22432,
+          "event": "dispatch_result",
+          "values": {
+            "result": "Ok(Ok(Accepted))"
+          }
+        },
+        {
+          "elapsed_ms": 22433,
+          "event": "dispatch",
+          "values": {
+            "position_ms": 419,
+            "state": "Playing"
+          }
+        },
+        {
+          "event": "transport_enter",
+          "position_ms": 419,
+          "state": "Playing"
+        },
+        {
+          "elapsed_ms": 2569,
+          "event": "discovery_response",
+          "http_status": 200
+        },
+        {
+          "elapsed_ms": 2586,
+          "event": "capability_ready"
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 419,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "elapsed_ms": 25032,
+          "event": "dispatch_result",
+          "values": {
+            "result": "Ok(Ok(Accepted))"
+          }
+        },
+        {
+          "elapsed_ms": 29946,
+          "event": "submit",
+          "values": {
+            "position_ms": 10456,
+            "state": "Playing",
+            "worker": true
+          }
+        },
+        {
+          "elapsed_ms": 29946,
+          "event": "dispatch",
+          "values": {
+            "position_ms": 10456,
+            "state": "Playing"
+          }
+        },
+        {
+          "event": "transport_enter",
+          "position_ms": 10456,
+          "state": "Playing"
+        },
+        {
+          "elapsed_ms": 31958,
+          "event": "render_fence",
+          "values": {
+            "generation": 3
+          }
+        },
+        {
+          "elapsed_ms": 31958,
+          "event": "dispatch_abort",
+          "values": {
+            "pending": 0
+          }
+        },
+        {
+          "elapsed_ms": 32152,
+          "event": "submit",
+          "values": {
+            "position_ms": 12404,
+            "state": "Stopped",
+            "worker": true
+          }
+        },
+        {
+          "elapsed_ms": 32156,
+          "event": "dispatch",
+          "values": {
+            "position_ms": 12404,
+            "state": "Stopped"
+          }
+        },
+        {
+          "event": "transport_enter",
+          "position_ms": 12404,
+          "state": "Stopped"
+        },
+        {
+          "elapsed_ms": 2615,
+          "event": "discovery_response",
+          "http_status": 200
+        },
+        {
+          "elapsed_ms": 2631,
+          "event": "capability_ready"
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 12404,
+          "state": "stopped"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "elapsed_ms": 34964,
+          "event": "dispatch_result",
+          "values": {
+            "result": "Ok(Ok(Accepted))"
+          }
+        },
+        {
+          "elapsed_ms": 35869,
+          "event": "dispatch_abort",
+          "values": {
+            "pending": 0
+          }
+        }
+      ],
+      "backend_exit": 0,
+      "exact_production_transport": true,
+      "validation_build": true
+    },
+    {
+      "name": "Cleanup",
+      "owned_backend_stopped": true,
+      "temporary_state_removed": true,
+      "library_track_preserved": true,
+      "delete_scrobble_and_metadata_edit_calls": 0
+    }
+  ],
+  "limits": [
+    "No universal server/account compatibility claim",
+    "No speaker/DAC/analog or final-device continuity claim",
+    "No scrobble/completion rule/history import",
+    "History row device attribution requires separate proof"
+  ]
+}

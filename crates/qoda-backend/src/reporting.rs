@@ -15,6 +15,13 @@ use tokio::sync::{Notify, watch};
 
 const INTERVAL: Duration = Duration::from_secs(10);
 const CAPACITY: usize = 8;
+fn diagnostic(event: &str, values: serde_json::Value) {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    eprintln!(
+        "QODA_VALIDATION_DEBUG {}",
+        serde_json::json!({"event":event,"elapsed_ms":START.get_or_init(Instant::now).elapsed().as_millis(),"values":values})
+    );
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Key {
     account: u64,
@@ -173,6 +180,10 @@ impl Dispatch {
                     notified.await;
                     continue;
                 };
+                diagnostic(
+                    "dispatch",
+                    serde_json::json!({"state":format!("{:?}",report.state),"position_ms":report.position_ms}),
+                );
                 let result = tokio::time::timeout(Duration::from_secs(3), async {
                     // Shared across canceled/replacement workers. A new account
                     // or render cannot dispatch before the old future releases.
@@ -180,6 +191,10 @@ impl Dispatch {
                     provider.report_playback(report).await
                 })
                 .await;
+                diagnostic(
+                    "dispatch_result",
+                    serde_json::json!({"result":format!("{result:?}")}),
+                );
                 let status = match result {
                     Ok(Ok(Outcome::Accepted)) => "accepted",
                     Ok(Ok(Outcome::ServerTermination)) => {
@@ -225,6 +240,10 @@ impl Dispatch {
 }
 impl Drop for Dispatch {
     fn drop(&mut self) {
+        diagnostic(
+            "dispatch_abort",
+            serde_json::json!({"pending":self.mailbox.lock().unwrap().reports.len()}),
+        );
         self.task.abort();
     }
 }
@@ -287,6 +306,7 @@ impl Controller {
         }
         let replacing = self.generation.replace(generation).is_some();
         if replacing {
+            diagnostic("render_fence", serde_json::json!({"generation":generation}));
             // Cancel stale positions before the successor has a nominal clock.
             // A later terminal report still belongs to the predecessor.
             if self
@@ -307,6 +327,10 @@ impl Controller {
     }
     fn submit(&mut self, reports: impl IntoIterator<Item = Report>) {
         for report in reports {
+            diagnostic(
+                "submit",
+                serde_json::json!({"state":format!("{:?}",report.state),"position_ms":report.position_ms,"worker":self.dispatch.is_some()}),
+            );
             if self
                 .dispatch
                 .as_ref()

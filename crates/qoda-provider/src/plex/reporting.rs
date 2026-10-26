@@ -64,6 +64,8 @@ fn capabilities(base: &Url, body: &str) -> Result<(Url, Url), ProviderError> {
 
 impl PlexProvider {
     pub(super) async fn timeline(&self, report: Report) -> Result<Outcome, ProviderError> {
+        let diagnostic_start=std::time::Instant::now();
+        eprintln!("QODA_VALIDATION_DEBUG {}",serde_json::json!({"event":"transport_enter","state":format!("{:?}",report.state),"position_ms":report.position_ms}));
         let source = self
             .sources
             .get(&report.track.source)
@@ -88,7 +90,9 @@ impl PlexProvider {
             .send()
             .await
             .map_err(|_| ProviderError::Network)?;
+        eprintln!("QODA_VALIDATION_DEBUG {}",serde_json::json!({"event":"discovery_response","http_status":discovery.status().as_u16(),"elapsed_ms":diagnostic_start.elapsed().as_millis()}));
         let (endpoint, mut metadata) = capabilities(&source.base, &small_body(discovery).await?)?;
+        eprintln!("QODA_VALIDATION_DEBUG {}",serde_json::json!({"event":"capability_ready","elapsed_ms":diagnostic_start.elapsed().as_millis()}));
         metadata
             .path_segments_mut()
             .map_err(|_| ProviderError::InvalidReply)?
