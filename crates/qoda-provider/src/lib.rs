@@ -1,5 +1,6 @@
 //! Provider metadata and media access. Credentials and upstream URLs never enter UI DTOs.
 pub mod artwork;
+pub mod playback;
 mod plex;
 use bytes::Bytes;
 use futures_util::stream::BoxStream;
@@ -200,6 +201,11 @@ impl std::fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 pub trait MusicProvider: Send + Sync {
+    /// Confirmed nominal playback only. Preparation never calls this operation.
+    /// Unsupported by default; implementations must not infer a scrobble.
+    fn report_playback(&self, _report: playback::Report) -> ProviderFuture<'_, playback::Outcome> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
     fn artists(
         &self,
         _source: SourceId,

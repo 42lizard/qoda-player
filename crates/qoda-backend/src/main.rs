@@ -16,6 +16,7 @@ mod playlists;
 mod proxy;
 mod queue;
 mod recovery;
+mod reporting;
 mod search;
 mod shutdown;
 mod source_format;
@@ -782,6 +783,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_audio = player.status();
     let mut last_stream_failed = false;
     let mut desktop_clock = mpris::Clock::default();
+    let mut reporting = reporting::Controller::new();
+    state["reporting"] = reporting.view();
     let mut last_clock_stale = false;
     let mut checkpoint_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     checkpoint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -802,6 +805,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         auth_generation = auth_generation
             .checked_add(1)
             .ok_or("Generation exhausted")?;
+        reporting.bind(auth_generation, None);
         auth_task = Some(connect(tx.clone(), auth_generation, c));
         state["status"] = json!("Connecting Plex");
         updates.send_replace(state.clone());
@@ -835,6 +839,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let observed_at=std::time::Instant::now();
                 desktop_clock.observe(&audio,observed_at);
                 let clock_stale=desktop_clock.stale(&audio,observed_at);
+                reporting.bind(auth_generation,provider.clone().map(|p|p as Arc<dyn MusicProvider>));
+                reporting.fence_generation(epochs.current);
+                reporting.observe_stop(&audio);
+                reporting.observe(reporting::Observation::capture(&queue,&audio,reporting::Context {
+                    account:auth_generation,generation:epochs.current,confirmed:presented_generation,
+                    failed_or_stale:stream_failed || clock_stale,
+                }),observed_at);
                 let mut presentation_changed=false;
                 if audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale {
                     last_stream_failed=stream_failed;
@@ -1629,6 +1640,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             auth_generation = auth_generation
                                 .checked_add(1)
                                 .ok_or("Account generation exhausted")?;
+                            reporting.bind(auth_generation, None);
                             browse_generation = browse_generation
                                 .checked_add(1)
                                 .ok_or("Browse generation exhausted")?;
@@ -1680,6 +1692,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             auth_generation = auth_generation
                                 .checked_add(1)
                                 .ok_or("Generation exhausted")?;
+                            reporting.bind(auth_generation, None);
                             state["signin_url"] = Value::Null;
                             state["status"] = json!("Restoring saved Plex sign-in");
                             if let Err(error) = keyring_request(
@@ -1729,6 +1742,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         auth_generation = auth_generation
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
+                        reporting.bind(auth_generation, None);
                         let g = auth_generation;
                         let tx = tx.clone();
                         state["status"] = json!("Starting Plex sign-in");
@@ -2177,6 +2191,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "stop" => {
+                        reporting.request_stop();
                         if let Some(task) = prepare_task.take() {
                             task.abort();
                         }
@@ -2269,6 +2284,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         auth_generation = auth_generation
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
+                        reporting.bind(auth_generation, None);
                         browse_generation = browse_generation
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
@@ -2430,6 +2446,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 | qoda_provider::ProviderError::SignInRequired
                         )
                     ) {
+                        reporting.bind(auth_generation, None);
                         if let Some(task) = browse_task.take() {
                             task.abort();
                         }
@@ -2709,6 +2726,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state["sign_in"]["connecting"] =
             json!(auth_task.as_ref().is_some_and(|task| !task.is_finished()));
         state["account_epoch"] = json!(auth_generation.to_string());
+        reporting.bind(
+            auth_generation,
+            provider.clone().map(|p| p as Arc<dyn MusicProvider>),
+        );
+        reporting.fence_generation(epochs.current);
+        state["reporting"] = reporting.view();
         let stamp = (queue.durable_stamp(), purge_epoch);
         if force_save || stamp != last_requested {
             last_requested = stamp;
@@ -2738,6 +2761,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let _ = queue.set_position(position);
     }
     ui_launcher.cancel();
+    reporting.finish(&player).await;
     gapless.invalidate();
     player.send(Command::Pause(true));
     player.send(Command::Stop);

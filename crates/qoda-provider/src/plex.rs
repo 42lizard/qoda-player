@@ -1,6 +1,7 @@
 mod albums;
 mod artists;
 mod playlists;
+mod reporting;
 use crate::*;
 use futures_util::StreamExt;
 use reqwest::{
@@ -478,6 +479,16 @@ fn parse_track(node: Node<'_, '_>, source: SourceId) -> Result<Track, ProviderEr
     })
 }
 impl MusicProvider for PlexProvider {
+    fn report_playback(&self, report: playback::Report) -> ProviderFuture<'_, playback::Outcome> {
+        Box::pin(async move {
+            // #16 must qualify the exact live contract and history effects first.
+            // No runtime/environment flag bypasses this release gate.
+            if !reporting::LIVE_QUALIFIED {
+                return Err(ProviderError::Unsupported);
+            }
+            self.timeline(report).await
+        })
+    }
     fn artists(
         &self,
         source: SourceId,

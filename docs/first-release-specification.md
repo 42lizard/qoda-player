@@ -92,20 +92,21 @@ keyring entries. Source builds are locked and versioned, installation/removal ar
 conflict-aware, login autostart is absent by default, and uninstall retains user
 data. Current upgrades require stopped processes. In-use checkpointed switching
 and schema-safe code/backup rollback remain #46; installed logout/crash behavior
-still requires actual qualification under #45.
+remains unqualified, outside the experimental installed-service support claim
+recorded when resolving #45.
 
 ## Acceptance evidence map
 
 | Area | Implementation/evidence | Remaining gate |
 | --- | --- | --- |
-| Browse, queue, playlist and UI contracts | Production Rust/QML plus deterministic provider/IPC/layout fixtures; scoped live owned-server baseline. | Complete owned-server cases #16 and actual input/output claim #18. |
+| Browse, queue, playlist and UI contracts | Production Rust/QML plus deterministic provider/IPC/layout fixtures; scoped live owned-server baseline. | Complete owned-server cases #16. Physical input/multi-output claims from #18 are excluded by the accepted support revision. |
 | Source/auth/cache/privacy | Private credentials, account-scoped caches, offline read-only startup and cleanup/migration fixtures. | Live keyring/permission/revocation matrix #16; excluded server/account paths need an explicit support boundary. |
-| ReplayGain/native gapless | Native FLAC extraction and 36 named player-side WAV/FLAC gain/transition cases. | Other embedded containers #30; final named-device PCM/profile/continuity qualification #27. |
+| ReplayGain/native gapless | Native FLAC extraction and 36 named player-side WAV/FLAC gain/transition cases. | Other embedded containers #30. Final named-device PCM/profile/continuity claims from #27 remain unverified and excluded. |
 | Optional converted output | SoXR VHQ, explicit plans and precision/layout policies. | Continuous converted DSP state across boundaries #41; do not call reset/transient behavior transparent. |
 | Recovery | Bounded pinned-version/visit recovery with synthetic native position checks. | Owned-server interruption/permission behavior #16. |
-| Plex listening/reporting | Confirmed nominal playback is the required authority; preparation is excluded. | Implementation #26 and controlled live contract validation #16. |
+| Plex listening/reporting | [Typed provider transport and bounded nominal observer](plex-reporting.md), with fake-provider/HTTP tests; preparation is excluded. Both production dispatch gates remain off. | Controlled live contract/history validation #16 before enabling or resolving #26. |
 | History | Bounded Previous path is implemented and separate from a complete archive. | Complete nominal history, retention/export/migration/privacy contract and storage #32. |
-| Lifecycle/install | Ownership/rollback fixtures, installed launcher stubs, native process shutdown, private-bus activation, native widget and UI fixtures. | Actual installed manager/logout/crash qualification #45 and in-use updates/rollback #46. |
+| Lifecycle/install | Ownership/rollback fixtures, installed launcher stubs, native process shutdown, private-bus activation, native widget and UI fixtures; software increment #45 complete. | In-use updates/rollback #46. Actual installed manager/logout/crash behavior remains unqualified and excluded from supported claims. |
 | Physical/hardware claims | Explicitly separated from digital/sample and IPC-driven evidence. | #18/#27, outside the accepted narrower first-release claim. |
 
 Evidence tiers are distinct: implementation, deterministic synthetic fixtures,
