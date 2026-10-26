@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import tempfile
 import unittest
@@ -25,7 +26,8 @@ class Installer(unittest.TestCase):
         original = b'{"version":1,"plugins":[],"unrelated":"preserved"}\n'
         shell.write_bytes(original)
         path = widget.install(self.config)
-        self.assertTrue((path / "qoda-ui/CompactControls.qml").is_file())
+        entry = json.loads((path / "manifest.json").read_text())["entryPoints"]["barWidget"]
+        self.assertTrue((path / entry).parent.joinpath("qoda-ui/CompactControls.qml").is_file())
         self.assertEqual(widget.owned(path)["id"], "qoda.player")
         self.assertEqual(shell.read_bytes(), original)
         widget.install(self.config)
@@ -33,9 +35,30 @@ class Installer(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertEqual(shell.read_bytes(), original)
 
+    def test_changed_payload_gets_fresh_qml_urls(self):
+        source = Path(self.temporary.name) / "source"
+        shutil.copytree(ROOT / "integrations", source / "integrations")
+        shutil.copytree(ROOT / "ui", source / "ui")
+        shutil.copyfile(ROOT / "LICENSE", source / "LICENSE")
+        def entry():
+            path = widget.install(self.config, root=source)
+            return path, json.loads((path / "manifest.json").read_text())["entryPoints"]["barWidget"]
+        path, initial = entry()
+        self.assertEqual(entry()[1], initial)
+        for relative in ["ui/CompactControls.qml", "integrations/omarchy/qoda.player/BarWidget.qml"]:
+            changed = source / relative
+            changed.write_text(changed.read_text() + "\n// changed payload\n")
+            path, updated = entry()
+            self.assertNotEqual(updated, initial)
+            self.assertTrue((path / updated).is_file())
+            self.assertEqual((path / updated).parent.joinpath("qoda-ui/CompactControls.qml").read_bytes(), (source / "ui/CompactControls.qml").read_bytes())
+            initial = updated
+
     def test_user_edits_and_additional_files_are_preserved(self):
-        for name in ["BarWidget.qml", "custom.txt", "notes/.qoda-install.json"]:
+        for name in [None, "custom.txt", "notes/.qoda-install.json"]:
             path = widget.install(self.config)
+            if name is None:
+                name = json.loads((path / "manifest.json").read_text())["entryPoints"]["barWidget"]
             (path / name).parent.mkdir(parents=True, exist_ok=True)
             (path / name).write_text("user-owned edit")
             with self.assertRaises(ValueError):
@@ -44,7 +67,6 @@ class Installer(unittest.TestCase):
                 widget.remove(self.config)
             self.assertEqual((path / name).read_text(), "user-owned edit")
             # Remove only this temporary test profile before the second case.
-            import shutil
             shutil.rmtree(path)
 
     def test_unowned_newer_and_symlink_installations_are_never_replaced(self):

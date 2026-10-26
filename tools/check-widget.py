@@ -41,7 +41,8 @@ def check(output=None):
             (ui / name).symlink_to(Path("/usr/share/omarchy/shell") / name, target_is_directory=True)
         plugin = installer.install(base / "payload")
         shutil.copytree(plugin, ui / "plugin")
-        widget = ui / "plugin/BarWidget.qml"
+        entry = Path(json.loads((plugin / "manifest.json").read_text())["entryPoints"]["barWidget"])
+        widget = ui / "plugin" / entry
         widget.write_text(widget.read_text().replace('    moduleName: "qoda.player"', '    readonly property var probeClient: client\n    readonly property var probePopup: popup\n    readonly property var probeControls: controls\n    readonly property var probeButton: iconButton\n    moduleName: "qoda.player"'))
         player = base / "player/ui"
         player.mkdir(parents=True)
@@ -64,7 +65,7 @@ import QtQuick.Window
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
-import "plugin" as Plugin
+import PLUGIN_IMPORT as Plugin
 import qs.Ui
 ShellRoot {
     property string captureDone: ""
@@ -95,7 +96,7 @@ ShellRoot {
         function status(): string { return JSON.stringify({connected: widget.probeClient.connected, instance: widget.probeClient.snapshot.instance || "", revision: widget.probeClient.snapshot.revision || "", open: widget.popupOpen, mapped: widget.probePopup.backingWindowVisible, known: widget.probeControls.known, width: widget.probePopup.width, height: widget.probePopup.height, capture: captureDone, opening: widget.openingLibrary}); }
     }
 }
-'''.replace("PLAYER_PATH", json.dumps(str(player.parent))))
+'''.replace("PLAYER_PATH", json.dumps(str(player.parent))).replace("PLUGIN_IMPORT", json.dumps(str(Path("plugin") / entry.parent))))
         runtime = base / "runtime/qoda"
         runtime.mkdir(mode=0o700)
         server = socket.socket(socket.AF_UNIX)

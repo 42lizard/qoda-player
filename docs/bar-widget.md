@@ -44,7 +44,9 @@ The shell loads the new plugin through its normal plugin/config refresh.
 
 The installer prints a bar-config backup under `omarchy/qoda-widget-backups/`.
 Updating an owned payload also keeps the previous plugin there, outside plugin
-discovery. Recorded hashes prevent replacement/removal of user edits, unexpected
+discovery. Content-addressed QML bundles give changed widgets and their shared
+controls fresh component URLs, avoiding stale icons after a plugin rescan.
+Recorded hashes prevent replacement/removal of user edits, unexpected
 files, symlinks, foreign installations or unknown installation records.
 
 ```sh

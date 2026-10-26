@@ -88,6 +88,17 @@ def install(config, root=ROOT, enable=False):
             shutil.copyfile(root / "ui" / name, shared / name)
         shutil.copyfile(root / "LICENSE", staged / "LICENSE")
         (shared / "qmldir").write_text("singleton Theme 1.0 Theme.qml\n" + "".join(f"{Path(name).stem} 1.0 {name}\n" for name in SHARED if name != "Theme.qml"))
+        # Quickshell can retain components at unchanged URLs across plugin rescans.
+        # Version the entire QML bundle so shared imports also receive fresh URLs.
+        digest = hashlib.sha256(json.dumps(fingerprint(staged), sort_keys=True).encode()).hexdigest()[:16]
+        bundle = staged / ("payload-" + digest)
+        bundle.mkdir()
+        (staged / "BarWidget.qml").rename(bundle / "BarWidget.qml")
+        shared.rename(bundle / "qoda-ui")
+        manifest_path = staged / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["entryPoints"]["barWidget"] = str((bundle / "BarWidget.qml").relative_to(staged))
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
         record = {"version": 1, "id": PLUGIN_ID, "files": fingerprint(staged), "activated": enable or bool(previous and previous.get("activated"))}
         (staged / MARKER).write_text(json.dumps(record, indent=2) + "\n")
         destination.parent.mkdir(parents=True, exist_ok=True)
