@@ -23,13 +23,15 @@ second display is established. Historical observations are identified separately
 from these current host observations. No account access or playback was performed
 in preparing this proposal.
 
-## Work that remains required
+## Required software scope
 
 This is an acceptance/support-matrix reduction, **not a feature cancellation**.
-The independent implementation backlog stays required: confirmed Plex reporting
+The independent implementation backlog remained required: confirmed Plex reporting
 #26, wider embedded gain metadata #30, complete nominal history/export #32,
 continuous converted DSP across track boundaries #41, and safe checkpointed
-updates/schema-aware rollback #46. Existing code must still satisfy its contracts;
+updates/schema-aware rollback #46. These implementations are now recorded in the
+[roadmap](implementation-roadmap.md), including the qualified continuous-conversion
+adapter. Existing code must still satisfy its contracts;
 the proposal does not turn defects or failed tests into exclusions.
 
 The owned-server path now has its controlled cases and limitations consolidated in

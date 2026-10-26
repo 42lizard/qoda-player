@@ -1,0 +1,363 @@
+{
+  "observed_local_date": "2026-10-27",
+  "scope": "Synthetic PCM-file output only; no provider, physical audio device, DAC or analog qualification",
+  "mpv": "0.41.0",
+  "libmpv_ffmpeg_runtime": "n9.0.2",
+  "command": "python3 tools/check-continuous-pcm.py --example target/debug/examples/continuous_pcm",
+  "pcm_comparisons": [
+    {
+      "case": "sequential-src-44100-16-wav",
+      "frames": 96123,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-src-44100-24-flac",
+      "frames": 96123,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-src-96000-24-wav",
+      "frames": 96057,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-src-96000-16-flac",
+      "frames": 96057,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-src-48000-24-flac",
+      "frames": 96113,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-scaling-16-wav",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-scaling-16-flac",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-scaling-24-wav",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-scaling-24-flac",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-44100-24-to-48000-24-s32",
+      "frames": 192123,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-48000-16-to-44100-16-s16",
+      "frames": 176504,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-48000-24-to-96000-24-s32",
+      "frames": 384226,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-96000-24-to-44100-16-s16",
+      "frames": 176452,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-96000-16-to-48000-16-s32",
+      "frames": 192057,
+      "valid_bits": 16,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-96000-24-to-48000-24-s32",
+      "frames": 192057,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-44100-24-to-96000-16-s16",
+      "frames": 384246,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-48000-24-to-44100-24-s32",
+      "frames": 176504,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-44100-24-to-44100-16-s16",
+      "frames": 176513,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-48000-24-to-48000-16-s32",
+      "frames": 192113,
+      "valid_bits": 16,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "sequential-profile-96000-24-to-96000-16-s16",
+      "frames": 384113,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "session-src-44100-16-wav",
+      "frames": 96123,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 65536
+    },
+    {
+      "case": "session-src-44100-24-flac",
+      "frames": 96123,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-src-96000-24-wav",
+      "frames": 96057,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-src-96000-16-flac",
+      "frames": 96057,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 49152
+    },
+    {
+      "case": "session-src-48000-24-flac",
+      "frames": 96113,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-scaling-16-wav",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 16384
+    },
+    {
+      "case": "session-scaling-16-flac",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-scaling-24-wav",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-scaling-24-flac",
+      "frames": 96113,
+      "max_error_s32_lsb": 0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-44100-24-to-48000-24-s32",
+      "frames": 192123,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 49152
+    },
+    {
+      "case": "session-profile-48000-16-to-44100-16-s16",
+      "frames": 176504,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-48000-24-to-96000-24-s32",
+      "frames": 384226,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-96000-24-to-44100-16-s16",
+      "frames": 176452,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-96000-16-to-48000-16-s32",
+      "frames": 192057,
+      "valid_bits": 16,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-96000-24-to-48000-24-s32",
+      "frames": 192057,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-44100-24-to-96000-16-s16",
+      "frames": 384246,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 49152
+    },
+    {
+      "case": "session-profile-48000-24-to-44100-24-s32",
+      "frames": 176504,
+      "valid_bits": 24,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-44100-24-to-44100-16-s16",
+      "frames": 176513,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    },
+    {
+      "case": "session-profile-48000-24-to-48000-16-s32",
+      "frames": 192113,
+      "valid_bits": 16,
+      "container_bits": 32,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 49152
+    },
+    {
+      "case": "session-profile-96000-24-to-96000-16-s16",
+      "frames": 384113,
+      "valid_bits": 16,
+      "container_bits": 16,
+      "join_max_error_valid_lsb": 0.0,
+      "whole_max_error_valid_lsb": 0.0,
+      "ring_high_water_bytes": 32768
+    }
+  ],
+  "rejected_faults": {
+    "sequential": [
+      "truncated-count",
+      "excess-count",
+      "wrong-decoded-rate",
+      "non-finite-gain",
+      "changed-rate",
+      "truncated-real-flac-payload"
+    ],
+    "session": [
+      "truncated-count",
+      "excess-count",
+      "wrong-decoded-rate",
+      "non-finite-gain",
+      "changed-rate",
+      "truncated-real-flac-payload"
+    ]
+  }
+}

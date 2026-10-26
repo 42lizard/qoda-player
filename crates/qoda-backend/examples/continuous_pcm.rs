@@ -1,25 +1,38 @@
-//! Device-free #41 experiment. Not wired into the player or its provider grants.
+//! Device-free #41 qualification using the shared production decoder/stream core.
+//! This executable has no provider grants or queue coordinator.
 //! Manifest contains original synthetic local sources; output is PCM-file only.
+#[path = "../src/continuous/decode.rs"]
+mod decode;
 #[path = "continuous_pcm/decoder.rs"]
 mod decoder;
 #[path = "../src/continuous/description.rs"]
 mod description;
+#[path = "../src/continuous/input.rs"]
+mod input;
 #[path = "continuous_pcm/native.rs"]
 mod native;
-#[path = "continuous_pcm/ring.rs"]
+#[path = "../src/continuous/ring.rs"]
 mod ring;
-#[cfg(test)]
+#[path = "../src/continuous/session.rs"]
+pub mod session;
 #[path = "../src/continuous/stream.rs"]
-mod stream;
+pub mod stream;
 use std::{path::PathBuf, sync::atomic::Ordering};
 fn run() -> Result<(), String> {
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let mut args: Vec<_> = std::env::args().skip(1).collect();
+    let use_session = args.first().is_some_and(|arg| arg == "--session");
+    if use_session {
+        args.remove(0);
+    }
     if args == ["--horizon"] {
         println!("{}", native::horizon()?);
         return Ok(());
     }
-    if args.len() != 4 {
-        return Err("Expected synthetic manifest, new capture, graph, output bits".into());
+    if !matches!(args.len(), 4 | 5) {
+        return Err(
+            "Expected synthetic manifest, new capture, graph, output bits, optional target rate"
+                .into(),
+        );
     }
     let manifest = std::fs::read(&args[0]).map_err(|_| "Manifest read failed")?;
     if manifest.len() > 65_536 {
@@ -39,8 +52,41 @@ fn run() -> Result<(), String> {
     if !matches!(bits, 16 | 32) {
         return Err("Unsupported output bits".into());
     }
+    let target_rate = args
+        .get(4)
+        .map_or(Ok(48000), |rate| rate.parse::<u32>())
+        .map_err(|_| "Invalid target rate")?;
+    if use_session {
+        let inputs: Vec<_> = sources
+            .iter()
+            .enumerate()
+            .map(|(index, source)| {
+                Ok(stream::Input {
+                    generation: index as u64 + 1,
+                    uri: source
+                        .path
+                        .to_str()
+                        .ok_or("Source path encoding unsupported")?
+                        .to_owned(),
+                    description: decoder::describe(source)?,
+                    gain: source.gain,
+                })
+            })
+            .collect::<Result<_, &'static str>>()?;
+        let session = session::Session::new(inputs[0].clone(), 1)?;
+        let native =
+            native::Native::for_session(&session, &args[1], rate, &args[2], bits, target_rate)?;
+        let result = native.run_session(&session, &inputs[1..]);
+        drop(native);
+        let observations = result?;
+        let summary = serde_json::json!({"source_frame_boundaries":inputs.iter().scan(0_u64,|sum,input|{*sum+=input.description.frames;Some(*sum)}).collect::<Vec<_>>(),
+            "ring_high_water_bytes":session.stream.high_water.load(Ordering::Relaxed),"capture_complete":true,"nominal_observations":observations});
+        drop(session);
+        println!("{summary}");
+        return Ok(());
+    }
     let ring = ring::Ring::new();
-    let native = native::Native::new(ring.clone(), &args[1], rate, &args[2], bits)?;
+    let native = native::Native::new(ring.clone(), &args[1], rate, &args[2], bits, target_rate)?;
     let copy = ring.clone();
     let producer = std::thread::spawn(move || {
         let result = decoder::produce(&sources, &copy);

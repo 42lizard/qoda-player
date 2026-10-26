@@ -105,6 +105,12 @@ ColumnLayout {
         }
         color: Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
     }
+    Label {
+        objectName: "outputContinuity"
+        visible: !!settings.output && (!!settings.output.continuous || !!settings.output.chain_fallback)
+        text: settings.output ? settings.output.chain_fallback || "Continuous conversion · compatible tracks share one converter" : ""
+        color: Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
+    }
     Label { text: settings.output ? settings.output.message || "" : "Output settings unavailable"; color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
     Label { visible: !!settings.output && settings.outputModeDraft === 1 && !settings.output.fidelity_available; text: "Fidelity unavailable: the ALSA submission guard could not be verified."; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true }
     Label { visible: !!settings.output && !!settings.output.source; text: settings.output && settings.output.source ? "Source header · " + settings.output.source.rate + " Hz · stereo · " + settings.output.source.bits + " bit" : ""; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }

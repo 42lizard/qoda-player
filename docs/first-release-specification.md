@@ -103,7 +103,7 @@ recorded when resolving #45.
 | Browse, queue, playlist and UI contracts | Production Rust/QML plus deterministic provider/IPC/layout fixtures; scoped live owned-server baseline. | [Owned-server matrix #16](plex-support-matrix.md) is consolidated; measured saved-duplicate limits remain explicit. Physical input/multi-output claims from #18 are excluded by the accepted support revision. |
 | Source/auth/cache/privacy | Private credentials, account-scoped caches, offline read-only startup and cleanup/migration fixtures. | [Owned auth/cache/cleanup matrix #16](plex-support-matrix.md) separates actual credential/native results, private keyring mechanics and unclaimed permission/expiry/revocation conditions. |
 | ReplayGain/native gapless | Bounded embedded FLAC/ID3/APE/MP4/Vorbis/qualified Opus/WAV extraction, synthetic parser/Opus captures and 36 named player-side WAV/FLAC gain/transition cases. | Final named-device PCM/profile/continuity claims from #27 remain unverified and excluded. |
-| Optional converted output | SoXR VHQ, explicit plans and precision/layout policies. | Continuous converted DSP state across boundaries #41; do not call reset/transient behavior transparent. |
+| Optional converted output | SoXR VHQ, explicit plans and precision/layout policies; persistent converted graph across qualified two-second-or-longer sources, digital references and paced nominal handoffs in #41. | Short/unknown/incompatible/resumed boundaries explicitly use independent conversion; physical continuity remains unqualified. |
 | Recovery | Bounded pinned-version/visit recovery with synthetic native position checks. | [Controlled owned-source client-transport interruption #16](plex-support-matrix.md) retains the pinned visit/version and position; physical outage/other-account permission loss remain unclaimed. |
 | Plex listening/reporting | [Typed provider transport and bounded nominal observer](plex-reporting.md), with fake-provider/HTTP tests and scoped live pause/resume/stop/duplicate-handoff qualification; preparation is excluded. | [Owned reporting/recovery matrix #16](plex-support-matrix.md) is consolidated. Broader compatibility and played-state/history synchronization remain unclaimed. |
 | History | Bounded Previous path and separate [nominal archive](listening-archive.md), durable visit identities, account cleanup, retention and private export. | No audibility, played-duration, completion or provider-history inference. |
@@ -118,8 +118,9 @@ commits and CI/measurement records live in the linked issues and topic documents
 
 The [implementation queue](implementation-roadmap.md) maps #21 and #23–#30 to their
 focused follow-ups. #28 groups offline startup (implemented #31), history #32 and
-packaging #33. Remaining software work includes #41; the support
-proposal does not cancel it. #45's remaining real-manager qualification is separate
+packaging #33. Continuous conversion #41 is implemented within its qualified
+source/horizon boundary; independent fallback remains explicit. The accepted
+support revision retains unmeasured physical conditions as exclusions. #45's remaining real-manager qualification is separate
 from its implemented shutdown and activation changes.
 
 Resolve #12/#1 only after this consolidation is reviewed against the explicitly accepted support boundary. Resolve the

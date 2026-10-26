@@ -84,6 +84,28 @@ impl Ring {
         Ok(())
     }
 }
+
+impl super::decode::Target for Ring {
+    fn cancelled(&self) -> bool {
+        Ring::cancelled(self)
+    }
+    fn write(&self, bytes: &[u8]) -> Result<(), &'static str> {
+        Ring::write(self, bytes)
+    }
+}
+
+impl super::input::Reader for Ring {
+    fn read(&self, bytes: &mut [u8]) -> Result<usize, &'static str> {
+        Ring::read(self, bytes)
+    }
+    fn cancel(&self) {
+        Ring::cancel(self)
+    }
+    fn cancelled(&self) -> bool {
+        Ring::cancelled(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

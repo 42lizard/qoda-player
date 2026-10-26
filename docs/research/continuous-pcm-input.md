@@ -1,8 +1,13 @@
 # Continuous PCM input adapter — #41 follow-up
 
-2026-10-26; source investigation only. No playback or system/account changes. mpv is pinned to **v0.41.0 / `41f6a645068483470267271e1d09966ca3b9f413`**. SoXR is pinned to **0.1.3 / `945b592b70470e29f917f4de89b4281fbbd540c0`**, matching the locally installed `/usr/include/soxr.h` version and the upstream SourceForge tree; GitHub source links below are the matching mirror. Existing EDL results and Qoda's grant/ownership requirements were supplied by the implementation owner, not reproduced here.
+Original source investigation: 2026-10-26; no playback or system/account changes
+during that review. Later implementation-owner measurements are recorded below. mpv is pinned to **v0.41.0 / `41f6a645068483470267271e1d09966ca3b9f413`**. SoXR is pinned to **0.1.3 / `945b592b70470e29f917f4de89b4281fbbd540c0`**, matching the locally installed `/usr/include/soxr.h` version and the upstream SourceForge tree; GitHub source links below are the matching mirror. Existing EDL results and Qoda's grant/ownership requirements were supplied by the implementation owner, not reproduced here.
 
-## Assessment
+The [production-adapter follow-up](#production-adapter-and-expanded-digital-qualification-2026-10-27)
+records the implemented route and its measured boundary. The source assessment below
+is retained as the original research, including the raw-demuxer approach later replaced.
+
+## Original assessment
 
 **A continuous PCM input is a viable experiment seam, not a verified replacement.** It can preserve one final filter graph while independently decoding authorized current/next sources. It also makes Rust responsible for framing, bounded admission, discontinuities, and logical occurrence attribution. Two important limits remain: mpv's PCM AO is a file writer with blocking, uncancellable writes, and public playback properties are not sample-exact boundary callbacks.
 
@@ -114,14 +119,15 @@ rate changes. Six Rust tests additionally cover starvation, byte reads, sealed
 input, non-finite frames, full-ring/empty-reader cancellation, blocked IPC,
 blocked decoder pipe kill/reap and native callback lifetime after cancellation.
 
-Still required before production: current-plus-one-future admission/revocation,
+At the isolated-experiment stage, the remaining production work was:
+current-plus-one-future admission/revocation,
 header-derived exact frame counts, a mutable producer that does not seal on a
 temporary absence of next, nominal clock/ownership with actual pacing, pause,
 queue replacement, seeks, recovery, changed output plans and current/next grants.
 Very short tracks may require more lookahead than one authorized successor can
 supply; the integration must explicitly fall back or resolve that horizon rather
 than invent EOF/silence or authorize arbitrary future tracks. Physical output
-remains unmeasured. #41 stays open.
+remains unmeasured. #41 stayed open at that isolated-experiment stage.
 
 
 ### Paced short-successor horizon measurement
@@ -157,8 +163,9 @@ comparisons still match at 0 LSB. Six faults now include a genuinely truncated
 FLAC payload whose valid header remains intact: the decoder frame-count check
 rejects it, independently of manifest/header disagreement.
 
-`src/continuous/stream.rs` is admission/transport/nominal-ledger groundwork, exercised
-by the experiment test target and **not yet wired into production**. One mutex
+At the groundwork commit, `src/continuous/stream.rs` supplied
+admission/transport/nominal-ledger rules to the experiment test target; the adapter
+was not yet wired into production at that stage. One mutex
 coordinates current/future authority with actual byte admission; a single producer,
 64 KiB ring, descriptor counts and immutable final seal bound it. An uncommitted
 future can be retired/replaced atomically. Any admitted future byte makes removal
@@ -171,3 +178,68 @@ final EOF after verified current completion. Seventeen example/core tests cover
 these rules plus blocked cancellation, byte reads, stale writes and concurrent
 writer refusal. Worker lifecycle, prewarming, callback wiring, provider descriptors,
 player/coordinator integration and paced/native qualification remain required.
+
+### Production adapter and expanded digital qualification (2026-10-27)
+
+The implementation now shares `continuous::{decode,input,ring,session,stream}`
+between the synthetic executable and the player. `source_format::probe` carries an
+optional exact description from the bounded prefix and confirmed HTTP extent;
+fragmented WAV headers wait for the data header. Unsupported/unknown descriptions
+retain the independent path. Native FLAC and plain integer WAV use the deliberately
+narrow descriptor rules above; decoded frame count, integer sample grid, source
+rate/layout and double output are checked independently before admission.
+
+Two source workers prewarm into separate 64 KiB rings; a single mux admits current
+then one compatible successor into the 64 KiB final stream. Temporary absence of
+next authorization blocks rather than supplying EOF/silence. An explicit final
+seal permits EOF after verified completion. Source identifiers enter private IPC,
+not argv. Cancellation wakes blocked readers/writers and kills/reaps owned decoder
+processes. Callback registration stays alive until after final engine destruction.
+Fresh loads do not request a seek to zero: the stream is intentionally nonseekable.
+A native startup nonpass exposed that generic-file seek request before its removal.
+
+The player chooses this route only for converted plans with gapless enabled,
+zero-position loading, confirmed compatible descriptors and at least two seconds
+per source. Strict/exact paths keep native staging; short/unknown/incompatible
+boundaries end the group with an explicit independent-conversion label. Resume,
+seek/recovery and output changes rebuild under existing pause/visit/version fences.
+The nominal `audio-pts` crosses integer frame boundaries to promote logical
+ownership; decoder admission is not presentation. Logical gain/source and handoff
+bindings update together while one physical native entry retains the final graph.
+A revoked generation cannot be reused. Untouched future removal preserves current;
+any admitted future byte requires the existing reset/review barrier.
+
+Expanded synthetic qualification covers **40** complete-output comparisons:
+20 sequential and 20 rolling-session cases, all three rate families, six unequal
+rate directions, precision-only conversion, 16/24-bit WAV/FLAC and S16/S32 output,
+fractional splits and unequal source gains. On the recorded local stack all 40
+match their uninterrupted reference at **0 valid output LSB**, at the join and
+across the entire output, with exact output lengths. Six faults reject in each
+mode, including an actually truncated FLAC body with a valid frame-count header.
+These assertions run in `tools/check.sh`; tolerance is at most two valid LSBs for
+converted captures, rather than assuming identical dither streams on every stack.
+
+Native player tests separately exercise the production post-negotiation graph:
+three-source capture against an uninterrupted reference (at most two S16 LSBs),
+unequal gains, removing/replacing an uncommitted successor without leaked samples,
+committed cancellation/reset, and a subsequent ordinary source load without raw
+options leaking. Paced null-output tests roll three sources with current plus one
+successor over 44.1→48, 48→44.1, 96→48, 44.1→96, 96→44.1, 48→96 and 48→48 kHz,
+using exactly two-second sources, with fractional splits covered separately in
+the captures. They assert nominal handoff ownership,
+per-occurrence gain, pause, no intermediate natural EOF and final-owner completion.
+The full suite also retains the existing queue, duplicate/visit, recovery,
+reporting, archive, generation and seek checks. Audio settings show the route and
+fallback reason. A long pause applies intentional backpressure rather than
+consuming the decoder network-inactivity budget.
+
+This is player-side digital/null qualification, not an ALSA final-submission,
+real-time physical continuity, external DAC or analog measurement. The accepted
+first-release support boundary keeps those unmeasured profiles experimental.
+
+Local completion checks pass: 323 production Rust tests (one physical opt-in
+ignored), 20 shared-core/example tests, 129 QML tests, 52 Python tests and
+warnings-denied Clippy. The [recorded 40-case measurements](continuous-pcm-measurements.json)
+contain only synthetic names, counts and errors. Prewarm readiness tests allow
+the decoder's startup budget before asserting full buffers; their sub-500 ms
+cancellation assertions remain unchanged.

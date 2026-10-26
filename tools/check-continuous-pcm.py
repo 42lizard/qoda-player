@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Qualify the isolated Rust continuous-input experiment using synthetic PCM only.
+"""Qualify the shared Rust continuous-input core using synthetic PCM only.
 
 Never opens a physical AO, network service, account, user music or desktop config.
-The example is not integrated into Qoda's queue/ownership/recovery controllers.
+This executable bypasses Qoda's queue/ownership/recovery controllers; native player
+tests qualify the adapter separately.
 """
 import argparse
 import json
@@ -39,8 +40,9 @@ def fixture(frames, bits, rate):
             for i in range(frames)]
 
 
-def compare(root, example, name, rate, bits, split, gains, flac=False, scale=False):
-    values = fixture(rate * 2 + 113, bits, rate)
+def compare(root, example, name, rate, bits, split, gains, flac=False, scale=False,
+            target=48000, valid_bits=16, container=16, session=False, seconds=2):
+    values = fixture(rate * seconds + 113, bits, rate)
     sources, joined = [], []
     offsets = [0, split, len(values)]
     for index in range(2):
@@ -56,8 +58,13 @@ def compare(root, example, name, rate, bits, split, gains, flac=False, scale=Fal
     manifest = root / f"{name}.json"
     manifest.write_text(json.dumps(sources))
     capture = root / f"{name}.pcm"
-    graph = "aformat=sample_fmts=s32" if scale else GRAPH
-    summary = json.loads(run([str(example), str(manifest), str(capture), graph, "32" if scale else "16"]))
+    if scale:
+        container = 32
+    graph = ("aformat=sample_fmts=s32" if scale else
+             f"aresample={target}:resampler=soxr:precision=28:cheby=1:osf=s{container}:output_sample_bits={valid_bits}:dither_method=triangular:async=0")
+    summary = json.loads(run([str(example), *(["--session"] if session else []), str(manifest), str(capture), graph, str(container),str(target)]))
+    if session:
+        assert summary["nominal_observations"][-1] == 2, (name,summary)
     assert summary["source_frame_boundaries"] == offsets[1:]
     assert 0 < summary["ring_high_water_bytes"] <= 65536
     actual_bytes = capture.read_bytes()
@@ -71,20 +78,24 @@ def compare(root, example, name, rate, bits, split, gains, flac=False, scale=Fal
     raw.write_bytes(b"".join(struct.pack("<d", value) for value in joined))
     reference = root / f"{name}-reference.pcm"
     run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "f64le", "-ar", str(rate), "-ac", "2",
-         "-i", str(raw), "-af", graph, "-f", "s16le", str(reference)])
+         "-i", str(raw), "-af", graph, "-f", f"s{container}le", str(reference)])
     reference_bytes = reference.read_bytes()
     assert len(actual_bytes) == len(reference_bytes), (name, len(actual_bytes), len(reference_bytes))
-    actual = struct.unpack("<" + "h" * (len(actual_bytes) // 2), actual_bytes)
-    expected = struct.unpack("<" + "h" * (len(reference_bytes) // 2), reference_bytes)
-    boundary = round(split * 48000 / rate) * 2
+    code,width = ("h",2) if container == 16 else ("i",4)
+    actual = struct.unpack("<" + code * (len(actual_bytes) // width), actual_bytes)
+    expected = struct.unpack("<" + code * (len(reference_bytes) // width), reference_bytes)
+    boundary = round(split * target / rate) * 2
     errors = [abs(a - b) for a, b in zip(actual, expected)]
     join = errors[max(0, boundary - 1024):boundary + 1024]
-    assert max(errors) <= 2, (name, max(errors), max(join))
-    return {"case": name, "frames": len(actual) // 2, "join_max_error_s16_lsb": max(join),
-            "whole_max_error_s16_lsb": max(errors), "ring_high_water_bytes": summary["ring_high_water_bytes"]}
+    unit = 2 ** (container-valid_bits)
+    assert max(errors) <= 2*unit, (name, max(errors)/unit, max(join)/unit)
+    return {"case": name, "frames": len(actual) // 2,"valid_bits":valid_bits,"container_bits":container,
+            "join_max_error_valid_lsb": max(join)/unit,
+            "whole_max_error_valid_lsb": max(errors)/unit, "ring_high_water_bytes": summary["ring_high_water_bytes"]}
 
 
-def failures(root, example):
+def failures(root, example, session=False):
+    label = "session" if session else "sequential"
     values = fixture(48000, 16, 48000)
     path = root / "failure-input.wav"
     write_wave(path, values, 48000, 16)
@@ -102,9 +113,9 @@ def failures(root, example):
     encoded.write_bytes(payload[:len(payload)//2])
     cases.append(("truncated-real-flac-payload", [{"path": str(encoded), "frames":48000,"rate":48000,"gain":1}]))
     for name, sources in cases:
-        manifest = root / f"{name}.json"
+        manifest = root / f"{label}-{name}.json"
         manifest.write_text(json.dumps(sources))
-        result = subprocess.run([str(example), str(manifest), str(root / f"{name}.pcm"), GRAPH, "16"],
+        result = subprocess.run([str(example), *(["--session"] if session else []), str(manifest), str(root / f"{label}-{name}.pcm"), GRAPH, "16"],
                                 capture_output=True, timeout=8)
         assert result.returncode == 1, (name, result.returncode)
         if name == "truncated-real-flac-payload":
@@ -116,20 +127,33 @@ def check(example):
     with tempfile.TemporaryDirectory(prefix="qoda-continuous-pcm-") as directory:
         root = Path(directory)
         results = []
-        for rate, bits, flac, split, gains in [
-            (44100, 16, False, 44117, (1, 1)),
-            (44100, 24, True, 44099, (1, .5011872336272722)),
-            (96000, 24, False, 95999, (.5, 1)),
-            (96000, 16, True, 96007, (1, 1)),
-            (48000, 24, True, 48001, (1, .5)),
-        ]:
-            name = f"src-{rate}-{bits}-{'flac' if flac else 'wav'}"
-            results.append(compare(root, example, name, rate, bits, split, gains, flac))
-        for bits in [16, 24]:
-            for flac in [False, True]:
-                name = f"scaling-{bits}-{'flac' if flac else 'wav'}"
-                results.append(compare(root, example, name, 48000, bits, 48013, (1, .5), flac, scale=True))
-        print(json.dumps({"pcm_comparisons": results, "rejected_faults": failures(root, example)}, indent=2))
+        for mode in [False,True]:
+            label="session" if mode else "sequential"
+            for rate, bits, flac, split, gains in [
+                (44100, 16, False, 44117, (1, 1)),
+                (44100, 24, True, 44099, (1, .5011872336272722)),
+                (96000, 24, False, 95999, (.5, 1)),
+                (96000, 16, True, 96007, (1, 1)),
+                (48000, 24, True, 48001, (1, .5)),
+            ]:
+                name = f"{label}-src-{rate}-{bits}-{'flac' if flac else 'wav'}"
+                results.append(compare(root, example, name, rate, bits, split, gains, flac, session=mode))
+            for bits in [16, 24]:
+                for flac in [False, True]:
+                    name = f"{label}-scaling-{bits}-{'flac' if flac else 'wav'}"
+                    results.append(compare(root, example, name, 48000, bits, 48013, (1, .5), flac, scale=True, session=mode))
+            for rate,bits,target,valid,container,flac in [
+                (44100,24,48000,24,32,True),(48000,16,44100,16,16,False),
+                (48000,24,96000,24,32,True),(96000,24,44100,16,16,False),
+                (96000,16,48000,16,32,True),(96000,24,48000,24,32,True),
+                (44100,24,96000,16,16,False),(48000,24,44100,24,32,True),
+                (44100,24,44100,16,16,False),(48000,24,48000,16,32,True),
+                (96000,24,96000,16,16,False),
+            ]:
+                name=f"{label}-profile-{rate}-{bits}-to-{target}-{valid}-s{container}"
+                results.append(compare(root,example,name,rate,bits,rate*2+17,(1,.5),flac,
+                                       target=target,valid_bits=valid,container=container,session=mode,seconds=4))
+        print(json.dumps({"pcm_comparisons": results, "rejected_faults":{"sequential":failures(root, example),"session":failures(root,example,True)}}, indent=2))
     print("Synthetic files removed. Queue ownership, seek/recovery and physical output remain unqualified.")
 
 

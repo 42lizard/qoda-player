@@ -1,5 +1,6 @@
 //! Native ownership and playlist IDs stay on one thread. Decoder selection is
 //! distinct from a positive nominal clock; buffered predecessors can be unknown.
+use crate::continuous::{self, Description};
 use crate::gain::Applied;
 use crate::{alsa_guard, output, source_format::Format};
 use serde::Serialize;
@@ -51,6 +52,7 @@ unsafe extern "C" {
 pub enum StageResult {
     Ready,
     MissedWindow,
+    Independent(&'static str),
 }
 pub struct Load {
     pub generation: u64,
@@ -58,6 +60,8 @@ pub struct Load {
     pub position: f64,
     pub gain: Applied,
     pub source: Option<Format>,
+    pub description: Option<crate::continuous::Description>,
+    pub chain: bool,
     pub output: Option<output::Selection>,
     pub playing: bool,
 }
@@ -76,11 +80,23 @@ pub enum Command {
         output::Plan,
         mpsc::Sender<Result<StageResult, &'static str>>,
     ),
+    #[cfg(test)]
+    LoadContinuous(u64, String, Applied, Description, output::Plan),
+    #[cfg(test)]
+    StageContinuous(
+        u64,
+        u64,
+        String,
+        Applied,
+        Description,
+        mpsc::Sender<Result<StageResult, &'static str>>,
+    ),
     LoadPrepared(Load),
     Configure(
         Option<output::Selection>,
         mpsc::Sender<Result<(), &'static str>>,
     ),
+    FinishChain(u64),
     Pause(bool),
     Stop,
     Quit,
@@ -90,6 +106,7 @@ pub enum Command {
         url: String,
         gain: Option<Applied>,
         source: Option<Format>,
+        description: Option<crate::continuous::Description>,
         reply: mpsc::Sender<Result<StageResult, &'static str>>,
     },
     Unstage {
@@ -123,6 +140,8 @@ pub struct Status {
     pub output: Option<alsa_guard::Observed>,
     pub output_selection: Option<output::Selection>,
     pub processing: Option<output::Plan>,
+    pub continuous: bool,
+    pub chain_fallback: Option<&'static str>,
 }
 fn decimal<S: serde::Serializer>(value: &u64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_str(&value.to_string())
@@ -210,6 +229,10 @@ fn create_handle(output: &str, extra: &[(String, String)]) -> Result<*mut c_void
     }
     Ok(h)
 }
+struct PcmActive {
+    session: continuous::Session,
+    pending: Option<Entry>,
+}
 struct Native {
     h: *mut c_void,
     current: Status,
@@ -220,33 +243,48 @@ struct Native {
     route: Option<output::Selection>,
     active: Option<Active>,
     pending_start: Option<PendingStart>,
+    pcm: Option<PcmActive>,
+    registration: Option<continuous::input::Registration>,
     future: Option<(i64, u64)>,
     ended: Option<(i64, u64)>,
     intent: Arc<AtomicBool>,
     latest_load: Arc<AtomicU64>,
+}
+fn qualified(d: Description, source: Option<Format>) -> bool {
+    source
+        == Some(Format {
+            rate: d.rate,
+            bits: d.bits,
+        })
+        && d.frames >= u64::from(d.rate) * 2
 }
 fn file_options(position: f64, gain: Option<&Applied>, plan: Option<output::Plan>) -> String {
     let filter = match plan {
         Some(plan) => Some(plan.filter(gain)),
         None => gain.map(Applied::filter),
     };
-    filter.map_or_else(
-        || format!("start={position}"),
-        |filter| {
-            // loadfile's outer key/value parser needs its own escaping; lavfi's
-            // brackets only protect the inner filter-list parser.
-            let value = filter.strip_prefix("af=").unwrap_or(&filter);
-            format!("start={position},af=%{}%{value}", value.len())
-        },
-    )
+    // Do not request even a zero seek on the nonseekable continuous input.
+    // Ordinary fresh files also start at zero without an explicit start option.
+    let mut options = if position > 0.0 {
+        vec![format!("start={position}")]
+    } else {
+        Vec::new()
+    };
+    if let Some(filter) = filter {
+        let value = filter.strip_prefix("af=").unwrap_or(&filter);
+        options.push(format!("af=%{}%{value}", value.len()));
+    }
+    options.join(",")
 }
 
 impl Native {
     fn replace_handle(&mut self, source: Option<Format>) -> Result<(), &'static str> {
+        self.cancel_pcm();
         let old = std::mem::replace(&mut self.h, std::ptr::null_mut());
         if !old.is_null() {
             unsafe { mpv_terminate_destroy(old) };
         }
+        self.registration = None;
         alsa_guard::disable();
         self.active = None;
         self.pending_start = None;
@@ -442,8 +480,76 @@ impl Native {
         } else {
             None
         };
+        if let Some(pcm) = &mut self.pcm {
+            pcm.session.poll();
+            self.current.continuous = true;
+            self.current.chain_fallback = pcm.session.stream.fallback();
+            let result = if let Some(error) = pcm.session.stream.error() {
+                Err(error)
+            } else if self
+                .registration
+                .as_ref()
+                .is_some_and(continuous::input::Registration::cancelled)
+            {
+                Err("Continuous input was interrupted; playback stays paused")
+            } else if self.current.entry_ready && self.pending_start.is_none() {
+                pts.filter(|p| *p > 0.0)
+                    .map(|p| pcm.session.observe(p))
+                    .transpose()
+            } else {
+                Ok(None)
+            };
+            match result {
+                Ok(Some(observation)) => {
+                    if observation.generation != self.current.generation {
+                        if let Some(entry) = pcm
+                            .pending
+                            .take()
+                            .filter(|e| e.generation == observation.generation)
+                        {
+                            self.current.generation = entry.generation;
+                            self.current.gain = entry.gain.clone();
+                            self.current.source = entry.source;
+                            if let Some(id) = self.entry {
+                                self.entries.insert(id, entry);
+                            }
+                        } else {
+                            self.current.error =
+                                Some("Continuous queue binding changed; playback paused");
+                        }
+                    }
+                    self.current.position_seconds = observation.position;
+                    self.current.handoff_from = observation.handoff_from;
+                    self.current.staged_generation = observation.staged_generation;
+                }
+                Ok(None) => self.current.position_seconds = None,
+                Err(error) => self.current.error = Some(error),
+            }
+            if self.current.error.is_some() {
+                self.intent.store(false, Ordering::Release);
+                self.call(&["set", "pause", "yes"]);
+                self.stop();
+            }
+        }
+    }
+    fn cancel_pcm(&mut self) {
+        if let Some(pcm) = self.pcm.take() {
+            pcm.session.cancel();
+        }
+        if let Some(registration) = &self.registration {
+            registration.cancel();
+        }
+    }
+    fn finish_chain(&self, owner: u64) {
+        if let Some(pcm) = &self.pcm
+            && pcm.session.stream.owner() == Ok(owner)
+        {
+            let _ = pcm.session.seal(owner);
+        }
     }
     fn stop(&mut self) -> bool {
+        self.cancel_pcm();
+        self.current.continuous = false;
         self.pending_start = None;
         let stopped = self.h.is_null() || self.call(&["stop"]);
         self.entry = None;
@@ -496,6 +602,9 @@ impl Native {
                         source,
                         handoff_from: handoff,
                         paused: self.current.paused,
+                        chain_fallback: (generation == previous)
+                            .then_some(self.current.chain_fallback)
+                            .flatten(),
                         ..Default::default()
                     };
                     self.entry = Some(id);
@@ -529,7 +638,9 @@ impl Native {
                 }
             }
         }
-        self.current.staged_generation = self.future.map(|(_, generation)| generation);
+        if self.pcm.is_none() {
+            self.current.staged_generation = self.future.map(|(_, generation)| generation);
+        }
     }
     fn reset(&mut self) -> Result<Status, &'static str> {
         self.pump();
@@ -553,14 +664,22 @@ impl Native {
             std::thread::sleep(Duration::from_millis(2));
         }
     }
-    fn load(
-        &mut self,
-        generation: u64,
-        url: String,
-        position: f64,
-        gain: Option<Applied>,
-        source: Option<Format>,
-    ) {
+    fn load(&mut self, load: Load) {
+        let gain = Some(load.gain.clone());
+        self.load_with_gain(load, gain);
+    }
+    fn load_with_gain(&mut self, load: Load, gain: Option<Applied>) {
+        let Load {
+            generation,
+            url,
+            position,
+            gain: _,
+            source,
+            description,
+            chain,
+            output: _,
+            playing: _,
+        } = load;
         if self.route.is_none()
             || self.route.as_ref().is_some_and(output::Selection::fidelity) && source.is_none()
         {
@@ -574,7 +693,7 @@ impl Native {
             self.intent.store(false, Ordering::Release);
             return;
         }
-        if !matches!(self.route, Some(output::Selection::Desktop))
+        if (!matches!(self.route, Some(output::Selection::Desktop)) || self.registration.is_some())
             && let Err(error) = self.replace_handle(source)
         {
             self.current = Status {
@@ -589,7 +708,77 @@ impl Native {
             return;
         }
         let processing = self.active.as_ref().map(|active| active.plan);
+        if chain
+            && position == 0.0
+            && processing.is_some_and(output::Plan::converted)
+            && let Some(description) = description.filter(|d| qualified(*d, source))
+        {
+            if let Err(error) =
+                self.load_pcm(generation, url, gain, description, processing.unwrap())
+            {
+                self.stop();
+                self.current = Status {
+                    generation,
+                    source,
+                    error: Some(error),
+                    idle: true,
+                    paused: true,
+                    ..Default::default()
+                };
+                self.intent.store(false, Ordering::Release);
+            }
+            return;
+        }
         self.load_file(generation, url, position, gain, source, processing);
+        if processing.is_some_and(output::Plan::converted) {
+            self.current.chain_fallback =
+                Some("Independent conversion: short, unverified or resumed source");
+        }
+    }
+    fn load_pcm(
+        &mut self,
+        generation: u64,
+        url: String,
+        gain: Option<Applied>,
+        description: Description,
+        plan: output::Plan,
+    ) -> Result<(), &'static str> {
+        let session = continuous::Session::new(
+            continuous::stream::Input {
+                generation,
+                uri: url,
+                description,
+                gain: gain.as_ref().map_or(1.0, |g| 10_f64.powf(g.db / 20.0)),
+            },
+            u64::from(description.rate) * 2,
+        )?;
+        for (key, value) in continuous::input::options(description.rate) {
+            let key = CString::new(key).map_err(|_| "Invalid continuous input option")?;
+            let value = CString::new(value).map_err(|_| "Invalid continuous input option")?;
+            if unsafe { mpv_set_option_string(self.h, key.as_ptr(), value.as_ptr()) } < 0 {
+                return Err("Continuous input options rejected");
+            }
+        }
+        let registration =
+            unsafe { continuous::input::Registration::attach(self.h, session.stream.clone()) }?;
+        self.registration = Some(registration);
+        self.pcm = Some(PcmActive {
+            session,
+            pending: None,
+        });
+        self.load_file(
+            generation,
+            continuous::input::URI.into(),
+            0.0,
+            None,
+            Some(plan.source),
+            Some(plan),
+        );
+        for entry in self.entries.values_mut() {
+            entry.gain = gain.clone();
+        }
+        self.current.continuous = true;
+        Ok(())
     }
     // The post-negotiation file pipeline is shared by production loads and
     // synthetic PCM-file qualification, without opening a physical device.
@@ -668,6 +857,7 @@ impl Native {
         url: String,
         gain: Option<Applied>,
         source: Option<Format>,
+        description: Option<crate::continuous::Description>,
     ) -> Result<StageResult, &'static str> {
         self.pump();
         self.sample();
@@ -680,6 +870,38 @@ impl Native {
             || self.entry.is_none()
         {
             return Ok(StageResult::MissedWindow);
+        }
+        if let Some(pcm) = &self.pcm {
+            if pcm.pending.is_some() {
+                return Ok(StageResult::MissedWindow);
+            }
+            let compatible = description.filter(|d| qualified(*d, source)).filter(|d| {
+                self.current.source == source && d.rate == self.current.source.map_or(0, |s| s.rate)
+            });
+            let Some(description) = compatible else {
+                self.finish_chain(owner);
+                return Ok(StageResult::Independent(
+                    "Independent conversion: successor has a different format, short or unverified span",
+                ));
+            };
+            let Some(active) = &self.active else {
+                return Err("Continuous conversion plan disappeared");
+            };
+            let Some(observed) = alsa_guard::observed() else {
+                return Err("Continuous output could not be verified");
+            };
+            if observed.rate != active.plan.target.rate
+                || observed.valid_bits < active.plan.target.bits
+                || observed.format != active.plan.sample
+            {
+                return Err("Continuous output changed; reapply output before resuming");
+            }
+            return self.stage_pcm(owner, next, url, gain, description);
+        }
+        if self.active.as_ref().is_some_and(|a| a.plan.converted()) {
+            return Ok(StageResult::Independent(
+                "Independent conversion: start a new qualified group at the next source",
+            ));
         }
         let processing = if let Some(active) = &self.active {
             let Some(source) = source else {
@@ -716,6 +938,43 @@ impl Native {
             None
         };
         self.append_file(next, url, gain, source, processing)
+    }
+    fn stage_pcm(
+        &mut self,
+        owner: u64,
+        next: u64,
+        url: String,
+        gain: Option<Applied>,
+        description: Description,
+    ) -> Result<StageResult, &'static str> {
+        let pcm = self.pcm.as_mut().ok_or("Continuous session disappeared")?;
+        if let Err(error) = pcm.session.stage(
+            owner,
+            continuous::stream::Input {
+                generation: next,
+                uri: url,
+                description,
+                gain: gain.as_ref().map_or(1.0, |g| 10_f64.powf(g.db / 20.0)),
+            },
+        ) {
+            if pcm.session.stream.error().is_some() {
+                return Err(error);
+            }
+            let _ = pcm.session.seal(owner);
+            return Ok(StageResult::Independent(
+                "Independent conversion: continuous preload window closed",
+            ));
+        }
+        pcm.pending = Some(Entry {
+            generation: next,
+            gain,
+            source: Some(Format {
+                rate: description.rate,
+                bits: description.bits,
+            }),
+        });
+        self.current.staged_generation = Some(next);
+        Ok(StageResult::Ready)
     }
     fn append_file(
         &mut self,
@@ -755,6 +1014,18 @@ impl Native {
     fn unstage(&mut self, owner: u64, next: u64) -> Result<Removal, &'static str> {
         self.pump();
         self.sample();
+        if let Some(pcm) = &mut self.pcm {
+            match pcm.session.remove(owner, next)? {
+                continuous::stream::Removal::Untouched => {
+                    pcm.pending = None;
+                    self.current.staged_generation = None;
+                    return Ok(Removal::Untouched);
+                }
+                continuous::stream::Removal::Committed | continuous::stream::Removal::Stale => {
+                    return self.reset().map(|s| Removal::Reset(Box::new(s)));
+                }
+            }
+        }
         if self.current.generation == owner && self.entry.is_some() && self.playing() == self.entry
         {
             if let Some((id, generation)) = self.future {
@@ -783,6 +1054,7 @@ impl Native {
 }
 impl Drop for Native {
     fn drop(&mut self) {
+        self.cancel_pcm();
         unsafe {
             if !self.h.is_null() {
                 mpv_terminate_destroy(self.h);
@@ -791,6 +1063,20 @@ impl Drop for Native {
                 alsa_guard::disable();
             }
         }
+    }
+}
+#[cfg(test)]
+fn test_load(generation: u64, url: String, position: f64, gain: Applied) -> Load {
+    Load {
+        generation,
+        url,
+        position,
+        gain,
+        source: None,
+        description: None,
+        chain: false,
+        output: Some(output::Selection::Desktop),
+        playing: false,
     }
 }
 impl Player {
@@ -855,6 +1141,8 @@ impl Player {
                 route: Some(output::Selection::Desktop),
                 active: None,
                 pending_start: None,
+                pcm: None,
+                registration: None,
             };
             let _ = ready_tx.send(true);
             loop {
@@ -864,6 +1152,7 @@ impl Player {
                 match rx.recv_timeout(Duration::from_millis(20)) {
                     Ok(Command::Quit) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Ok(Command::FinishChain(owner)) => native.finish_chain(owner),
                     Ok(Command::Pause(p)) => {
                         let pause = p
                             || !native.intent.load(Ordering::Acquire)
@@ -880,12 +1169,11 @@ impl Player {
                         }
                     }
                     #[cfg(test)]
-                    Ok(Command::Load(generation, url, position)) => {
-                        native.load(generation, url, position, None, None)
-                    }
+                    Ok(Command::Load(generation, url, position)) => native
+                        .load_with_gain(test_load(generation, url, position, Applied::off()), None),
                     #[cfg(test)]
                     Ok(Command::LoadGain(generation, url, position, gain)) => {
-                        native.load(generation, url, position, Some(gain), None)
+                        native.load(test_load(generation, url, position, gain))
                     }
                     #[cfg(test)]
                     Ok(Command::LoadProcessed(generation, url, gain, plan)) => {
@@ -913,6 +1201,21 @@ impl Player {
                         );
                         let _ = reply.send(result);
                     }
+                    #[cfg(test)]
+                    Ok(Command::LoadContinuous(generation, url, gain, description, plan)) => {
+                        assert!(matches!(native.desktop_output.as_str(), "pcm" | "null"));
+                        let result = native.replace_handle(None).and_then(|()| {
+                            native.load_pcm(generation, url, Some(gain), description, plan)
+                        });
+                        if let Err(error) = result {
+                            native.current.error = Some(error);
+                        }
+                    }
+                    #[cfg(test)]
+                    Ok(Command::StageContinuous(owner, next, url, gain, description, reply)) => {
+                        let result = native.stage_pcm(owner, next, url, Some(gain), description);
+                        let _ = reply.send(result);
+                    }
                     Ok(Command::LoadPrepared(load)) => {
                         if native.latest_load.load(Ordering::Acquire) != load.generation {
                             continue;
@@ -932,15 +1235,9 @@ impl Player {
                                 ..Default::default()
                             };
                         } else {
-                            native.load(
-                                load.generation,
-                                load.url,
-                                load.position,
-                                Some(load.gain),
-                                load.source,
-                            );
-                            let stale =
-                                native.latest_load.load(Ordering::Acquire) != load.generation;
+                            let generation = load.generation;
+                            native.load(load);
+                            let stale = native.latest_load.load(Ordering::Acquire) != generation;
                             if stale {
                                 native.stop();
                             }
@@ -964,9 +1261,10 @@ impl Player {
                         url,
                         gain,
                         source,
+                        description,
                         reply,
                     }) => {
-                        let result = native.stage(owner, next, url, gain, source);
+                        let result = native.stage(owner, next, url, gain, source, description);
                         native.pump();
                         native.sample();
                         *shared.lock().unwrap() = native.current.clone();
@@ -1016,6 +1314,11 @@ impl Player {
             "Playback command queue is busy; selection stays paused. Retry explicitly."
         })
     }
+    pub fn finish_chain(&self, owner: u64) {
+        if self.status().continuous {
+            self.send(Command::FinishChain(owner));
+        }
+    }
     pub fn send(&self, command: Command) {
         if let Command::Pause(p) = &command {
             self.desired_playing.store(!p, Ordering::Release);
@@ -1052,6 +1355,7 @@ impl Player {
             url,
             gain: None,
             source: None,
+            description: None,
             reply,
         })
         .await
@@ -1063,6 +1367,7 @@ impl Player {
         url: String,
         gain: Applied,
         source: Option<Format>,
+        description: Option<crate::continuous::Description>,
     ) -> Result<StageResult, &'static str> {
         self.reply(|reply| Command::Stage {
             owner,
@@ -1070,6 +1375,7 @@ impl Player {
             url,
             gain: Some(gain),
             source,
+            description,
             reply,
         })
         .await
@@ -1179,6 +1485,8 @@ mod tests {
             position: 0.0,
             gain: Applied::off(),
             source: None,
+            description: None,
+            chain: false,
             playing: true,
         }
     }
@@ -1493,6 +1801,7 @@ mod gapless_tests {
                                     2,
                                     files[1].to_str().unwrap().into(),
                                     gain(next_db),
+                                    None,
                                     None
                                 )
                                 .await
@@ -1963,5 +2272,302 @@ mod hq_conversion_tests {
             );
             std::fs::remove_dir_all(root).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod continuous_tests {
+    use super::*;
+    struct Fixture {
+        root: std::path::PathBuf,
+        files: Vec<std::path::PathBuf>,
+        description: Description,
+    }
+    impl Fixture {
+        fn new(rate: u32, bits: u16) -> Self {
+            Self::with_frames(rate, bits, rate * 2 + 17)
+        }
+        fn with_frames(rate: u32, bits: u16, frames: u32) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("qoda-continuous-native-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&root).unwrap();
+            let mut files = Vec::new();
+            for seed in 0..3 {
+                let path = root.join(format!("{seed}.wav"));
+                let mut pcm = Vec::<u8>::new();
+                for frame in 0..frames {
+                    let value = ((f64::from(frame + seed * 131) * 0.11).sin()
+                        * 0.2
+                        * 2_f64.powi(i32::from(bits) - 1))
+                    .round() as i32;
+                    for _ in 0..2 {
+                        pcm.extend(&value.to_le_bytes()[..usize::from(bits / 8)]);
+                    }
+                }
+                let mut bytes = b"RIFF".to_vec();
+                bytes.extend((36 + pcm.len() as u32).to_le_bytes());
+                bytes.extend(b"WAVEfmt ");
+                bytes.extend(16_u32.to_le_bytes());
+                bytes.extend(1_u16.to_le_bytes());
+                bytes.extend(2_u16.to_le_bytes());
+                bytes.extend(rate.to_le_bytes());
+                bytes.extend((rate * u32::from(bits) / 4).to_le_bytes());
+                bytes.extend((bits / 4).to_le_bytes());
+                bytes.extend(bits.to_le_bytes());
+                bytes.extend(b"data");
+                bytes.extend((pcm.len() as u32).to_le_bytes());
+                bytes.extend(pcm);
+                std::fs::write(&path, bytes).unwrap();
+                files.push(path);
+            }
+            Self {
+                root,
+                files,
+                description: Description {
+                    rate,
+                    bits,
+                    frames: u64::from(frames),
+                },
+            }
+        }
+        fn plan(&self, rate: u32) -> output::Plan {
+            output::Plan {
+                source: Format {
+                    rate: self.description.rate,
+                    bits: self.description.bits,
+                },
+                target: Format { rate, bits: 16 },
+                sample: output::Sample::S16,
+            }
+        }
+        fn load(&self, player: &Player, generation: u64, plan: output::Plan) {
+            player.send(Command::LoadContinuous(
+                generation,
+                self.files[0].to_str().unwrap().into(),
+                Applied::off(),
+                self.description,
+                plan,
+            ));
+            let state = wait(player, |s| s.entry_ready && s.paused);
+            assert!(state.continuous);
+        }
+        fn stage(&self, player: &Player, owner: u64, next: u64, index: usize, db: f64) {
+            let (tx, rx) = mpsc::channel();
+            player.send(Command::StageContinuous(
+                owner,
+                next,
+                self.files[index].to_str().unwrap().into(),
+                Applied {
+                    db,
+                    ..Applied::off()
+                },
+                self.description,
+                tx,
+            ));
+            assert_eq!(
+                rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap(),
+                StageResult::Ready
+            );
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                eprintln!(
+                    "{}",
+                    std::fs::read_to_string(self.root.join("mpv.log")).unwrap_or_default()
+                );
+            }
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+    fn wait(player: &Player, predicate: impl Fn(&Status) -> bool) -> Status {
+        let until = std::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            let s = player.status();
+            assert!(s.error.is_none(), "{s:?}");
+            if predicate(&s) {
+                return s;
+            }
+            assert!(std::time::Instant::now() < until, "{s:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    #[test]
+    fn rolling_three_track_conversion_uses_nominal_clock_and_preserves_gain_per_occurrence() {
+        // Actual paced libmpv null AO, no device or account. Exactly one staged
+        // source, minimum two seconds, all qualified source/target rate families.
+        for (source, bits, target) in [
+            (44100, 24, 48000),
+            (48000, 24, 44100),
+            (96000, 24, 48000),
+            (48000, 24, 48000),
+            (44100, 16, 96000),
+            (96000, 24, 44100),
+            (48000, 16, 96000),
+        ] {
+            let fixture = Fixture::with_frames(source, bits, source * 2);
+            let player = Player::with_options(
+                "null",
+                &[
+                    ("audio-format", "s16".into()),
+                    ("audio-samplerate", target.to_string()),
+                    ("audio-channels", "stereo".into()),
+                    (
+                        "log-file",
+                        fixture.root.join("mpv.log").to_str().unwrap().into(),
+                    ),
+                ],
+            )
+            .unwrap();
+            fixture.load(&player, 10, fixture.plan(target));
+            fixture.stage(&player, 10, 11, 1, -6.0);
+            assert_eq!(player.status().generation, 10);
+            player.send(Command::Pause(false));
+            let next = wait(&player, |s| {
+                s.generation == 11 && s.position_seconds.is_some()
+            });
+            assert_eq!(next.handoff_from, Some(10));
+            assert_eq!(next.gain.unwrap().db, -6.0);
+            assert!(!next.natural_eof);
+            player.send(Command::Pause(true));
+            let paused = wait(&player, |s| s.paused);
+            assert_eq!(paused.generation, 11);
+            if source == 44100 && target == 48000 {
+                // Exceed the decoder's network inactivity budget while output
+                // intentionally applies backpressure. This must not be a stall.
+                std::thread::sleep(Duration::from_secs(6));
+                let held = player.status();
+                assert!(held.paused && held.error.is_none());
+                assert_eq!(held.generation, 11);
+                assert!(held.position_seconds.unwrap() <= paused.position_seconds.unwrap() + 0.05);
+            }
+            fixture.stage(&player, 11, 12, 2, -3.0);
+            player.send(Command::Pause(false));
+            let last = wait(&player, |s| {
+                s.generation == 12 && s.position_seconds.is_some()
+            });
+            assert_eq!(last.handoff_from, Some(11));
+            assert_eq!(last.gain.unwrap().db, -3.0);
+            assert!(!last.natural_eof);
+            player.finish_chain(12);
+            let end = wait(&player, |s| s.idle && s.natural_eof);
+            assert_eq!(end.generation, 12);
+            drop(player);
+        }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn committed_future_cancellation_returns_reset_and_raw_options_do_not_leak_to_next_load()
+    {
+        let fixture = Fixture::new(44100, 16);
+        let player = Player::with_output("null").unwrap();
+        fixture.load(&player, 1, fixture.plan(48000));
+        fixture.stage(&player, 1, 2, 1, 0.0);
+        player.send(Command::Pause(false));
+        wait(&player, |s| {
+            s.generation == 1 && s.position_seconds.is_some_and(|p| p > 1.9)
+        });
+        let Removal::Reset(before) = player.unstage(1, 2).await.unwrap() else {
+            panic!("admitted future was acknowledged untouched");
+        };
+        assert!(matches!(before.generation, 1 | 2));
+        let state = player.status();
+        assert!(state.idle && state.paused);
+        assert!(!state.natural_eof);
+        assert!(!state.continuous);
+        player.send(Command::Load(
+            3,
+            fixture.files[0].to_str().unwrap().into(),
+            0.0,
+        ));
+        wait(&player, |s| s.generation == 3 && s.entry_ready && s.paused);
+        player.send(Command::Pause(false));
+        wait(&player, |s| s.generation == 3 && s.idle && s.natural_eof);
+        drop(player);
+    }
+    #[test]
+    fn native_continuous_graph_matches_uninterrupted_conversion_with_per_source_gain() {
+        let fixture = Fixture::new(44100, 24);
+        let capture = fixture.root.join("capture.pcm");
+        let reference = fixture.root.join("reference.pcm");
+        let raw = fixture.root.join("reference.f64");
+        let plan = fixture.plan(48000);
+        let mut joined = Vec::new();
+        for (index, db) in [0.0, -6.0, -3.0].into_iter().enumerate() {
+            let wav = std::fs::read(&fixture.files[index]).unwrap();
+            for bytes in wav[44..].as_chunks::<3>().0 {
+                let value = i32::from_le_bytes([0, bytes[0], bytes[1], bytes[2]]) >> 8;
+                let sample = f64::from(value) / 8388608.0 * 10_f64.powf(db / 20.0);
+                joined.extend(sample.to_le_bytes());
+            }
+        }
+        std::fs::write(&raw, joined).unwrap();
+        let graph = plan.filter(None);
+        let graph = graph
+            .strip_prefix("af=lavfi=[")
+            .unwrap()
+            .strip_suffix(']')
+            .unwrap();
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-nostdin", "-v", "error", "-f", "f64le", "-ar", "44100", "-ac", "2", "-i",
+            ])
+            .arg(&raw)
+            .args(["-af", graph, "-f", "s16le"])
+            .arg(&reference)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let player = Player::with_options(
+            "pcm",
+            &[
+                ("ao-pcm-file", capture.to_str().unwrap().into()),
+                ("ao-pcm-waveheader", "no".into()),
+                ("audio-format", "s16".into()),
+                ("audio-samplerate", "48000".into()),
+                ("audio-channels", "stereo".into()),
+            ],
+        )
+        .unwrap();
+        fixture.load(&player, 20, plan);
+        fixture.stage(&player, 20, 21, 2, -30.0);
+        let (reply, result) = mpsc::channel();
+        player.send(Command::Unstage {
+            owner: 20,
+            next: 21,
+            reply,
+        });
+        assert!(matches!(
+            result
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap(),
+            Removal::Untouched
+        ));
+        fixture.stage(&player, 20, 22, 1, -6.0);
+        player.send(Command::Pause(false));
+        wait(&player, |s| s.generation == 22);
+        fixture.stage(&player, 22, 23, 2, -3.0);
+        wait(&player, |s| s.generation == 23);
+        player.finish_chain(23);
+        wait(&player, |s| s.idle && s.natural_eof);
+        drop(player);
+        let actual = std::fs::read(capture).unwrap();
+        let expected = std::fs::read(reference).unwrap();
+        assert_eq!(actual.len(), expected.len());
+        let error = actual
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .zip(expected.as_chunks::<2>().0.iter())
+            .map(|(a, b)| {
+                (i32::from(i16::from_le_bytes(*a)) - i32::from(i16::from_le_bytes(*b))).abs()
+            })
+            .max()
+            .unwrap();
+        assert!(
+            error <= 2,
+            "Continuous graph differs from uninterrupted reference by {error} output LSB"
+        );
     }
 }

@@ -534,6 +534,8 @@ mod tests {
                 position: 1.0,
                 gain: gain::Applied::off(),
                 source: None,
+                description: None,
+                chain: false,
                 output: Some(crate::output::Selection::Desktop),
                 playing: true,
             })
@@ -576,6 +578,8 @@ mod tests {
                 position: queue.position(),
                 gain: prepared.gain,
                 source: None,
+                description: None,
+                chain: false,
                 output: Some(crate::output::Selection::Desktop),
                 playing,
             })

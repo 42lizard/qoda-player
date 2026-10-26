@@ -3,7 +3,8 @@
 2026-10-26. This completes the owned-path qualification record for #16 under the
 [accepted support boundary](first-release-scope-proposal.md). It is a measured
 compatibility matrix, not certification of every Plex server, account or format.
-Continuous converted playback #41 remains required software work before release.
+The separate [continuous-conversion adapter #41](audio/hq-conversion.md) now has
+production implementation and scoped digital/null qualification.
 
 The historical and current controlled baseline is one owned PMS
 **1.43.5.11029-6bf8af3f0**, verified HTTPS and five discovered music libraries,

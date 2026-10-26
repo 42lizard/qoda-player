@@ -29,6 +29,7 @@ impl Input {
             && matches!(d.bits, 16 | 24)
             && d.frames >= minimum
             && d.frames > 0
+            && d.frames <= (1_u64 << 52)
             && d.frames.checked_mul(FRAME_BYTES).is_some()
             && self.gain.is_finite()
             && (0.0..=1_000_000.0).contains(&self.gain)
@@ -57,6 +58,7 @@ impl Slot {
 }
 struct State {
     current: Slot,
+    highest_generation: u64,
     future: Option<Slot>,
     bytes: VecDeque<u8>,
     sealed: bool,
@@ -93,6 +95,7 @@ impl Stream {
         }
         Ok(Arc::new(Self {
             state: Mutex::new(State {
+                highest_generation: input.generation,
                 current: Slot::new(input, 0),
                 future: None,
                 bytes: VecDeque::new(),
@@ -121,6 +124,9 @@ impl Stream {
             state.error.get_or_insert(message);
         }
         self.cancel();
+    }
+    pub fn finished(&self) -> bool {
+        self.state.lock().is_ok_and(|s| s.finished)
     }
     pub fn error(&self) -> Option<&'static str> {
         self.state
@@ -174,7 +180,7 @@ impl Stream {
             || s.sealed
             || s.finished
             || s.current.input.generation != owner
-            || input.generation <= owner
+            || input.generation <= s.highest_generation
             || s.future.is_some()
         {
             return Err("Continuous preload window closed");
@@ -192,6 +198,7 @@ impl Stream {
         {
             return Err("Continuous timeline exhausted");
         }
+        s.highest_generation = input.generation;
         s.future = Some(Slot::new(input, start));
         self.changed.notify_all();
         Ok(())
@@ -399,7 +406,7 @@ impl Stream {
             .state
             .lock()
             .map_err(|_| "Continuous input unavailable")?;
-        if !pts.is_finite() || pts < 0.0 || self.cancelled() {
+        if !pts.is_finite() || pts < 0.0 || self.cancelled() && !s.finished {
             return Err("Continuous nominal clock unavailable");
         }
         let rate = f64::from(s.current.input.description.rate);
@@ -416,7 +423,7 @@ impl Stream {
         };
         let position = pts - candidate.start as f64 / rate;
         let admitted = candidate.written / FRAME_BYTES;
-        if position > (admitted as f64 + 2.0) / rate {
+        if position > (admitted as f64 + 3.0) / rate {
             return Err("Continuous clock exceeds admitted source span");
         }
         let position = (position >= 0.0)
@@ -435,6 +442,19 @@ impl Stream {
         })
     }
 }
+
+impl super::input::Reader for Stream {
+    fn read(&self, bytes: &mut [u8]) -> Result<usize, &'static str> {
+        Stream::read(self, bytes)
+    }
+    fn cancel(&self) {
+        Stream::cancel(self)
+    }
+    fn cancelled(&self) -> bool {
+        Stream::cancelled(self) && !self.finished()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,6 +510,7 @@ mod tests {
         stream.stage(1, input(2, 1)).unwrap();
         claim(&stream, 2);
         assert_eq!(stream.remove(1, 2).unwrap(), Removal::Untouched);
+        assert!(stream.stage(1, input(2, 1)).is_err());
         assert!(!stream.live(2));
         assert!(stream.write(2, &[2; 16]).is_err());
         assert!(stream.complete(2).is_err());

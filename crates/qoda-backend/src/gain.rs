@@ -278,6 +278,7 @@ pub struct Prepared {
     pub media: PreparedMedia,
     pub gain: Applied,
     pub source: Option<crate::source_format::Format>,
+    pub continuous: Option<crate::continuous::Description>,
 }
 #[derive(Clone, Copy, Debug)]
 pub enum PrepareError {
@@ -324,7 +325,7 @@ pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared
         fidelity,
         ..
     } = request;
-    let source = if fidelity {
+    let verified = if fidelity {
         Some(
             tokio::time::timeout(
                 Duration::from_secs(5),
@@ -337,6 +338,8 @@ pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared
     } else {
         None
     };
+    let source = verified.map(|verified| verified.format);
+    let continuous = verified.and_then(|verified| verified.continuous);
     let gain = if mode == Mode::Off {
         Applied::off()
     } else {
@@ -349,6 +352,7 @@ pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared
         media,
         gain,
         source,
+        continuous,
     })
 }
 #[derive(Serialize, Deserialize)]

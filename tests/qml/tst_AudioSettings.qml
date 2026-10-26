@@ -84,6 +84,15 @@ TestCase {
         toggle.forceActiveFocus(); keyClick(Qt.Key_Space);
         verify(!settings.allowConversionDraft); compare(settings.requestedOutputMode, "fidelity"); verify(settings.canApplyOutput);
     }
+    function test_continuity_and_independent_fallback_are_explicit() {
+        settings.output = {available: true, selection: {mode: "fidelity_resampled"}, continuous: true};
+        const label = findChild(settings, "outputContinuity");
+        verify(label.visible); verify(label.text.includes("Continuous conversion"));
+        settings.output = {available: true, selection: {mode: "fidelity_resampled"}, continuous: false, chain_fallback: "Independent conversion: short source"};
+        verify(label.visible); compare(label.text, "Independent conversion: short source");
+        settings.output = {available: true, selection: {mode: "desktop"}};
+        verify(!label.visible);
+    }
     function test_mode_is_keyboard_accessible_without_implicit_playback() {
         const combo = findChild(settings, "replaygainMode");
         compare(combo.currentIndex, 3);

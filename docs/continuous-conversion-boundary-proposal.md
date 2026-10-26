@@ -2,10 +2,11 @@
 
 Accepted recommended default for #41, 2026-10-26, under the human's standing
 delegation to accept recommended planning defaults. Retain one successor and use
-explicit short/unknown/incompatible-input fallback. Production is not changed by
-this record; qualification and integration remain required.
-The bounded Rust continuous-input experiment matches nine uninterrupted PCM
-references, including unequal gains, and passes cancellation/fault checks.
+explicit short/unknown/incompatible-input fallback. The production adapter now applies this boundary; implementation and digital/null
+qualification are recorded in the [continuous-input evidence](research/continuous-pcm-input.md).
+The expanded shared-core matrix matches 40 uninterrupted PCM references on the
+measured stack, including unequal gains. Native adapter tests separately cover
+rolling nominal handoffs, cancellation/reset and final graph output.
 
 A paced-null follow-up supplies a one-second current source and only a **one-frame
 successor**, with neither final EOF nor fabricated silence. While a third source
@@ -23,9 +24,9 @@ Silently ending the stream or inserting silence would defeat the continuity clai
 ## Decision: retain the existing one-successor access boundary
 
 Use continuous conversion only for verified compatible source/output formats
-with enough frames for the qualified lookahead horizon. Start conservatively at
-two seconds for current and next, then qualify that threshold over the supported
-rates/plans before enabling it. A shorter, unknown-length or incompatible next
+with enough frames for the qualified lookahead horizon. The initial adapter uses
+two seconds for current and next, qualified by rolling paced-null handoffs across
+the supported rate directions and precision-only conversion. A shorter, unknown-length or incompatible next
 source explicitly ends the continuous group and uses the ordinary independent
 load. Show that fallback in the gapless status; do not claim continuous conversion
 across that boundary. There is no additional provider access beyond current/next.

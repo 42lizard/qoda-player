@@ -6,6 +6,7 @@ mod artwork;
 mod artwork_store;
 mod cache_files;
 mod catalog;
+mod continuous;
 mod gain;
 mod gapless;
 mod metadata_cache;
@@ -338,6 +339,8 @@ fn output_view(
         view["source"] = json!(audio.source);
         if audio.entry_ready && audio.error.is_none() {
             view["processing"] = json!(audio.processing);
+            view["continuous"] = json!(audio.continuous);
+            view["chain_fallback"] = json!(audio.chain_fallback);
         }
         if audio.entry_ready && !audio.idle && audio.error.is_none() {
             view["observed"] = json!(audio.output);
@@ -2605,6 +2608,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         media,
                         gain,
                         source,
+                        continuous,
                     } = prepared;
                     if let Err(error) = queue.update_selected(media.track.clone(), &media.version) {
                         let reason = version_failure(&error, &media.version);
@@ -2636,6 +2640,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             position: queue.position(),
                             gain,
                             source,
+                            description: continuous,
+                            chain: gapless.view.enabled,
                             output: output_settings.selection.clone(),
                             playing: desired_playing,
                         }) {
@@ -2739,6 +2745,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         {
             state["error"] = json!(error);
         }
+        gapless.finish_chain_if_needed(&queue, &epochs, &player);
         state["gapless"] = json!(gapless.view);
         state["replaygain"] = gain_view(&gain_settings, &audio, epochs.current);
         state["output"] = output_view(&output_settings, &output_devices, &audio, epochs.current);

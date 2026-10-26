@@ -50,7 +50,7 @@ two native playlist entries and an EDL virtual file. All output is PCM-file only
 Recorded output frames: 192000 in every successful mode. Join maximum/RMS error
 against the uninterrupted FFmpeg reference: single-file **0/0 LSB**, native
 playlist **34/2.986133 LSB**, EDL **0/0 LSB**. The default invocation fails on the
-native reset; `--expect-reset` verifies this known current limitation.
+native reset; `--expect-reset` verifies this independent-playlist limitation.
 
 The EDL run with Qoda's `access-references=no` failed format recognition; the
 controlled EDL experiment required `access-references=yes` for these trusted local
@@ -61,4 +61,6 @@ removed automatically.
 
 This supports a continuous-input design investigation; it does not implement
 queue ownership, mutable staging, seek/recovery, gain changes or revocation for
-that input. #41 therefore stays open.
+that input. #41 therefore stayed open at this research stage. The later
+[production PCM adapter](continuous-pcm-input.md#production-adapter-and-expanded-digital-qualification-2026-10-27)
+records the implemented seam and its separate qualification.

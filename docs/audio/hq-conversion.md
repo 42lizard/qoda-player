@@ -52,22 +52,37 @@ mpv's ignore-chmap option is limited here to an explicit fixed stereo policy.
 
 ## Gapless scope
 
-An unchanged source format/output plan/gain can be staged through the existing
-native queue. Format or conversion-gain changes take the ordinary EOF load path
-so the next source can renegotiate and prefer exact playback again. Strict
-Fidelity's existing staging behavior is preserved.
+Compatible converted tracks now use a bounded Rust PCM stream into one final
+libmpv/SoXR graph. The converter stays alive across those nominal track boundaries;
+per-occurrence ReplayGain is applied once in double precision before the shared
+graph. The provider still grants only current plus one successor. Decoder selection,
+prewarming and byte admission do not confirm a listening occurrence: the nominal
+audio clock must cross its verified integer source-frame boundary.
 
-mpv drains/resets resampling state per file. Two 44.1→48 kHz files retained the
-expected concatenated output-frame count and matched independently converted
-reference files at the join. That is not a continuous album-wide resampler: a
-sine test found a 35-output-LSB transient relative to an uninterrupted ideal sine
-at the file boundary. The same experiment using mpv's internal SoXR resampler
-also reset state. Continuous resampler-state handoff is tracked in [#41](https://github.com/42lizard/qoda-player/issues/41);
-this increment does not claim that boundary is transparent. A reproducible
-[upstream-path comparison](../research/continuous-resampler.md) now distinguishes
-native playlist reset from EDL continuous-input behavior and its ownership/trust
-constraints. A [bounded Rust continuous-PCM experiment](../research/continuous-pcm-input.md#implementation-owner-experiment-isolated-decoder-and-persistent-final-graph) now matches uninterrupted conversion across fractional splits and unequal gains, with cancellation/fault checks. It is not yet connected to production queue ownership, seek or recovery. Run `python3 tools/check-resampler-boundary.py --expect-reset` from
-the repository root to reproduce the current limitation using synthetic files.
+The initial profile requires stereo integer 16/24-bit native FLAC or plain WAV at
+44.1, 48 or 96 kHz, a confirmed header-derived frame span, at least two seconds per
+source, and unchanged source format/output plan. Unknown, short, incompatible or
+resumed sources use explicit independent conversion. The Audio settings show
+continuous conversion or the independent fallback reason. Disabling gapless ends
+the group. Exact-format Desktop/strict Fidelity staging retains its existing path.
+
+Seek, recovery and output changes rebuild under the existing pause/generation
+fences. Removing a successor before any shared PCM admission can preserve the
+current source; after admission, cancellation stops/resets and requires review.
+An uncommitted speculative decoder failure ends only the current group, while a
+current or committed decoder failure pauses playback. No silence or fabricated
+EOF bridges a temporary absence of successor authorization. Decoder helpers are
+owned, bounded, cancellable and killed/reaped on teardown; provider URLs enter
+through IPC rather than process arguments.
+
+The earlier native-playlist pipeline reset resampler state and produced a
+35-output-LSB join transient in the measured sine fixture. The reproducible
+[upstream-path comparison](../research/continuous-resampler.md) and
+`python3 tools/check-resampler-boundary.py --expect-reset` retain that historical
+result for independent files. The new shared route is qualified against an
+uninterrupted reference instead of concatenated independently converted files;
+see [continuous-input evidence](../research/continuous-pcm-input.md). Neither route
+qualifies physical ALSA/device continuity from digital or null-output measurements.
 
 ## Validation
 

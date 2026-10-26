@@ -82,7 +82,12 @@ pub fn parse(bytes: &[u8]) -> Result<Format, &'static str> {
     }
     Err(invalid)
 }
-pub async fn probe(source: &dyn MediaSource) -> Result<Format, &'static str> {
+#[derive(Clone, Copy)]
+pub struct Verified {
+    pub format: Format,
+    pub continuous: Option<crate::continuous::Description>,
+}
+pub async fn probe(source: &dyn MediaSource) -> Result<Verified, &'static str> {
     let mut response = source
         .open(
             Some(ByteRange::try_from("bytes=0-65535").map_err(|_| "Invalid source range")?),
@@ -99,23 +104,121 @@ pub async fn probe(source: &dyn MediaSource) -> Result<Format, &'static str> {
     {
         return Err("Source format range was not confirmed; fidelity stays paused.");
     }
+    let extent = if response.status == 200 {
+        response.content_length.map(|total| (total, total))
+    } else {
+        response
+            .content_range
+            .as_deref()
+            .and_then(|range| range.strip_prefix("bytes 0-"))
+            .and_then(|range| range.split_once('/'))
+            .and_then(|(end, total)| {
+                let end = end.parse::<u64>().ok()?;
+                let total = total.parse::<u64>().ok()?;
+                (end < total
+                    && response
+                        .content_length
+                        .is_none_or(|length| Some(length) == end.checked_add(1)))
+                .then_some((total, end + 1))
+            })
+    };
     let mut bytes = Vec::new();
     while let Some(chunk) = response.body.next().await {
         let chunk = chunk.map_err(|_| "Source format read interrupted; fidelity stays paused.")?;
         bytes.extend_from_slice(&chunk[..chunk.len().min(65536 - bytes.len())]);
-        if let Ok(format) = parse(&bytes) {
-            return Ok(format);
+        if let Ok(format) = parse(&bytes)
+            && let Some(continuous) = extent
+                .filter(|(_, range_bytes)| bytes.len() as u64 <= *range_bytes)
+                .and_then(|(total, _)| crate::continuous::describe(&bytes, total))
+        {
+            return Ok(Verified {
+                format,
+                continuous: Some(continuous),
+            });
         }
         if bytes.len() == 65536 {
             break;
         }
     }
-    parse(&bytes)
+    parse(&bytes).map(|format| Verified {
+        format,
+        continuous: extent
+            .filter(|(_, range_bytes)| bytes.len() as u64 <= *range_bytes)
+            .and_then(|(total, _)| crate::continuous::describe(&bytes, total)),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct Fragmented {
+        range: Option<String>,
+    }
+    impl qoda_provider::MediaSource for Fragmented {
+        fn open(
+            &self,
+            _: Option<qoda_provider::ByteRange>,
+            _: bool,
+        ) -> qoda_provider::ProviderFuture<'_, qoda_provider::MediaResponse> {
+            Box::pin(async move {
+                let mut prefix = wave(48000, 16, 2);
+                prefix[4..8].copy_from_slice(&(36_u32 + 384000).to_le_bytes());
+                prefix.extend(b"data");
+                prefix.extend(384000_u32.to_le_bytes());
+                // The first body chunk contains a format but no data header.
+                let chunks = [
+                    Ok(bytes::Bytes::copy_from_slice(&prefix[..36])),
+                    Ok(bytes::Bytes::copy_from_slice(&prefix[36..])),
+                ];
+                Ok(qoda_provider::MediaResponse {
+                    status: 206,
+                    content_type: Some("audio/wav".into()),
+                    content_length: Some(44),
+                    content_range: self.range.clone(),
+                    etag: None,
+                    body: Box::pin(futures_util::stream::iter(chunks)),
+                })
+            })
+        }
+    }
+    #[tokio::test]
+    async fn exact_span_waits_for_fragmented_data_header_and_requires_confirmed_extent() {
+        let verified = probe(&Fragmented {
+            range: Some("bytes 0-43/384044".into()),
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            verified.format,
+            Format {
+                rate: 48000,
+                bits: 16
+            }
+        );
+        assert_eq!(
+            verified.continuous,
+            Some(crate::continuous::Description {
+                rate: 48000,
+                bits: 16,
+                frames: 96000
+            })
+        );
+        for range in ["bytes 0-43/*", "bytes 0-43/384043", "bytes 0-44/384044"] {
+            let verified = probe(&Fragmented {
+                range: Some(range.into()),
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                verified.format,
+                Format {
+                    rate: 48000,
+                    bits: 16
+                }
+            );
+            assert_eq!(verified.continuous, None);
+        }
+    }
     fn wave(rate: u32, bits: u16, channels: u16) -> Vec<u8> {
         let mut bytes = b"RIFF".to_vec();
         bytes.extend(36_u32.to_le_bytes());

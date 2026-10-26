@@ -1,6 +1,6 @@
 # Running the first application slice
 
-Current live qualification is consolidated in the [owned-Plex support matrix](plex-support-matrix.md). Increment notes below retain their historical limits; #41 continuous converted playback still blocks the full release.
+Current live qualification is consolidated in the [owned-Plex support matrix](plex-support-matrix.md). Increment notes below retain their historical limits. [Continuous converted playback](audio/hq-conversion.md) is implemented within its verified source and lookahead boundary; independent fallbacks and physical-output limitations stay explicit.
 
 This is development software, tracked in [issue 21](https://github.com/42lizard/qoda-player/issues/21). It contains a real Rust process, Plex provider, embedded libmpv owner and standalone Quickshell window. It does not install a service or modify Omarchy configuration.
 

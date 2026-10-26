@@ -164,6 +164,17 @@ impl Controller {
         }));
         Ok(())
     }
+    pub fn finish_chain_if_needed(&self, queue: &Queue, epochs: &Epochs, player: &Player) {
+        if self.plan.is_some() || !player.status().continuous {
+            return;
+        }
+        let failed = self
+            .failed
+            .is_some_and(|(owner, _)| owner == epochs.current);
+        if !self.view.enabled || failed || successor(queue).map_or(true, |s| s.is_none()) {
+            player.finish_chain(epochs.current);
+        }
+    }
     pub fn unavailable_reply(
         &self,
         reply: &Reply,
@@ -208,6 +219,7 @@ impl Controller {
             media,
             gain,
             source,
+            continuous,
         } = prepared;
         let mut candidate = successor(queue)?.ok_or("The natural successor changed")?.2;
         if let Err(error) = candidate.update_selected(media.track.clone(), &media.version) {
@@ -229,6 +241,7 @@ impl Controller {
                 url.clone(),
                 gain,
                 source,
+                continuous,
             )
             .await
         {
@@ -239,14 +252,16 @@ impl Controller {
                         .into();
                 Ok(())
             }
-            Ok(StageResult::MissedWindow) => {
+            Ok(result @ (StageResult::MissedWindow | StageResult::Independent(_))) => {
                 proxy.revoke_url(&url).await;
                 self.failed = Some((reply.key.owner_gen, reply.key.next));
                 self.plan = None;
                 self.view.phase = "fallback";
-                self.view.message =
-                    "The successor missed its native preload window; normal loading will continue."
-                        .into();
+                self.view.message = match result {
+                    StageResult::Independent(reason) => reason.into(),
+                    _ => "The successor missed its native preload window; normal loading will continue.".into(),
+                };
+                player.finish_chain(reply.key.owner_gen);
                 Ok(())
             }
             Err(error) => Err(error.into()),
