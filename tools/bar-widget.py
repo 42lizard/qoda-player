@@ -53,7 +53,7 @@ def backup_settings(config):
     return directory / "shell.json"
 
 
-def activate(config, root):
+def activate(config, root, launcher=None):
     if config != config_home():
         raise ValueError("Activation can only target the current desktop configuration")
     backup = backup_settings(config)
@@ -67,14 +67,20 @@ def activate(config, root):
     shell_env = dict(os.environ, OMARCHY_SHELL_IPC_TIMEOUT="10s")
     subprocess.run(["omarchy-shell", "shell", "rescanPlugins"], check=True, timeout=15, env=shell_env)
     subprocess.run(["omarchy", "plugin", "enable", PLUGIN_ID, *placement], check=True, timeout=15, env=shell_env)
-    subprocess.run(["omarchy", "bar", "set", PLUGIN_ID, "playerPath", str(root), "--section", "right"], check=True, timeout=15, env=shell_env)
+    subprocess.run(["omarchy", "bar", "set", PLUGIN_ID, "playerPath", str(root) if launcher is None else "", "--section", "right"], check=True, timeout=15, env=shell_env)
+    subprocess.run(["omarchy", "bar", "set", PLUGIN_ID, "launcherPath", str(launcher) if launcher else "", "--section", "right"], check=True, timeout=15, env=shell_env)
 
 
 
-def install(config, root=ROOT, enable=False):
+def install(config, root=ROOT, enable=False, installed_prefix=None):
     config, root = Path(config).expanduser().absolute(), Path(root).resolve()
     if enable and config != config_home():
         raise ValueError("Activation can only target the current desktop configuration")
+    launcher = None
+    if installed_prefix is not None:
+        launcher = Path(installed_prefix).expanduser().absolute() / "bin/qoda"
+        if launcher.is_symlink() or not launcher.is_file() or not os.access(launcher, os.X_OK):
+            raise ValueError("Installed prefix must contain a regular executable bin/qoda launcher")
     destination = config / "omarchy/plugins" / PLUGIN_ID
     previous = owned(destination) if destination.exists() or destination.is_symlink() else None
     staging_parent = config / "omarchy/qoda-widget-backups"
@@ -112,7 +118,7 @@ def install(config, root=ROOT, enable=False):
                 backup.rename(destination)
             raise
     if enable:
-        activate(config, root)
+        activate(config, root, launcher)
     return destination
 
 
@@ -133,10 +139,11 @@ def main():
     parser.add_argument("command", choices=["install", "remove"])
     parser.add_argument("--config-home", type=Path, default=config_home(), help="Alternate profile for isolated installation checks")
     parser.add_argument("--enable", action="store_true", help="Explicitly add the installed widget to the running desktop bar")
+    parser.add_argument("--installed-prefix", type=Path, help="Use this installed Qoda prefix instead of the development checkout when enabling")
     args = parser.parse_args()
     try:
         if args.command == "install":
-            print("Installed widget:", install(args.config_home, enable=args.enable))
+            print("Installed widget:", install(args.config_home, enable=args.enable, installed_prefix=args.installed_prefix))
         else:
             if args.enable:
                 parser.error("--enable only applies to install")

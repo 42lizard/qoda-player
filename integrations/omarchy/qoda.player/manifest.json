@@ -6,14 +6,31 @@
   "author": "Qoda Player contributors",
   "license": "MIT",
   "description": "Qoda icon and compact playback controls connected to the Qoda backend.",
-  "kinds": ["bar-widget"],
-  "entryPoints": {"barWidget": "BarWidget.qml"},
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
   "barWidget": {
     "displayName": "Qoda Player",
     "description": "Click the Qoda icon for playback controls; open the library to restore a hidden player.",
     "category": "Media",
     "allowMultiple": false,
     "defaultSection": "right",
-    "schema": [{"key": "playerPath", "type": "string", "label": "Qoda development checkout", "defaultValue": ""}]
+    "schema": [
+      {
+        "key": "playerPath",
+        "type": "string",
+        "label": "Qoda development checkout",
+        "defaultValue": ""
+      },
+      {
+        "key": "launcherPath",
+        "type": "string",
+        "label": "Installed Qoda launcher (takes precedence)",
+        "defaultValue": ""
+      }
+    ]
   }
 }

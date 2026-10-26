@@ -14,9 +14,9 @@ claim hardware presentation.
 | 76 | Persistence completed, but runtime socket cleanup failed. | Quit reports cleanup failure; conflicting paths are preserved. |
 
 If persistence and socket cleanup both fail, the persistence result takes
-precedence and the additional cleanup error is logged. Other unhandled failures
-retain their ordinary failure status; startup/fatal compatibility classification
-is still part of #45.
+precedence and the additional cleanup error is logged. Fatal configured-launcher/runtime/duplicate-owner/engine-initialization failures
+use 78, and missing unit executables use 127; both suppress automatic restart.
+Other unhandled runtime failures retain the bounded recovery policy.
 
 `qoda status` reports `last_backend_exit` from the backend unit's `Result`,
 `ExecMainCode` and `ExecMainStatus`, alongside service activity and release
@@ -28,7 +28,7 @@ not a durable audit history and not proof that a running process is healthy.
 
 `qoda quit` reads that result even when the stop job itself succeeds (or fails).
 It does not start/retry anything after an error. The backend unit uses
-`RestartPreventExitStatus=74 75 76`, so orderly shutdown failures do not resurrect
+`RestartPreventExitStatus=74 75 76 78 127`, so orderly shutdown failures do not resurrect
 the player. The development runner also propagates these codes for a backend it
 owns. Existing installed units must be upgraded through the stopped-only installer
 to receive this policy; these source changes do not alter the active desktop.
@@ -58,6 +58,13 @@ Native unit syntax checks include the restart-prevention policy. No fixture load
 media, contacts Plex, accesses credentials or changes host services.
 
 Actual user-manager observation across graphical logout, service crash/retry,
-concurrent activation and UI loss remains #45. Absent-UI MPRIS activation and the
-installed bar-launch path also remain open. These tests do not replace that
+concurrent activation and UI loss remains #45. Absent-UI MPRIS and installed-bar activation are implemented in
+[activation scope](activation.md); their actual manager qualification remains open. These tests do not replace that
 qualification. Safe in-use updates/rollback remain #46.
+
+The coordinator retains one SIGINT receiver across event-loop iterations,
+registered before IPC readiness. Recreating `ctrl_c()` in each select could lose
+an interrupt between listeners; repeated native stops cover this race. The UI
+and development client wait for shutdown acknowledgement instead of immediately
+closing their command socket. An unacknowledged UI Quit stays visible with a retry
+message; it does not silently close and leave the backend playing.

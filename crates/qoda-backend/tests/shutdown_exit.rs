@@ -14,9 +14,13 @@ use std::{
 struct Fixture {
     root: PathBuf,
     process: Child,
+    stop_mode: &'static str,
 }
 impl Fixture {
     fn start() -> Self {
+        Self::prepared(|_| {})
+    }
+    fn prepared(before: impl FnOnce(&std::path::Path)) -> Self {
         let root = std::env::temp_dir().join(format!("qoda-shutdown-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
@@ -24,8 +28,13 @@ impl Fixture {
             fs::create_dir(root.join(name)).unwrap();
             fs::set_permissions(root.join(name), fs::Permissions::from_mode(0o700)).unwrap();
         }
+        before(&root);
         let process = Self::spawn(&root);
-        Self { root, process }
+        Self {
+            root,
+            process,
+            stop_mode: "startup",
+        }
     }
     fn spawn(root: &std::path::Path) -> Child {
         Command::new(env!("CARGO_BIN_EXE_qoda-backend"))
@@ -116,11 +125,23 @@ impl Fixture {
                 }
                 return code;
             }
-            assert!(Instant::now() < deadline, "Shutdown timed out");
+            assert!(
+                Instant::now() < deadline,
+                "Shutdown timed out via {}. Signal state: {}. Backend log: {}",
+                self.stop_mode,
+                fs::read_to_string(format!("/proc/{}/status", self.process.id()))
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|line| line.starts_with("Sig"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                fs::read_to_string(self.root.join("backend.log")).unwrap_or_default()
+            );
             thread::sleep(Duration::from_millis(25));
         }
     }
-    fn signal(&self) {
+    fn signal(&mut self) {
+        self.stop_mode = "SIGINT";
         // SAFETY: this child is owned by the fixture and has not been reaped.
         assert_eq!(
             unsafe { libc::kill(self.process.id().try_into().unwrap(), libc::SIGINT) },
@@ -140,13 +161,14 @@ impl Drop for Fixture {
 
 #[test]
 fn ipc_quit_and_service_signal_exit_cleanly_after_successful_checkpoint() {
-    for signal in [false, true] {
+    for signal in std::iter::once(false).chain(std::iter::repeat_n(true, 12)) {
         let mut fixture = Fixture::start();
         let mut reader = fixture.connect();
         let state = Fixture::ready(&mut reader);
         if signal {
             fixture.signal();
         } else {
+            fixture.stop_mode = "IPC Quit";
             writeln!(
                 reader.get_mut(),
                 "{}",
@@ -199,6 +221,7 @@ fn failed_final_checkpoint_exits_74_and_preserves_last_committed_database() {
         if signal {
             fixture.signal();
         } else {
+            fixture.stop_mode = "IPC Quit";
             writeln!(
                 reader.get_mut(),
                 "{}",
@@ -263,7 +286,22 @@ fn cleanup_failure_exits_76_and_preserves_replaced_path() {
                 .contains("runtime socket cleanup failed")
         );
         fixture.process = Fixture::spawn(&fixture.root);
-        assert_eq!(fixture.wait(), 1);
+        assert_eq!(fixture.wait(), 78);
         preserved();
     }
+}
+
+#[test]
+fn startup_preserves_a_live_unmanaged_socket() {
+    let mut listener = None;
+    let mut fixture = Fixture::prepared(|root| {
+        let directory = root.join("runtime/qoda");
+        fs::create_dir(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        listener =
+            Some(std::os::unix::net::UnixListener::bind(directory.join("backend.sock")).unwrap());
+    });
+    assert_eq!(fixture.wait(), 78);
+    assert!(fixture.root.join("runtime/qoda/backend.sock").exists());
+    drop(listener);
 }

@@ -327,7 +327,8 @@ impl Remote {
     }
     async fn request(&self, action: Action) -> fdo::Result<()> {
         let (reply, rx) = oneshot::channel();
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        let deadline = tokio::time::Instant::now()
+            + Duration::from_secs(if action == Action::Raise { 12 } else { 3 });
         tokio::time::timeout_at(deadline, async {
             self.tx
                 .send(crate::Event::Desktop(Request {
@@ -349,7 +350,7 @@ impl Remote {
     }
 }
 struct Root(Remote);
-#[zbus::interface(name = "org.mpris.MediaPlayer2", spawn = false)]
+#[zbus::interface(name = "org.mpris.MediaPlayer2", spawn = true)]
 impl Root {
     async fn quit(&self) -> fdo::Result<()> {
         self.0.request(Action::Quit).await

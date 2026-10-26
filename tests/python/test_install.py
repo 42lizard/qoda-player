@@ -255,7 +255,7 @@ class Installation(unittest.TestCase):
         unit = (self.config / "systemd/user/qoda-backend.service").read_text()
         self.assertIn("KillSignal=SIGINT", unit)
         self.assertIn("Restart=on-failure", unit)
-        self.assertIn("RestartPreventExitStatus=74 75 76", unit)
+        self.assertIn("RestartPreventExitStatus=74 75 76 78 127", unit)
         self.assertIn("StartLimitBurst=3", unit)
         self.assertIn("Requisite=graphical-session.target", unit)
         self.assertNotIn("[Install]", unit)
@@ -364,14 +364,66 @@ class Launch(unittest.TestCase):
 
     def test_first_toggle_shows_and_existing_toggle_toggles(self):
         for ui_running in [False, True]:
-            with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.UNITS[0] or ui_running), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", return_value={"protocol": 1}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
+            with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.UNITS[0] or ui_running), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", return_value={"protocol": 1, "instance": "fixture"}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
                 launcher.launch("toggle")
                 ipc.assert_called_once_with("toggle" if ui_running else "show")
                 self.assertEqual([call.args for call in manager.call_args_list], [("start", launcher.UNITS[0]), ("start", launcher.UNITS[1])])
 
+    def test_fenced_activation_never_starts_a_backend_and_writes_private_owner(self):
+        with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.UNITS[0]), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot", return_value={"instance": "fixture"}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
+            launcher.launch("search", expected_instance="fixture", expires=time.monotonic() * 1000 + 5000)
+        manager.assert_called_once_with("start", launcher.UNITS[1])
+        ipc.assert_called_once_with("search")
+        owner = launcher.read_owner()
+        self.assertEqual(owner["instance"], "fixture")
+        self.assertEqual(launcher.owner_path().stat().st_mode & 0o777, 0o600)
+
+    def test_missing_changed_and_expired_activation_cannot_start_services(self):
+        for running, instance, expiry in [(False, "fixture", None), (True, "newer", None), (True, "fixture", time.monotonic() * 1000 - 1)]:
+            with mock.patch.object(launcher, "active", return_value=running), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot", return_value={"instance": instance}):
+                with self.assertRaises(ValueError):
+                    launcher.launch("show", expected_instance="fixture", expires=expiry)
+                manager.assert_not_called()
+
+    def test_unsupported_ui_owner_record_is_preserved(self):
+        with launcher.control_lock():
+            path = launcher.owner_path()
+            original = b'{"format":2,"private":"preserved"}'
+            path.write_bytes(original)
+            path.chmod(0o600)
+            with self.assertRaises(ValueError):
+                launcher.write_owner("fixture", time.monotonic() * 1000 + 5000)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_nonregular_ui_handoff_is_rejected_without_blocking(self):
+        with launcher.control_lock():
+            os.mkfifo(launcher.owner_path(), 0o600)
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            launcher.read_owner()
+
+    def test_ui_runner_terminates_only_its_ui_when_backend_changes(self):
+        with launcher.control_lock():
+            launcher.write_owner("fixture", time.monotonic() * 1000 + 5000)
+        child = mock.Mock()
+        child.poll.return_value = None
+        with mock.patch.object(launcher, "snapshot", side_effect=[{"instance":"fixture"}, {"instance":"newer"}]), mock.patch.object(launcher.subprocess, "Popen", return_value=child), mock.patch.object(launcher, "manager") as manager:
+            with self.assertRaisesRegex(ValueError, "instance changed"):
+                launcher.run_ui()
+        child.terminate.assert_called_once()
+        child.wait.assert_called_once_with(timeout=3)
+        manager.assert_not_called()
+
+    def test_expired_ui_handoff_starts_nothing(self):
+        with launcher.control_lock():
+            launcher.write_owner("fixture", time.monotonic() * 1000 - 1)
+        with mock.patch.object(launcher.subprocess, "Popen") as process:
+            with self.assertRaisesRegex(ValueError, "expired"):
+                launcher.run_ui()
+        process.assert_not_called()
+
     def test_unmanaged_backend_or_protocol_failure_never_starts_ui(self):
         for error in [None, ValueError("protocol mismatch")]:
-            with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", side_effect=error, return_value={"protocol": 1}):
+            with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", side_effect=error, return_value={"protocol": 1, "instance": "fixture"}):
                 with self.assertRaises(ValueError):
                     launcher.launch("show")
                 manager.assert_not_called()

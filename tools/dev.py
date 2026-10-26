@@ -21,6 +21,12 @@ def request(op):
         state = json.loads(f.readline(2**20))
         if op != 'hello':
             f.write((json.dumps({'op': op, 'instance': state['instance']})+'\n').encode()); f.flush()
+        if op == 'quit':
+            while True:
+                line = f.readline(16 * 1024 * 1024)
+                if not line: break
+                state = json.loads(line)
+                if state.get('shutdown'): break
         return state
 
 def main():

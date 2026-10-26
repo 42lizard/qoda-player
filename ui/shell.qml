@@ -12,6 +12,13 @@ ShellRoot {
     property string form: "full"
     property string lastForm: "full"
     UiRequests { id: uiRequests }
+    QuitState {
+        id: quitState
+        connected: socket.connected
+        instance: root.instance
+        onSendQuit: root.send("quit")
+        onExitUi: Qt.quit()
+    }
     OmarchyTheme {}
     readonly property var selectedTrack: queueModel.find(row => row.selected)?.track || snapshot.selection || null
     function showSurface(next, interactive) {
@@ -218,7 +225,7 @@ ShellRoot {
                     root.instance = next.instance;
                     root.snapshot = next;
                     if (raised) root.showSurface(root.lastForm, true);
-                    if (next.shutdown) { Qt.quit(); return; }
+                    if (quitState.observe(next)) return;
                     let libraries = JSON.stringify(next.libraries || []);
                     if (libraries !== root.libraryJson) { root.libraryJson = libraries; root.libraryModel = next.libraries || []; }
                     let tracks = JSON.stringify(next.page ? next.page.tracks : []);
@@ -370,7 +377,7 @@ ShellRoot {
                     MenuItem { text: "Gapless"; checkable: true; checked: !!root.snapshot.gapless && root.snapshot.gapless.enabled; enabled: socket.connected && !!root.snapshot.gapless; onTriggered: root.send("set_gapless", {enabled: checked}) }
                     MenuSeparator {}
                     MenuItem { text: "Hide player"; onTriggered: root.hideSurface() }
-                    MenuItem { text: "Quit player"; onTriggered: { root.send("quit"); Qt.quit(); } }
+                    MenuItem { text: "Quit player"; onTriggered: quitState.begin() }
                 }
             }
             RowLayout {
@@ -400,7 +407,7 @@ ShellRoot {
                 onActionRequested: (op, fields) => root.send(op, fields)
             }
             Label { visible: !socket.connected || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || !!root.snapshot.error; text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: Theme.muted; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
-            Label { visible: !!root.snapshot.error; text: root.snapshot.error || ""; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
+            Label { visible: !!quitState.error || !!root.snapshot.error; text: quitState.error || root.snapshot.error || ""; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
                 QtObject {
                     id: libraryTabs; property int currentIndex: 2
                     onCurrentIndexChanged: {
@@ -765,13 +772,14 @@ ShellRoot {
     }
     CompactPlayer {
         id: compact
+        notice: quitState.error
         snapshot: root.snapshot
         selectedTrack: root.selectedTrack
         connected: socket.connected
         onSearchRequested: root.focusSearch()
         onExpandRequested: root.showSurface("full", true)
         onHideRequested: root.hideSurface()
-        onQuitRequested: { root.send("quit"); Qt.quit(); }
+        onQuitRequested: quitState.begin()
         onTransportRequested: op => root.send(op)
         onQueueRequested: op => { if (op === "show") { root.openQueue(0); } else root.editQueue(op); }
     }
@@ -798,6 +806,6 @@ ShellRoot {
         function browseArtists(): void { root.pendingSearchFocus = false; root.closeSettings(); root.queueRequested = false; libraryTabs.currentIndex = 3; root.showSurface("full", true); }
         function browsePlaylists(): void { root.pendingSearchFocus = false; root.closeSettings(); root.queueRequested = false; libraryTabs.currentIndex = 1; root.showSurface("full", true); }
         function status(): string { return JSON.stringify({discovery: root.snapshot.discovery || null, theme: {system: Theme.system, background: String(Theme.background), foreground: String(Theme.foreground), accent: String(Theme.accent), controlText: String(fullFrame.palette.text), controlHighlight: String(fullFrame.palette.highlight)}, libraryPicker: {source: root.libraryId, label: libraryPicker.label(libraryPicker.selected), open: libraryPicker.popupVisible}, settings: {section: root.settingsSection, visible: settingsSheet.visible, scrollable: settingsSheet.scrollable}, searchFocused: search.activeFocus, reorder: {queueActive: queueReorder.active, playlistActive: playlistReorder.active, queueEnabled: queueReorder.enabled, playlistEnabled: playlistReorder.enabled}, search: root.snapshot.search || null, output: root.snapshot.output || null, replaygain: root.snapshot.replaygain || null, audioExpanded: root.audioExpanded, uiCapability: root.snapshot.ui || null, unavailable: {visible: queueTabs.currentIndex === 2, canRetry: unavailableBrowser.canRetry, entries: unavailableBrowser.rows.length}, desktopControls: root.snapshot.mpris || null, navigation: {visible: queueTabs.currentIndex === 1, entries: navigationBrowser.rows.length, viewportHeight: navigationBrowser.viewportHeight, page: root.snapshot.navigation || null}, artists: artistBrowser.artistModel.length, queueDrawerOpen: queueDrawer.opened, queueDrawerVisible: queueDrawer.visible, albums: {canQueue: albumBrowser.canQueue, cache: root.snapshot.albums ? root.snapshot.albums.cache || null : null, thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height, sidebarWidth: libraryRail.width, railHeight: railScroll.height, railContentHeight: railScroll.contentHeight, accountTop: railAccount.mapToItem(railScroll, 0, 0).y, accountBottom: railAccount.mapToItem(railScroll, 0, railAccount.height).y, browserWidth: browserPane.width, browserHeight: browserPane.height, queueVisible: queueSlot.visible || queueDrawer.opened, queueWidth: queuePane.width, queueHeight: queuePane.height, queueRowHeight: queueView.itemAtIndex(0)?.height || 0}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length, order: root.playlistEntries.map(row => row.id)} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
-        function quit(): void { root.send("quit"); Qt.quit(); }
+        function quit(): void { quitState.begin(); }
     }
 }

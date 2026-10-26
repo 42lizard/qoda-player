@@ -14,6 +14,7 @@ BarWidget {
     property bool popupOpen: false
     readonly property bool opened: popupOpen
     property bool openingLibrary: false
+    readonly property string installedLauncher: String(setting("launcherPath", ""))
     readonly property string playerPath: String(setting("playerPath", ""))
     Accessible.name: "Qoda Player"
     Accessible.role: Accessible.Button
@@ -26,7 +27,7 @@ BarWidget {
     property bool launchStarted: false
     property string launchError: ""
     function openLibrary(action) {
-        if (!playerPath || openingLibrary) return;
+        if ((!playerPath && !installedLauncher) || openingLibrary) return;
         libraryAction = ["showFull", "showSearch", "showQueue"].includes(action) ? action : "showFull";
         openingLibrary = true; launchStarted = false; openAttempts = 0; launchError = "";
         tryOpen();
@@ -34,7 +35,10 @@ BarWidget {
     function tryOpen() {
         if (!openingLibrary) return;
         openAttempts++;
-        opener.command = ["quickshell", "ipc", "--path", playerPath + "/ui", "call", "--", "control", libraryAction];
+        if (installedLauncher) {
+            const action = {showFull: "show", showSearch: "search", showQueue: "queue"}[libraryAction];
+            opener.command = [installedLauncher, action];
+        } else opener.command = ["quickshell", "ipc", "--path", playerPath + "/ui", "call", "--", "control", libraryAction];
         opener.running = true;
         openDeadline.restart();
     }
@@ -67,7 +71,10 @@ BarWidget {
         onExited: (code, status) => {
             openDeadline.stop();
             if (code === 0) { root.openingLibrary = false; root.close(); }
-            else {
+            else if (root.installedLauncher) {
+                root.openingLibrary = false;
+                root.launchError = "Installed Qoda could not open. Check the launcher and user-service journal.";
+            } else {
                 if (!root.launchStarted) {
                     root.launchStarted = true;
                     Quickshell.execDetached(["python3", root.playerPath + "/tools/dev.py"]);
@@ -77,7 +84,7 @@ BarWidget {
             }
         }
     }
-    Timer { id: openDeadline; interval: 3000; onTriggered: if (opener.running) opener.signal(9) }
+    Timer { id: openDeadline; interval: root.installedLauncher ? 25000 : 3000; onTriggered: if (opener.running) opener.signal(9) }
     Timer { id: openRetry; interval: 500; onTriggered: root.tryOpen() }
     PopupCard {
         id: popup

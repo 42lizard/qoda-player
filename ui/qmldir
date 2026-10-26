@@ -25,3 +25,5 @@ DiscoveryNotice 1.0 DiscoveryNotice.qml
 CompactControls 1.0 CompactControls.qml
 WidgetState 1.0 WidgetState.qml
 WidgetClient 1.0 WidgetClient.qml
+
+QuitState 1.0 QuitState.qml

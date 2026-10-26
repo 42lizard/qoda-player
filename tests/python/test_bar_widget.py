@@ -108,6 +108,20 @@ class Installer(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)
 
+    def test_installed_activation_clears_development_mode_and_uses_launcher(self):
+        shell = self.config / "omarchy/shell.json"
+        shell.parent.mkdir(parents=True)
+        shell.write_text('{"bar":{"layout":{"right":[]}}}')
+        launcher = Path(self.temporary.name) / "installed/bin/qoda"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("#!/usr/bin/python3\n")
+        launcher.chmod(0o755)
+        with mock.patch.object(widget, "config_home", return_value=self.config), mock.patch.object(widget.subprocess, "run") as run:
+            widget.install(self.config, enable=True, installed_prefix=launcher.parent.parent)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[-2], ["omarchy", "bar", "set", "qoda.player", "playerPath", "", "--section", "right"])
+        self.assertEqual(commands[-1], ["omarchy", "bar", "set", "qoda.player", "launcherPath", str(launcher), "--section", "right"])
+
     def test_alternate_profile_cannot_activate_the_real_desktop(self):
         with self.assertRaises(ValueError):
             widget.install(self.config, enable=True)

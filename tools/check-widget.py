@@ -92,8 +92,10 @@ ShellRoot {
         function next(): void { widget.probeControls.queueRequested("next"); }
         function play(): void { widget.probeControls.transportRequested("resume"); }
         function expand(): void { widget.probeControls.expandRequested(); }
+        function installed(path: string): void { widget.settings = {playerPath: PLAYER_PATH, launcherPath: path}; }
+        function launch(action: string): void { widget.openLibrary(action); }
         function capture(path: string): void { captureDone = ""; widget.probeControls.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
-        function status(): string { return JSON.stringify({connected: widget.probeClient.connected, instance: widget.probeClient.snapshot.instance || "", revision: widget.probeClient.snapshot.revision || "", open: widget.popupOpen, mapped: widget.probePopup.backingWindowVisible, known: widget.probeControls.known, width: widget.probePopup.width, height: widget.probePopup.height, capture: captureDone, opening: widget.openingLibrary}); }
+        function status(): string { return JSON.stringify({connected: widget.probeClient.connected, instance: widget.probeClient.snapshot.instance || "", revision: widget.probeClient.snapshot.revision || "", open: widget.popupOpen, mapped: widget.probePopup.backingWindowVisible, known: widget.probeControls.known, width: widget.probePopup.width, height: widget.probePopup.height, capture: captureDone, opening: widget.openingLibrary, error: widget.launchError, launched: widget.launchStarted}); }
     }
 }
 '''.replace("PLAYER_PATH", json.dumps(str(player.parent))).replace("PLUGIN_IMPORT", json.dumps(str(Path("plugin") / entry.parent))))
@@ -194,6 +196,21 @@ ShellRoot {
                 else:
                     raise AssertionError("Expand did not restore browser")
                 assert len(requests) == before
+                calls = base / "installed-calls.jsonl"
+                launcher = base / "installed-launcher"
+                launcher.write_text("#!/usr/bin/python3\nimport json,sys\nfrom pathlib import Path\nwith Path(" + repr(str(calls)) + ").open('a') as file: file.write(json.dumps(sys.argv[1:])+'\\n')\n")
+                launcher.chmod(0o755)
+                ipc(ui, "fixture", "installed", launcher)
+                for action, expected in [("showFull", "show"), ("showSearch", "search"), ("showQueue", "queue")]:
+                    ipc(ui, "fixture", "launch", action)
+                    until(lambda s: not s["opening"])
+                    assert json.loads(calls.read_text().splitlines()[-1]) == [expected]
+                assert ipc(player, "control", "status") == "showFull"
+                launcher.write_text("#!/usr/bin/python3\nraise SystemExit(1)\n")
+                ipc(ui, "fixture", "launch", "showSearch")
+                failed = until(lambda s: not s["opening"] and bool(s["error"]))
+                assert not failed["launched"] and len(requests) == before
+                assert ipc(player, "control", "status") == "showFull"
                 connections[-1].shutdown(socket.SHUT_RDWR)
                 connections[-1].close()
                 snapshot["instance"] = str(uuid.uuid4()); snapshot["revision"] = "0"
@@ -206,6 +223,7 @@ ShellRoot {
                     time.sleep(0.05)
                 assert requests[-1]["instance"] == snapshot["instance"]
                 print("Anchored widget popup open/close and hidden-browser restoration passed without implicit playback")
+                print("Installed launcher routes show/search/queue and failure never falls back to development")
                 print("Lossless command fences, backend reconnect and non-raising subscriptions passed")
             finally:
                 for process in reversed(processes):

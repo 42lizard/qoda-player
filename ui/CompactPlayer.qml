@@ -9,6 +9,7 @@ PanelWindow {
     required property var snapshot
     required property var selectedTrack
     required property bool connected
+    property string notice: ""
     property var targetScreen: null
     property bool interactive: false
     property bool focusPrimed: false
@@ -47,6 +48,7 @@ PanelWindow {
         selectedTrack: panel.selectedTrack
         connected: panel.connected
         active: panel.visible
+        notice: panel.notice
         onSearchRequested: panel.searchRequested()
         onExpandRequested: panel.expandRequested()
         onHideRequested: panel.hideRequested()

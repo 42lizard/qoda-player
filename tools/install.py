@@ -133,9 +133,9 @@ def integrations(prefix):
                    for name, action in [("Toggle", "toggle"), ("Compact", "compact"), ("Quit", "quit")])).encode()
     common = ("[Unit]\nDescription=Qoda {name}\nPartOf=graphical-session.target\nRequisite=graphical-session.target\nAfter=graphical-session.target\n"
               "StartLimitIntervalSec=60\nStartLimitBurst=3\n\n[Service]\nType=exec\n")
-    backend = (common.format(name="backend") + f"ExecStart=/usr/bin/env -- {quote_exec(current / 'qoda-backend')}\n"
-               "Restart=on-failure\nRestartPreventExitStatus=74 75 76\nRestartSec=2\nKillSignal=SIGINT\nTimeoutStopSec=10\nUMask=0077\n").encode()
-    ui = (common.format(name="interface") + f"ExecStart=quickshell --path {quote_exec(current / 'ui')} --no-duplicate\n"
+    backend = (common.format(name="backend") + f"ExecStart=/usr/bin/env -- {quote_exec(current / 'qoda-backend')} --ui-launcher {quote_exec(launcher)}\n"
+               "Restart=on-failure\nRestartPreventExitStatus=74 75 76 78 127\nRestartSec=2\nKillSignal=SIGINT\nTimeoutStopSec=10\nUMask=0077\n").encode()
+    ui = (common.format(name="interface").replace("PartOf=graphical-session.target", "PartOf=graphical-session.target qoda-backend.service").replace("Requisite=graphical-session.target", "Requisite=graphical-session.target qoda-backend.service").replace("After=graphical-session.target", "After=graphical-session.target qoda-backend.service") + f"ExecStart=/usr/bin/python3 {quote_exec(current / 'launch.py')} run-ui\n"
           "Restart=no\nTimeoutStopSec=5\nUMask=0077\n").encode()
     return {"prefix": {"bin/qoda": (wrapper, 0o755), "share/applications/qoda-player.desktop": (desktop, 0o644),
                        "share/icons/hicolor/scalable/apps/qoda-player.svg": ((ROOT / "packaging/qoda-player.svg").read_bytes(), 0o644)},

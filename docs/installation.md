@@ -61,8 +61,8 @@ The installer stages `lib/qoda-player/releases/<version>-<content-hash>`, then
 switches `current` and the recorded `bin`, `share` and user-unit artifacts. It
 serializes with launcher actions. Retained releases are private installed code;
 they are removed together on uninstall. The source checkout is no longer needed
-to run the installed app. The optional development bar widget remains separate;
-its checkout-based launch setting does not yet activate the installed launcher.
+to run the installed app. The optional bar widget remains separately installed; it can explicitly use the
+[installed launcher](activation.md) with `--installed-prefix`.
 
 The Wayland, runtime and session D-Bus environment must already be available to
 the user service manager and match the invoking desktop. The launcher diagnoses
@@ -87,8 +87,7 @@ readiness. These do not prove an actual user manager's logout/crash behavior.
 
 Before #33 closes, [#45](https://github.com/42lizard/qoda-player/issues/45) must qualify actual installed services in a disposable graphical
 session: concurrent launch/Quit races, UI failure and explicit recreation,
-backend crash retry/rate limiting, graphical logout, MPRIS Raise without an
-attached UI, and final-checkpoint outcome propagation through the real user
+backend crash retry/rate limiting, graphical logout, fenced MPRIS/installed-bar activation under the real manager, and final-checkpoint outcome propagation through the real user
 manager. Process-level checkpoint/backup/cleanup exit reporting and launcher
 classification are implemented and tested in [shutdown outcomes](shutdown.md). Existing schema incompatibility protection is backend-owned; this
 installer does not offer code/database downgrade or automatic backup restoration.

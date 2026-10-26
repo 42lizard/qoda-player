@@ -59,6 +59,27 @@ impl SocketIdentity {
             inode: metadata.ino(),
         })
     }
+    pub async fn clear_stale(path: &Path) -> std::io::Result<()> {
+        let identity = Self::capture(path)?;
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            tokio::net::UnixStream::connect(path),
+        )
+        .await
+        {
+            Ok(Err(error))
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                ) =>
+            {
+                identity.remove(path)
+            }
+            _ => Err(std::io::Error::other(
+                "Active or unresponsive runtime socket preserved",
+            )),
+        }
+    }
     pub fn remove(self, path: &Path) -> std::io::Result<()> {
         let metadata = match std::fs::symlink_metadata(path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),

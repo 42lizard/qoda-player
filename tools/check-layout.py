@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPACT_STUB = """import QtQuick
 Item {
     visible: false
-    property var snapshot; property var selectedTrack; property bool connected
+    property var snapshot; property var selectedTrack; property bool connected; property string notice: ""
     property var targetScreen; property bool interactive; property var screen: null
     readonly property bool backingWindowVisible: false
     readonly property int keyboardMode: 0

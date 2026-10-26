@@ -1,3 +1,4 @@
+mod activation;
 mod albums;
 mod alsa_guard;
 mod artwork;
@@ -55,6 +56,7 @@ enum Event {
     DesktopLost(uuid::Uuid),
     DesktopReady(Result<mpris::Service, ()>),
     UiPeer(uuid::Uuid, bool),
+    UiLaunchDone(uuid::Uuid, Result<(), &'static str>),
     Advance(u64),
     StreamFailed(qoda_provider::ProviderError, bool),
     Recovery(recovery::Reply),
@@ -587,27 +589,37 @@ async fn main() -> std::process::ExitCode {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("Qoda: {error}");
-            std::process::ExitCode::from(
-                error
-                    .downcast_ref::<shutdown::Error>()
-                    .map_or(1, shutdown::Error::exit_status),
-            )
+            std::process::ExitCode::from(error.downcast_ref::<shutdown::Error>().map_or_else(
+                || {
+                    if error.is::<activation::ConfigError>() {
+                        78
+                    } else {
+                        1
+                    }
+                },
+                shutdown::Error::exit_status,
+            ))
         }
     }
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut ui_launcher = activation::configured(std::env::args_os().skip(1))?;
     let credential = if std::env::args().any(|s| s == "--credential-stdin") {
         let mut input = Zeroizing::new(String::new());
         std::io::stdin().take(65537).read_to_string(&mut input)?;
         if input.len() > 65536 {
-            return Err("Credential input too large".into());
+            return Err(activation::ConfigError("Credential input too large").into());
         }
-        Some(serde_json::from_str::<Credential>(&input).map_err(|_| "Invalid credential input")?)
+        Some(
+            serde_json::from_str::<Credential>(&input)
+                .map_err(|_| activation::ConfigError("Invalid credential input"))?,
+        )
     } else {
         None
     };
-    let dir = runtime()?;
+    let dir = runtime()
+        .map_err(|_| activation::ConfigError("Runtime directory is unavailable or unsafe"))?;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -617,7 +629,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .open(dir.join("backend.lock"))?;
     use std::os::fd::AsRawFd;
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-        return Err("Qoda backend is already running".into());
+        return Err(activation::ConfigError("Qoda backend is already running").into());
     }
     if std::env::args().any(|s| s == "--restore-backup") {
         storage::restore_latest(&storage::path().map_err(|e| e.to_string())?)
@@ -627,14 +639,26 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
+    // Keep one cancellation-safe receiver across coordinator iterations.
+    let mut interrupts = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let path = dir.join("backend.sock");
     if path.symlink_metadata().is_ok() {
-        shutdown::SocketIdentity::capture(&path)?.remove(&path)?;
+        shutdown::SocketIdentity::clear_stale(&path)
+            .await
+            .map_err(|_| {
+                activation::ConfigError(
+                    "Runtime socket conflict preserved; repair the runtime path before retrying",
+                )
+            })?;
     }
     let listener = tokio::net::UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     let socket_identity = shutdown::SocketIdentity::capture(&path)?;
-    let player = Player::start()?;
+    let player = Player::start().map_err(|_| {
+        activation::ConfigError(
+            "The playback engine could not initialize; check native dependencies",
+        )
+    })?;
     let mut gain_settings = gain::Settings::load(
         identities_path().and_then(|p| p.parent().map(std::path::Path::to_owned)),
     );
@@ -750,7 +774,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut desired_playing = false;
     let mut automatic_preparation = None;
     let mut ui_peers = HashSet::new();
-    state["ui"] = json!({"can_raise":false,"raise_token":null});
+    state["ui"] =
+        json!({"can_raise":ui_launcher.available(),"raise_token":null,"launch_error":null});
     let mut output_refresh = tokio::time::interval(std::time::Duration::from_secs(5));
     let mut output_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
@@ -826,7 +851,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                     state["revision"] = json!(revision.to_string());
-                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale).with_ui(!ui_peers.is_empty());
+                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale).with_ui(!ui_peers.is_empty() || ui_launcher.available());
                     state["presentation"]=view.presentation();
                     state["gapless"]=json!(gapless.view);
                     state["artwork_cache"]=artwork.view().await;
@@ -842,7 +867,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else if presentation_changed || gapless_changed || state["queue"]["selected"]!=json!(queue.selected()) {Event::Checkpoint} else {continue}
             },
             _ = checkpoint_tick.tick()=>Event::Checkpoint,
-            _ = tokio::signal::ctrl_c() => break,
+            _ = interrupts.recv() => break,
         };
         if matches!(&event, Event::Request(_) | Event::Desktop(_)) {
             let audio = player.status();
@@ -888,6 +913,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ));
                 continue;
             }
+            if request.action == mpris::Action::Raise
+                && ui_peers.is_empty()
+                && ui_launcher.available()
+            {
+                ui_launcher.start(&instance, Some(request), tx.clone());
+                continue;
+            }
             let view = mpris::View::capture(
                 &queue,
                 &player.status(),
@@ -897,7 +929,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 desired_playing,
                 last_stream_failed || last_clock_stale,
             )
-            .with_ui(!ui_peers.is_empty());
+            .with_ui(!ui_peers.is_empty() || ui_launcher.available());
             if let Some(command) = mpris::translate(&request.action, &view, &queue, &instance) {
                 desktop_deadline = Some(request.deadline);
                 desktop_owner = Some(request.owner);
@@ -1136,7 +1168,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     desired_playing,
                     last_stream_failed || last_clock_stale,
                 )
-                .with_ui(!ui_peers.is_empty());
+                .with_ui(!ui_peers.is_empty() || ui_launcher.available());
                 event = mpris::translate(action, &view, &queue, &instance)
                     .map(Event::Request)
                     .unwrap_or(Event::Checkpoint);
@@ -1266,6 +1298,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     state["error"] = json!(error.to_string());
                 }
             }
+            Event::UiLaunchDone(id, result) => {
+                let Some(requests) = ui_launcher.complete(id) else {
+                    continue;
+                };
+                state["ui"]["launch_error"] = result.err().map(Value::from).unwrap_or(Value::Null);
+                for request in requests {
+                    let accepted = desktop
+                        .as_ref()
+                        .is_some_and(|service| service.accepts(&request));
+                    let response = if accepted {
+                        result.map_err(str::to_owned)
+                    } else {
+                        Err("UI activation expired or its desktop connection was replaced".into())
+                    };
+                    let _ = request.reply.send(response);
+                }
+            }
             Event::UiPeer(peer, attached) => {
                 let changed = if attached {
                     ui_peers.insert(peer)
@@ -1275,11 +1324,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if !changed {
                     continue;
                 }
-                state["ui"]["can_raise"] = json!(!ui_peers.is_empty());
+                state["ui"]["can_raise"] = json!(!ui_peers.is_empty() || ui_launcher.available());
             }
             Event::DesktopLost(id)
                 if desktop.as_ref().is_some_and(|service| service.id() == id) =>
             {
+                ui_launcher.cancel();
                 if let Some(service) = desktop.take() {
                     service.shutdown().await;
                 }
@@ -1390,6 +1440,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "show_ui" => {
                         if !ui_peers.is_empty() {
                             state["ui"]["raise_token"] = json!(uuid::Uuid::new_v4().to_string());
+                        } else if ui_launcher.available() {
+                            ui_launcher.start(&instance, None, tx.clone());
                         }
                     }
                     "retry_save" => force_save = true,
@@ -2633,7 +2685,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             desired_playing,
             last_stream_failed || last_clock_stale,
         )
-        .with_ui(!ui_peers.is_empty());
+        .with_ui(!ui_peers.is_empty() || ui_launcher.available());
         state["presentation"] = view.presentation();
         if let Some(desktop) = &mut desktop {
             if seeked {
@@ -2685,6 +2737,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         let _ = queue.set_position(position);
     }
+    ui_launcher.cancel();
     gapless.invalidate();
     player.send(Command::Pause(true));
     player.send(Command::Stop);

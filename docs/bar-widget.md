@@ -60,6 +60,10 @@ Without `--enable`, installation only copies files. `--config-home <directory>`
 supports isolated install/update/remove checks; it cannot activate another
 profile against the running desktop.
 
+For an installed release, use the explicit [installed activation route](activation.md)
+with `--installed-prefix`; installed failures never fall back to the development
+checkout.
+
 ## Checks
 
 `./tools/check.sh` includes pure QML checks for shared compact controls, stale

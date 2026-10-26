@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
    global p,s,f,state,instance
    backend_env=dict(env)
    if unavailable:backend_env['DBUS_SESSION_BUS_ADDRESS']='unix:path='+temp+'/missing-session-bus'
-   p=subprocess.Popen([str(root/'target/debug/qoda-backend')],env=backend_env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+   p=subprocess.Popen([str(Path(os.environ.get('CARGO_TARGET_DIR',str(root/'target')))/'debug/qoda-backend')],env=backend_env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
    for _ in range(150):
     assert p.poll() is None,'Backend exited'
     try:
