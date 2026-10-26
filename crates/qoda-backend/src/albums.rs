@@ -2,11 +2,10 @@
 use crate::metadata_cache::{Cache, Info, Page, Query};
 use qoda_core::{Counter, SourceId};
 use qoda_provider::{
-    AlbumPage, AlbumRef, AlbumSnapshot, ArtistPage, ArtistRef, MusicProvider, ProviderError, Track,
+    AlbumPage, AlbumRef, AlbumSnapshot, ArtistPage, ArtistRef, ProviderError, Track,
 };
 use serde::Serialize;
 use serde_json::Value;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Default, Serialize)]
@@ -63,10 +62,11 @@ impl Controller {
     pub fn command(
         &mut self,
         request: &Value,
-        provider: Arc<dyn MusicProvider>,
+        access: impl Into<crate::offline::Access>,
         auth: u64,
         events: mpsc::Sender<crate::Event>,
     ) -> Result<(), String> {
+        let access = access.into();
         enum Action {
             Page(SourceId, u64, String, Option<ArtistRef>),
             Artists(SourceId, u64, String),
@@ -170,8 +170,8 @@ impl Controller {
                 },
                 Action::Open(reference) => Query::AlbumDetail { reference },
             };
-            cache
-                .read(provider, query, move |result, info| {
+            access
+                .read(&cache, query, move |result, info| {
                     let events = events.clone();
                     async move {
                         let result = result.and_then(|page| match page {
@@ -267,7 +267,13 @@ impl Controller {
                 self.view.selected = Some(snapshot);
             }
             Err(error) => {
-                self.view.message = error.to_string();
+                self.view.message = if error == ProviderError::MissingTrack
+                    && self.view.cache.origin == "offline"
+                {
+                    String::new()
+                } else {
+                    error.to_string()
+                };
                 if matches!(
                     error,
                     ProviderError::AccessDenied | ProviderError::UnknownSource

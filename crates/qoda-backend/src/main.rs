@@ -8,6 +8,7 @@ mod gain;
 mod gapless;
 mod metadata_cache;
 mod mpris;
+mod offline;
 mod output;
 mod player;
 mod playlists;
@@ -35,6 +36,18 @@ use tokio::{
 };
 use zeroize::Zeroizing;
 
+enum ConnectError {
+    Identity,
+    Provider(qoda_provider::ProviderError),
+}
+impl std::fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Identity => f.write_str("Saved library identities are unsafe, damaged or unsupported; existing data was preserved. Repair or remove source-identities.json before reconnecting."),
+            Self::Provider(error) => error.fmt(f),
+        }
+    }
+}
 enum Event {
     Request(Value),
     Desktop(mpris::Request),
@@ -56,7 +69,7 @@ enum Event {
     MetadataCacheDone(u64, Result<(), String>),
     Connected(
         u64,
-        Result<(PlexProvider, HashMap<String, SourceId>), qoda_provider::ProviderError>,
+        Result<(PlexProvider, HashMap<String, SourceId>), ConnectError>,
         Credential,
     ),
     Vault(vault::Reply),
@@ -97,26 +110,53 @@ fn identities_path() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
         .map(|p| p.join("qoda/source-identities.json"))
 }
-fn identities() -> HashMap<String, SourceId> {
-    identities_path()
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+fn parse_identities(
+    bytes: &[u8],
+) -> Result<HashMap<String, SourceId>, qoda_provider::ProviderError> {
+    use qoda_provider::ProviderError::InvalidReply;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err(InvalidReply);
+    }
+    let ids: HashMap<String, SourceId> = serde_json::from_slice(bytes).map_err(|_| InvalidReply)?;
+    let mut seen = HashSet::new();
+    if ids.len() > 16384
+        || !ids.iter().all(|(key, id)| {
+            let scope = serde_json::from_str::<[String; 3]>(key).ok();
+            seen.insert(*id)
+                && scope.is_some_and(|scope| {
+                    scope.iter().all(|s| !s.is_empty() && s.len() <= 1024)
+                        && serde_json::to_string(&scope).ok().as_deref() == Some(key)
+                })
+        })
+    {
+        return Err(InvalidReply);
+    }
+    Ok(ids)
+}
+fn identities() -> Result<HashMap<String, SourceId>, qoda_provider::ProviderError> {
+    use qoda_provider::ProviderError::InvalidReply;
+    let path = identities_path().ok_or(InvalidReply)?;
+    let directory = cache_files::Directory::open(path.parent().ok_or(InvalidReply)?)
+        .map_err(|_| InvalidReply)?;
+    let Some(file) = directory
+        .file("source-identities.json")
+        .map_err(|_| InvalidReply)?
+    else {
+        return Ok(HashMap::new());
+    };
+    let mut bytes = Vec::new();
+    file.take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| InvalidReply)?;
+    parse_identities(&bytes)
 }
 fn save_identities(ids: &HashMap<String, SourceId>) -> std::io::Result<()> {
-    let p = identities_path().ok_or_else(|| std::io::Error::other("No config directory"))?;
-    let parent = p.parent().unwrap();
-    std::fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(".sources-{}", uuid::Uuid::new_v4()));
-    let mut f = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(0o600)
-        .open(&tmp)?;
-    use std::io::Write;
-    f.write_all(&serde_json::to_vec(ids)?)?;
-    f.sync_all()?;
-    std::fs::rename(tmp, p)
+    let path = identities_path().ok_or_else(|| std::io::Error::other("No config directory"))?;
+    let bytes = serde_json::to_vec(ids)?;
+    parse_identities(&bytes).map_err(std::io::Error::other)?;
+    cache_files::Directory::open(path.parent().unwrap())
+        .and_then(|directory| directory.atomic("source-identities.json", &bytes))
+        .map_err(std::io::Error::other)
 }
 async fn connection(
     stream: tokio::net::UnixStream,
@@ -178,7 +218,12 @@ fn connect(
     credential: Credential,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let r = PlexProvider::connect(credential.clone(), identities()).await;
+        let r = match identities() {
+            Ok(ids) => PlexProvider::connect(credential.clone(), ids)
+                .await
+                .map_err(ConnectError::Provider),
+            Err(_) => Err(ConnectError::Identity),
+        };
         let _ = tx.send(Event::Connected(generation, r, credential)).await;
     })
 }
@@ -354,6 +399,21 @@ fn unavailable_request(
     }
     Err("That unavailable entry changed. Review the current session.".into())
 }
+fn reconnect_request(
+    queue: &queue::Queue,
+    request: &Value,
+    account: u64,
+    credential: bool,
+) -> Result<(), String> {
+    check_queue(queue, request).map_err(|e| e.to_string())?;
+    if !credential {
+        return Err("Restore sign-in or connect Plex before reconnecting.".into());
+    }
+    if request["account_epoch"].as_str() != Some(account.to_string().as_str()) {
+        return Err("The account changed. Review the connection before retrying.".into());
+    }
+    Ok(())
+}
 fn guarded_queue_command(op: &str) -> bool {
     matches!(
         op,
@@ -386,6 +446,7 @@ fn guarded_queue_command(op: &str) -> bool {
             | "album_enqueue"
             | "playlist_enqueue"
             | "disconnect"
+            | "reconnect"
             | "forget_signin"
             | "search_play"
             | "search_next"
@@ -411,6 +472,7 @@ fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
             | "stop"
             | "stop_clear"
             | "disconnect"
+            | "reconnect"
             | "forget_signin"
             | "quit"
             | "set_output"
@@ -582,10 +644,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut handled_end = None;
     let mut playlists = playlists::Controller::default();
     let metadata = metadata_cache::Cache::start(metadata_cache::Paths::discover()).await;
+    let mut cached_discovery = metadata
+        .discovery()
+        .await
+        .filter(|discovery| !discovery.libraries.is_empty());
     let mut albums = albums::Controller::with_cache(metadata.clone());
     let mut presented_generation = None;
     let mut catalog_revision = 0_u64;
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
+    if let Some(discovery) = &cached_discovery {
+        state["libraries"] = offline::library_views(&discovery.libraries, &[]);
+        state["status"] = json!(
+            "Offline library cache available. Choose a library; restore sign-in for playback."
+        );
+    }
+    state["discovery"] = json!({"origin":if cached_discovery.is_some() {"offline"} else {"none"},"stale":true,"incomplete":true,"fetched":cached_discovery.as_ref().map(|d|d.fetched.to_string()),"message":if cached_discovery.is_some() {"Offline cached libraries · unverified and incomplete. Connect Plex for playback, playlists and edits."} else {"No cached library discovery available. Connect Plex to browse."}});
     state["replaygain"] = gain_settings.view();
     state["output"] = output_view(&output_settings, &output_devices, &player.status(), 0);
     if let Some(error) = output_init_error {
@@ -914,6 +987,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     event = Event::Checkpoint;
                 }
             }
+        }
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
+            && request["op"] == "reconnect"
+            && let Err(error) = reconnect_request(
+                &queue,
+                request,
+                auth_generation,
+                current_credential.is_some(),
+            )
+        {
+            state["error"] = json!(error);
+            event = Event::Checkpoint;
         }
         // Validate and persist before touching speculative output. A failed
         // save or an unchanged mode must not cancel/rebuild a staged successor.
@@ -1269,6 +1355,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::Request(v) => {
+                let catalog_access = offline::access(provider.clone(), cached_discovery.clone());
                 if v["instance"] != instance {
                     continue;
                 }
@@ -1341,7 +1428,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 state["error"] =
                                     json!("Choose a metadata target from 0 to 1024 MiB.");
                             } else {
-                                let epoch = if clear {
+                                if clear || mib == Some(0) {
+                                    cached_discovery = None;
+                                    let live = provider
+                                        .as_ref()
+                                        .map(|p| p.libraries())
+                                        .unwrap_or_default();
+                                    state["libraries"] = offline::library_views(&live, &live);
+                                    state["discovery"] = json!({"origin":if provider.is_some() {"live"} else {"none"},"stale":provider.is_none(),"incomplete":true,"message":"Offline library cache cleared or disabled. Reconnect Plex to save library discovery again."});
+                                }
+                                let epoch = if clear || mib == Some(0) {
                                     if let Some(task) = browse_task.take() {
                                         task.abort();
                                     }
@@ -1359,7 +1455,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     state["status"] = json!(
                                         "Metadata cache clearing. Browse again to load catalog pages."
                                     );
-                                    metadata.begin_clear()
+                                    if clear { metadata.begin_clear() } else { None }
                                 } else {
                                     None
                                 };
@@ -1443,6 +1539,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 "Gapless chaining disabled for this backend session."
                             }
                             .into();
+                        }
+                    }
+                    "reconnect" => {
+                        let result = check_queue(&queue, &v).map_err(|error| error.to_string());
+                        if let Err(error) = result {
+                            state["error"] = json!(error);
+                        } else if v["account_epoch"].as_str()
+                            != Some(auth_generation.to_string().as_str())
+                        {
+                            state["error"] = json!(
+                                "The account changed. Review the connection before retrying."
+                            );
+                        } else if let Some(credential) = current_credential.clone() {
+                            for task in [auth_task.take(), browse_task.take(), prepare_task.take()]
+                                .into_iter()
+                                .flatten()
+                            {
+                                task.abort();
+                            }
+                            auth_generation = auth_generation
+                                .checked_add(1)
+                                .ok_or("Account generation exhausted")?;
+                            browse_generation = browse_generation
+                                .checked_add(1)
+                                .ok_or("Browse generation exhausted")?;
+                            epochs.reset()?;
+                            gapless.invalidate();
+                            player.invalidate_load(epochs.current);
+                            player.send(Command::Pause(true));
+                            player.send(Command::Stop);
+                            proxy.revoke().await;
+                            artwork.revoke(false).await;
+                            search.invalidate()?;
+                            albums.invalidate();
+                            playlists.invalidate();
+                            catalog::publish_page(&mut state, &mut catalog_revision, None)?;
+                            state["catalog"] =
+                                json!({"revision":catalog_revision.to_string(),"busy":false});
+                            provider = None;
+                            cached_discovery = metadata.discovery().await;
+                            state["libraries"] = offline::library_views(
+                                &cached_discovery
+                                    .as_ref()
+                                    .map(|d| d.libraries.clone())
+                                    .unwrap_or_default(),
+                                &[],
+                            );
+                            state["discovery"] = json!({"origin":"offline","stale":true,"incomplete":true,"message":"Reconnecting Plex · cached browsing remains read-only; playback stays paused."});
+                            state["sign_in"]["connected"] = json!(false);
+                            desired_playing = false;
+                            state["intent"] = json!("paused");
+                            state["audio"] = Value::Null;
+                            state["status"] = json!(
+                                "Reconnecting Plex; choose Resume explicitly after connection."
+                            );
+                            auth_task = Some(connect(tx.clone(), auth_generation, credential));
+                        } else {
+                            state["error"] =
+                                json!("Restore sign-in or connect Plex before reconnecting.");
                         }
                     }
                     "restore_signin" => {
@@ -1574,7 +1729,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "album_list" | "album_open" | "artist_list" | "artist_open" => {
-                        if let Some(provider) = provider.clone() {
+                        if let Some(provider) = catalog_access.clone() {
                             if let Err(error) =
                                 albums.command(&v, provider, auth_generation, tx.clone())
                             {
@@ -1622,7 +1777,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "search_all" => {
-                        if let Some(provider) = provider.clone() {
+                        if let Some(provider) = catalog_access.clone() {
                             if let Err(error) = search.begin(
                                 v["query"].as_str().unwrap_or(""),
                                 auth_generation,
@@ -1660,7 +1815,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "browse" => {
-                        if let Some(p) = provider.clone()
+                        if let Some(p) = catalog_access.clone()
                             && let Ok(source) =
                                 serde_json::from_value::<SourceId>(v["source"].clone())
                         {
@@ -1695,28 +1850,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state["catalog"] = json!({"revision":catalog_revision.to_string(),"busy":true,"refreshing":false});
                             let cache = metadata.clone();
                             browse_task = Some(tokio::spawn(async move {
-                                cache
-                                    .read(
-                                        p,
-                                        metadata_cache::Query::Tracks {
-                                            source,
-                                            offset,
-                                            query,
-                                        },
-                                        move |result, info| {
-                                            let tx = tx.clone();
-                                            async move {
-                                                let result = result.and_then(|page| match page {
-                                                    metadata_cache::Page::Tracks(page) => Ok(page),
-                                                    _ => Err(
-                                                        qoda_provider::ProviderError::InvalidReply,
-                                                    ),
-                                                });
-                                                let _ = tx.send(Event::Page(g, result, info)).await;
-                                            }
-                                        },
-                                    )
-                                    .await;
+                                p.read(
+                                    &cache,
+                                    metadata_cache::Query::Tracks {
+                                        source,
+                                        offset,
+                                        query,
+                                    },
+                                    move |result, info| {
+                                        let tx = tx.clone();
+                                        async move {
+                                            let result = result.and_then(|page| match page {
+                                                metadata_cache::Page::Tracks(page) => Ok(page),
+                                                _ => {
+                                                    Err(qoda_provider::ProviderError::InvalidReply)
+                                                }
+                                            });
+                                            let _ = tx.send(Event::Page(g, result, info)).await;
+                                        }
+                                    },
+                                )
+                                .await;
                             }));
                         }
                     }
@@ -2053,6 +2207,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         epochs.reset()?;
                         gapless.invalidate();
                         provider = None;
+                        cached_discovery = None;
+                        state["discovery"] = json!({"origin":"none","stale":true,"incomplete":true,"message":"Disconnected; cached library discovery removed."});
                         search.invalidate()?;
                         playlists.invalidate();
                         albums.invalidate();
@@ -2139,15 +2295,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             Event::Connected(g, r, credential) if g == auth_generation => match r {
                 Ok((p, ids)) => {
+                    // A verified account replaces all cached browse authority. Fence
+                    // in-flight cached results before publishing its source allowlist.
+                    if let Some(task) = browse_task.take() {
+                        task.abort();
+                    }
+                    browse_generation = browse_generation
+                        .checked_add(1)
+                        .ok_or("Browse generation exhausted")?;
+                    albums.invalidate();
+                    playlists.invalidate();
+                    catalog::publish_page(&mut state, &mut catalog_revision, None)?;
+                    state["catalog"] =
+                        json!({"revision":catalog_revision.to_string(),"busy":false});
+                    artwork.revoke(true).await;
+                    let live = p.libraries();
+                    let account = p.account_scope().to_owned();
+                    let snapshot = offline::reconcile(
+                        cached_discovery.as_ref(),
+                        account,
+                        live.clone(),
+                        p.unavailable_sources(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs() as i64),
+                    );
+                    let mut libraries = snapshot.libraries.clone();
+                    cached_discovery = None;
+                    match metadata.install_discovery(snapshot.clone()).await {
+                        Ok(()) => cached_discovery = Some(snapshot),
+                        Err(error) => {
+                            state["error"] = json!(error);
+                            libraries = live.clone();
+                        }
+                    }
+                    let missing = libraries.len().saturating_sub(live.len());
+                    state["discovery"] = json!({"origin":if libraries.is_empty() && p.unavailable_server_count()==0 {"none"} else if live.is_empty() {"offline"} else if p.unavailable_server_count()>0 {"partial"} else {"live"},"stale":missing>0,"incomplete":true,"message":format!("{} live libraries · {} cached libraries · {} servers unavailable. Cached sources are read-only; catalog coverage may be incomplete.",live.len(),missing,p.unavailable_server_count())});
+                    state["libraries"] = offline::library_views(&libraries, &live);
                     if save_identities(&ids).is_err() {
                         state["error"] = json!("Library identities could not be saved");
                     }
                     search.invalidate()?;
-                    state["libraries"] = json!(p.libraries());
-                    state["status"] = json!("Choose a music library");
-                    provider = Some(Arc::new(p));
+                    state["status"] = json!(if libraries.is_empty() {
+                        "No available music libraries. Reconnect after server access changes."
+                    } else {
+                        "Choose a library; cached sources require a successful reconnect for playback."
+                    });
+                    provider = if live.is_empty() {
+                        None
+                    } else {
+                        Some(Arc::new(p))
+                    };
                     current_credential = Some(credential);
-                    state["sign_in"]["connected"] = json!(true);
+                    state["sign_in"]["connected"] = json!(provider.is_some());
                     state["sign_in"]["can_save"] = json!(true);
                     if state["sign_in"]["saved"] != "present" {
                         state["sign_in"]["message"] =
@@ -2155,6 +2355,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(e) => {
+                    if matches!(
+                        e,
+                        ConnectError::Provider(
+                            qoda_provider::ProviderError::AccessDenied
+                                | qoda_provider::ProviderError::SignInRequired
+                        )
+                    ) {
+                        if let Some(task) = browse_task.take() {
+                            task.abort();
+                        }
+                        browse_generation = browse_generation
+                            .checked_add(1)
+                            .ok_or("Browse generation exhausted")?;
+                        albums.invalidate();
+                        search.invalidate()?;
+                        metadata.clear().await;
+                        provider = None;
+                        current_credential = None;
+                        state["sign_in"]["connected"] = json!(false);
+                        state["sign_in"]["can_save"] = json!(false);
+                        cached_discovery = None;
+                        state["libraries"] = json!([]);
+                        catalog::publish_page(&mut state, &mut catalog_revision, None)?;
+                        state["catalog"] =
+                            json!({"revision":catalog_revision.to_string(),"busy":false});
+                        state["discovery"] = json!({"origin":"none","stale":true,"incomplete":true,"message":"Plex denied account access; cached library discovery was removed."});
+                    }
                     state["status"] = json!("Plex connection failed");
                     state["error"] = json!(e.to_string());
                 }
@@ -2216,8 +2443,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         });
                     }
                     Err(error) => {
-                        state["status"] = json!("Browse failed");
-                        state["error"] = json!(error.to_string());
+                        if info.origin == "offline"
+                            && error == qoda_provider::ProviderError::MissingTrack
+                        {
+                            state["status"] = json!(info.message);
+                            state["error"] = Value::Null;
+                        } else {
+                            state["status"] = json!("Browse failed");
+                            state["error"] = json!(error.to_string());
+                        }
                         if matches!(
                             error,
                             qoda_provider::ProviderError::AccessDenied
@@ -2403,6 +2637,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         state["albums"] = json!(albums.view);
         state["artwork_cache"] = artwork.view().await;
         state["metadata_cache"] = json!(metadata.view());
+        state["sign_in"]["can_reconnect"] = json!(current_credential.is_some());
+        state["sign_in"]["connecting"] =
+            json!(auth_task.as_ref().is_some_and(|task| !task.is_finished()));
         state["account_epoch"] = json!(auth_generation.to_string());
         let stamp = (queue.durable_stamp(), purge_epoch);
         if force_save || stamp != last_requested {
@@ -2472,6 +2709,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn persisted_source_identity_rejects_newer_malformed_and_cross_account_aliases() {
+        let id = SourceId::new();
+        let key = serde_json::to_string(&["account", "server", "section"]).unwrap();
+        let good = json!({key: id});
+        assert!(parse_identities(&serde_json::to_vec(&good).unwrap()).is_ok());
+        for invalid in [
+            json!({"version":2,"sources":{}}),
+            json!({"not a scope":id}),
+            json!({serde_json::to_string(&["a","s","1"]).unwrap():id,serde_json::to_string(&["b","s","1"]).unwrap():id}),
+        ] {
+            assert!(parse_identities(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        }
+    }
+    #[test]
+    fn reconnect_requires_current_queue_account_and_explicit_session_credential() {
+        let queue = queue::Queue::default();
+        let snapshot = queue.snapshot();
+        let mut request = json!({"queue_session":snapshot.session,"queue_revision":snapshot.revision,"account_epoch":"3"});
+        assert!(reconnect_request(&queue, &request, 3, true).is_ok());
+        assert!(reconnect_request(&queue, &request, 3, false).is_err());
+        request["account_epoch"] = json!("2");
+        assert!(reconnect_request(&queue, &request, 3, true).is_err());
+        request["account_epoch"] = json!("3");
+        request["queue_revision"] = json!("18446744073709551615");
+        assert!(reconnect_request(&queue, &request, 3, true).is_err());
+    }
     use super::*;
     fn queued_selection() -> queue::Queue {
         let track = qoda_provider::Track {

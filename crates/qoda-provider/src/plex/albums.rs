@@ -453,6 +453,9 @@ mod tests {
         });
         let source = SourceId::new();
         let provider = PlexProvider {
+            account_scope: "a".repeat(64),
+            unavailable_sources: HashSet::new(),
+            unavailable_servers: 0,
             http: Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()

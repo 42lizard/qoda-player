@@ -20,6 +20,9 @@ pub fn selected_tracks(
     {
         return Err("The account changed. Connect and select tracks again.");
     }
+    if state["catalog"]["cache"]["origin"] == "offline" {
+        return Err("This cached source is offline. Reconnect and select tracks again.");
+    }
     if state["catalog"]["busy"] != false
         || request["catalog_revision"].as_str().is_none()
         || request["catalog_revision"] != state["catalog"]["revision"]
@@ -77,6 +80,13 @@ pub fn publish_page(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cached_only_source_cannot_queue_even_when_other_libraries_are_connected() {
+        let (mut state, request) = fixture();
+        assert!(selected_tracks(&state, &request, 4).is_ok());
+        state["catalog"]["cache"] = json!({"origin":"offline","stale":true,"incomplete":true});
+        assert!(selected_tracks(&state, &request, 4).is_err());
+    }
     use super::*;
     use qoda_core::SourceId;
     use serde_json::json;

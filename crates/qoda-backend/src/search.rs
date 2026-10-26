@@ -2,10 +2,10 @@
 use crate::metadata_cache::{self, Cache, Info};
 use futures_util::StreamExt;
 use qoda_core::{SourceId, TrackRef};
-use qoda_provider::{CatalogPage, Library, MusicProvider, ProviderError, Track};
+use qoda_provider::{CatalogPage, Library, ProviderError, Track};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::HashSet, time::Duration};
 use tokio::{sync::mpsc, task::JoinHandle};
 const SOURCES: usize = 32;
 const RESULTS: usize = 500;
@@ -79,10 +79,11 @@ impl Controller {
         &mut self,
         query: &str,
         account: u64,
-        provider: Arc<dyn MusicProvider>,
+        access: impl Into<crate::offline::Access>,
         cache: Cache,
         tx: mpsc::Sender<crate::Event>,
     ) -> Result<(), &'static str> {
+        let access = access.into();
         if query.chars().take(513).count() > 512 {
             return Err("Search supports at most 512 characters.");
         }
@@ -92,7 +93,7 @@ impl Controller {
             return Ok(());
         }
         let mut ids = HashSet::new();
-        let libraries: Vec<_> = provider
+        let libraries: Vec<_> = access
             .libraries()
             .into_iter()
             .filter(|library| ids.insert(library.id))
@@ -125,15 +126,15 @@ impl Controller {
         self.task = Some(tokio::spawn(async move {
             let jobs = futures_util::stream::iter(libraries)
                 .map(|library| {
-                    let (provider, cache, query, tx) =
-                        (provider.clone(), cache.clone(), query.clone(), tx.clone());
+                    let (access, cache, query, tx) =
+                        (access.clone(), cache.clone(), query.clone(), tx.clone());
                     async move {
                         let source = library.id;
                         let output = tx.clone();
                         let result = tokio::time::timeout(
                             Duration::from_secs(6),
-                            cache.read(
-                                provider,
+                            access.read(
+                                &cache,
                                 metadata_cache::Query::Tracks {
                                     source,
                                     offset: 0,
@@ -244,7 +245,13 @@ impl Controller {
                     }
                     Err(error) => {
                         source.phase = "failed";
-                        source.error = Some(error.to_string());
+                        source.error = Some(
+                            if error == ProviderError::MissingTrack && cache.origin == "offline" {
+                                cache.message.into()
+                            } else {
+                                error.to_string()
+                            },
+                        );
                         if !matches!(
                             error,
                             ProviderError::Network | ProviderError::SignInRequired
@@ -318,7 +325,8 @@ impl Drop for Controller {
 mod tests {
     use super::*;
     use qoda_core::{Counter, ProviderTrackKey};
-    use qoda_provider::{PreparedMedia, ProviderFuture};
+    use qoda_provider::{MusicProvider, PreparedMedia, ProviderFuture};
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Provider {
         libraries: Vec<Library>,

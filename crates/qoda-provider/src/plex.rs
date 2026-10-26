@@ -9,7 +9,12 @@ use reqwest::{
 };
 use roxmltree::{Document, Node};
 use serde::de::Error;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 use zeroize::Zeroizing;
 
 #[derive(Clone)]
@@ -251,10 +256,24 @@ struct Source {
     key: String,
 }
 pub struct PlexProvider {
+    account_scope: String,
+    unavailable_sources: HashSet<SourceId>,
+    unavailable_servers: usize,
     http: Client,
     sources: HashMap<SourceId, Source>,
 }
 impl PlexProvider {
+    /// Stable noncredential account partition for disposable cached metadata.
+    pub fn account_scope(&self) -> &str {
+        &self.account_scope
+    }
+    /// Only sources on account-entitled servers whose discovery was unreachable.
+    pub fn unavailable_sources(&self) -> &HashSet<SourceId> {
+        &self.unavailable_sources
+    }
+    pub fn unavailable_server_count(&self) -> usize {
+        self.unavailable_servers
+    }
     pub async fn connect(
         credential: Credential,
         mut identities: HashMap<String, SourceId>,
@@ -284,6 +303,9 @@ impl PlexProvider {
         )
         .await?;
         let document = Document::parse(&resource_text).map_err(|_| ProviderError::InvalidReply)?;
+        if !discovery_container(&document) {
+            return Err(ProviderError::InvalidReply);
+        }
         struct Server {
             name: String,
             id: String,
@@ -316,7 +338,10 @@ impl PlexProvider {
             })
             .collect();
         let mut sources = HashMap::new();
+        let mut unavailable = HashSet::new();
         for server in servers {
+            let mut discovered = false;
+            let mut denied = false;
             for connection in server.connections {
                 let Ok(base) = secure_base(&connection) else {
                     continue;
@@ -339,14 +364,22 @@ impl PlexProvider {
                     continue;
                 }
                 let h = headers(&credential.client_id, Some(&server.token))?;
-                let Ok(section_text) =
-                    xml(&http, path(&base, &["library", "sections"]), h.clone()).await
-                else {
-                    continue;
-                };
+                let section_text =
+                    match xml(&http, path(&base, &["library", "sections"]), h.clone()).await {
+                        Ok(text) => text,
+                        Err(ProviderError::AccessDenied | ProviderError::SignInRequired) => {
+                            denied = true;
+                            continue;
+                        }
+                        Err(_) => continue,
+                    };
                 let Ok(sections) = Document::parse(&section_text) else {
                     continue;
                 };
+                if !discovery_container(&sections) {
+                    continue;
+                }
+                discovered = true;
                 for node in sections.descendants().filter(|n| {
                     n.has_tag_name("Directory") && n.attribute("type") == Some("artist")
                 }) {
@@ -378,12 +411,43 @@ impl PlexProvider {
                 }
                 break;
             }
+            if !discovered && !denied {
+                unavailable.insert(server.id);
+            }
         }
-        if sources.is_empty() {
-            return Err(ProviderError::AccessDenied);
-        }
-        Ok((Self { http, sources }, identities))
+        // A verified empty discovery is meaningful: removed/denied libraries
+        // must replace the former allowlist instead of looking like an outage.
+        Ok((
+            Self {
+                unavailable_sources: retained_sources(&identities, &account, &unavailable),
+                unavailable_servers: unavailable.len(),
+                account_scope: format!(
+                    "{:x}",
+                    Sha256::digest(format!("plex\0{account}").as_bytes())
+                ),
+                http,
+                sources,
+            },
+            identities,
+        ))
     }
+}
+fn discovery_container(document: &Document<'_>) -> bool {
+    document.root_element().has_tag_name("MediaContainer")
+}
+// Resource entitlement is checked first; absence or explicit denial never
+// retains a server merely because it once appeared in a cached identity file.
+fn retained_sources(
+    ids: &HashMap<String, SourceId>,
+    account: &str,
+    unavailable: &HashSet<String>,
+) -> HashSet<SourceId> {
+    ids.iter()
+        .filter_map(|(key, id)| {
+            let [owner, server, _]: [String; 3] = serde_json::from_str(key).ok()?;
+            (owner == account && unavailable.contains(&server)).then_some(*id)
+        })
+        .collect()
 }
 // Bound display metadata retained by the session, preserving UTF-8 boundaries.
 fn display_attr(node: Node<'_, '_>, key: &str) -> String {
@@ -530,10 +594,14 @@ impl MusicProvider for PlexProvider {
         key: ProviderTrackKey,
     ) -> ProviderFuture<'_, PreparedMedia> {
         Box::pin(async move {
-            let s = self
-                .sources
-                .get(&source)
-                .ok_or(ProviderError::UnknownSource)?;
+            let s =
+                self.sources
+                    .get(&source)
+                    .ok_or(if self.unavailable_sources.contains(&source) {
+                        ProviderError::Network
+                    } else {
+                        ProviderError::UnknownSource
+                    })?;
             let key = String::from(key);
             let mut metadata_url = path(&s.base, &["library", "metadata", &key]);
             metadata_url
@@ -649,6 +717,55 @@ impl MediaSource for PlexStream {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn malformed_discovery_cannot_be_treated_as_an_authoritative_empty_library_list() {
+        assert!(discovery_container(
+            &Document::parse("<MediaContainer size='0'/>").unwrap()
+        ));
+        assert!(!discovery_container(&Document::parse("<html/>").unwrap()));
+        assert!(!discovery_container(
+            &Document::parse("<Unexpected><Directory/></Unexpected>").unwrap()
+        ));
+    }
+    #[tokio::test]
+    async fn known_unreachable_source_pauses_as_network_failure_without_preparing_media() {
+        let source = SourceId::new();
+        let provider = PlexProvider {
+            http: Client::new(),
+            sources: HashMap::new(),
+            account_scope: "a".repeat(64),
+            unavailable_sources: HashSet::from([source]),
+            unavailable_servers: 1,
+        };
+        assert!(matches!(
+            provider
+                .prepare(source, "1".to_owned().try_into().unwrap())
+                .await,
+            Err(ProviderError::Network)
+        ));
+        assert!(matches!(
+            provider
+                .prepare(SourceId::new(), "1".to_owned().try_into().unwrap())
+                .await,
+            Err(ProviderError::UnknownSource)
+        ));
+    }
+    #[test]
+    fn cached_source_retention_is_scoped_to_the_current_account_and_entitled_unreachable_servers() {
+        let a = SourceId::new();
+        let b = SourceId::new();
+        let c = SourceId::new();
+        let ids = HashMap::from([
+            (serde_json::to_string(&["A", "dead", "1"]).unwrap(), a),
+            (serde_json::to_string(&["B", "dead", "1"]).unwrap(), b),
+            (serde_json::to_string(&["A", "removed", "1"]).unwrap(), c),
+        ]);
+        assert_eq!(
+            retained_sources(&ids, "A", &HashSet::from(["dead".into()])),
+            HashSet::from([a])
+        );
+        assert!(retained_sources(&ids, "A", &HashSet::new()).is_empty());
+    }
     use super::*;
     #[test]
     fn retained_display_fields_are_bounded_without_truncating_identity() {

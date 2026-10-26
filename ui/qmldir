@@ -21,3 +21,4 @@ TrackSelection 1.0 TrackSelection.qml
 UiRequests 1.0 UiRequests.qml
 UnavailableBrowser 1.0 UnavailableBrowser.qml
 ThemedControl 1.0 ThemedControl.qml
+DiscoveryNotice 1.0 DiscoveryNotice.qml

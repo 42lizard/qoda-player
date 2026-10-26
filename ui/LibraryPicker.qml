@@ -27,7 +27,7 @@ ColumnLayout {
     function caption(library) {
         if (!library) return "Select a source to browse";
         const identity = suffix(library);
-        return server(library) + (identity ? " · " + identity : "");
+        return server(library) + (identity ? " · " + identity : "") + (library.offline ? " · cached" : "");
     }
     function label(library) { return library ? title(library) + " · " + caption(library) : "Choose a music library"; }
     onLibrariesChanged: dismiss()

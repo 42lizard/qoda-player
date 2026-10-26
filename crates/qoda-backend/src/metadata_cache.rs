@@ -292,6 +292,15 @@ impl Default for Info {
     }
 }
 impl Info {
+    fn offline() -> Self {
+        Self {
+            origin: "offline",
+            stale: true,
+            incomplete: true,
+            refreshing: false,
+            message: "Offline cached metadata · unverified and incomplete · connect Plex for playback or edits.",
+        }
+    }
     fn album_detail(stale: bool, refreshing: bool) -> Self {
         Self {
             origin: "cached",
@@ -597,7 +606,7 @@ impl Store {
         let id: i32 = conn
             .pragma_query_value(None, "application_id", |r| r.get(0))
             .map_err(database_error)?;
-        if version > 1 || (id != 0 && id != APP_ID) {
+        if version > 2 || (id != 0 && id != APP_ID) {
             return Err(DatabaseError::Unsupported);
         }
         let tables: i64 = conn
@@ -617,6 +626,12 @@ impl Store {
         } else if id != APP_ID {
             return Err(DatabaseError::Unsupported);
         }
+        if version < 2 {
+            conn.execute_batch("BEGIN;CREATE TABLE discovery(id INTEGER PRIMARY KEY CHECK(id=1),payload BLOB NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0));PRAGMA user_version=2;COMMIT;")
+                .map_err(database_error)?;
+        }
+        conn.prepare("SELECT payload,bytes FROM discovery LIMIT 0")
+            .map_err(database_error)?;
         conn.pragma_update(None, "journal_mode", "DELETE")
             .map_err(database_error)?;
         conn.pragma_update(None, "secure_delete", true)
@@ -656,7 +671,7 @@ impl Store {
             .ok_or("Metadata database is unavailable.")
     }
     fn refresh_stats(&mut self) -> Result<()> {
-        self.stats=self.connection()?.query_row("SELECT (SELECT coalesce(sum(bytes),0) FROM pages)+(SELECT coalesce(sum(bytes),0) FROM tracks),(SELECT count(*) FROM pages),(SELECT count(*) FROM tracks)",[],|r|Ok(Stats{bytes:r.get(0)?,pages:r.get(1)?,tracks:r.get(2)?})).map_err(|_|"Metadata cache accounting failed.")?;
+        self.stats=self.connection()?.query_row("SELECT (SELECT coalesce(sum(bytes),0) FROM pages)+(SELECT coalesce(sum(bytes),0) FROM tracks)+(SELECT coalesce(sum(bytes),0) FROM discovery),(SELECT count(*) FROM pages),(SELECT count(*) FROM tracks)",[],|r|Ok(Stats{bytes:r.get(0)?,pages:r.get(1)?,tracks:r.get(2)?})).map_err(|_|"Metadata cache accounting failed.")?;
         Ok(())
     }
     fn trim(&mut self) -> Result<()> {
@@ -667,7 +682,7 @@ impl Store {
             .map_err(|_| "Metadata eviction transaction failed.")?;
         let result = (|| {
             if target == 0 {
-                conn.execute_batch("DELETE FROM pages;DELETE FROM tracks;")
+                conn.execute_batch("DELETE FROM pages;DELETE FROM tracks;DELETE FROM discovery;")
                     .map_err(|_| "Metadata eviction failed.")?;
                 return Ok(());
             }
@@ -859,6 +874,10 @@ impl Store {
         })))
     }
     fn purge_source(&mut self, source: SourceId) -> Result<()> {
+        let mut discovery = self.discovery()?;
+        if let Some(discovery) = &mut discovery {
+            discovery.libraries.retain(|library| library.id != source);
+        }
         let _ = self.connection()?;
         let tx = self
             .conn
@@ -870,8 +889,111 @@ impl Store {
             .map_err(|_| "Metadata invalidation failed.")?;
         tx.execute("DELETE FROM tracks WHERE source=?1", [source_key(source)])
             .map_err(|_| "Metadata invalidation failed.")?;
+        if let Some(discovery) = discovery {
+            let bytes =
+                serde_json::to_vec(&discovery).map_err(|_| "Metadata invalidation failed.")?;
+            tx.execute(
+                "UPDATE discovery SET payload=?1,bytes=?2 WHERE id=1",
+                params![bytes, (bytes.len() + 128) as i64],
+            )
+            .map_err(|_| "Metadata invalidation failed.")?;
+        }
         tx.commit().map_err(|_| "Metadata invalidation failed.")?;
         self.trim()
+    }
+    fn discovery(&self) -> Result<Option<crate::offline::Discovery>> {
+        if self.prefs.purge_pending || self.prefs.budget_mib == 0 {
+            return Ok(None);
+        }
+        let length: Option<i64> = self
+            .connection()?
+            .query_row(
+                "SELECT length(payload) FROM discovery WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| "Cached library discovery could not be read.")?;
+        let Some(length) = length else {
+            return Ok(None);
+        };
+        if length < 0 || length as u64 > crate::offline::MAX_DISCOVERY as u64 {
+            return Err(
+                "Cached library discovery exceeds its size limit; preserved existing data.",
+            );
+        }
+        let bytes: Vec<u8> = self
+            .connection()?
+            .query_row("SELECT payload FROM discovery WHERE id=1", [], |r| r.get(0))
+            .map_err(|_| "Cached library discovery could not be read.")?;
+        let discovery: crate::offline::Discovery = serde_json::from_slice(&bytes)
+            .map_err(|_| "Cached library discovery is damaged; preserved existing data.")?;
+        if !discovery.valid() {
+            return Err("Unsupported or invalid cached library discovery was preserved.");
+        }
+        Ok(Some(discovery))
+    }
+    fn install_discovery(&mut self, discovery: &crate::offline::Discovery) -> Result<()> {
+        let previous = self.discovery()?;
+        // Durable intent precedes replacement: interrupted/failed switches cannot
+        // reopen the former account's catalog as the latest discovery on restart.
+        self.prefs.purge_pending = true;
+        self.save_preferences()?;
+        if !discovery.valid() {
+            return Err("Invalid library discovery.");
+        }
+        let bytes =
+            serde_json::to_vec(discovery).map_err(|_| "Library discovery could not be encoded.")?;
+        if bytes.len() > crate::offline::MAX_DISCOVERY {
+            return Err("Library discovery exceeds its size limit.");
+        }
+        let _ = self.connection()?;
+        let tx = self
+            .conn
+            .as_mut()
+            .ok_or("Metadata unavailable.")?
+            .transaction()
+            .map_err(|_| "Library discovery transaction failed.")?;
+        if previous
+            .as_ref()
+            .is_none_or(|old| old.account != discovery.account)
+        {
+            // Legacy unpartitioned cache cannot establish an account. Drop it once
+            // the first verified discovery arrives, before exposing a live view.
+            tx.execute_batch("DELETE FROM pages;DELETE FROM tracks;")
+                .map_err(|_| "Account metadata cleanup failed.")?;
+        } else {
+            let allowed: std::collections::HashSet<_> = discovery
+                .libraries
+                .iter()
+                .map(|l| source_key(l.id))
+                .collect();
+            let sources = {
+                let mut stmt = tx
+                    .prepare("SELECT source FROM pages UNION SELECT source FROM tracks")
+                    .map_err(|_| "Metadata sources unavailable.")?;
+                stmt.query_map([], |r| r.get::<_, String>(0))
+                    .map_err(|_| "Metadata sources unavailable.")?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|_| "Metadata sources unavailable.")?
+            };
+            for source in sources.into_iter().filter(|id| !allowed.contains(id)) {
+                tx.execute("DELETE FROM pages WHERE source=?1", [&source])
+                    .map_err(|_| "Source metadata cleanup failed.")?;
+                tx.execute("DELETE FROM tracks WHERE source=?1", [&source])
+                    .map_err(|_| "Source metadata cleanup failed.")?;
+            }
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO discovery(id,payload,bytes) VALUES(1,?1,?2)",
+            params![bytes, (bytes.len() + 128) as i64],
+        )
+        .map_err(|_| "Library discovery could not be saved.")?;
+        tx.commit()
+            .map_err(|_| "Library discovery could not be committed.")?;
+        self.trim()?;
+        self.prefs.purge_pending = false;
+        self.save_preferences()
     }
     fn clear(&mut self) -> Result<()> {
         self.prefs.purge_pending = true;
@@ -899,6 +1021,8 @@ impl Store {
 }
 
 enum Op {
+    Discovery,
+    InstallDiscovery(crate::offline::Discovery),
     Get(Query),
     Put(Query, Box<Page>),
     Search(Query),
@@ -908,6 +1032,7 @@ enum Op {
     Stop,
 }
 enum Reply {
+    Discovery(Option<crate::offline::Discovery>),
     Hit(Option<Hit>),
     Search(Option<Page>),
     Done,
@@ -966,10 +1091,11 @@ impl Cache {
                     break;
                 }
                 let clear = matches!(&job.op, Op::Clear);
-                let mutating = !matches!(&job.op, Op::Get(_) | Op::Search(_));
+                let installing = matches!(&job.op, Op::InstallDiscovery(_));
+                let mutating = !matches!(&job.op, Op::Get(_) | Op::Search(_) | Op::Discovery);
                 let suppressed = !clear
                     && (job.epoch != epoch.load(Ordering::Acquire)
-                        || blocked.load(Ordering::Acquire));
+                        || blocked.load(Ordering::Acquire) && !installing);
                 let result = if suppressed {
                     Err("Metadata cache work was cancelled.")
                 } else {
@@ -986,6 +1112,10 @@ impl Cache {
                     match store.as_mut() {
                         None => Err(warning.unwrap_or("Metadata cache unavailable.")),
                         Some(store) => match job.op {
+                            Op::Discovery => store.discovery().map(Reply::Discovery),
+                            Op::InstallDiscovery(discovery) => {
+                                store.install_discovery(&discovery).map(|_| Reply::Done)
+                            }
                             Op::Get(query) => store.get(&query).map(Reply::Hit),
                             Op::Put(query, page) => store.put(&query, &page).map(|_| Reply::Done),
                             Op::Search(query) => store.search(&query).map(Reply::Search),
@@ -996,7 +1126,10 @@ impl Cache {
                         },
                     }
                 };
-                if clear && result.is_ok() && job.epoch == epoch.load(Ordering::Acquire) {
+                if (clear || installing)
+                    && result.is_ok()
+                    && job.epoch == epoch.load(Ordering::Acquire)
+                {
                     blocked.store(false, Ordering::Release);
                 }
                 if !suppressed && job.epoch == epoch.load(Ordering::Acquire) {
@@ -1029,7 +1162,10 @@ impl Cache {
             return Ok(Reply::Done);
         };
         let (reply, rx) = oneshot::channel();
-        let wait = matches!(&op, Op::Clear | Op::Purge(_) | Op::Stop);
+        let wait = matches!(
+            &op,
+            Op::Clear | Op::InstallDiscovery(_) | Op::Purge(_) | Op::Stop
+        );
         let job = Job { epoch, op, reply };
         if wait {
             tokio::time::timeout(Duration::from_secs(2), tx.send(job))
@@ -1104,6 +1240,69 @@ impl Cache {
         if let Some(epoch) = self.advance() {
             let _ = self.request(epoch, Op::Purge(source)).await;
         }
+    }
+    pub async fn discovery(&self) -> Option<crate::offline::Discovery> {
+        match self.request(self.epoch(), Op::Discovery).await {
+            Ok(Reply::Discovery(discovery)) => discovery,
+            _ => None,
+        }
+    }
+    pub async fn install_discovery(&self, discovery: crate::offline::Discovery) -> Result<()> {
+        self.blocked.store(true, Ordering::Release);
+        let epoch = self
+            .advance()
+            .ok_or("Metadata account generation exhausted.")?;
+        let result = self
+            .request(epoch, Op::InstallDiscovery(discovery))
+            .await
+            .map(|_| ());
+        if result.is_err() {
+            self.blocked.store(true, Ordering::Release);
+            let mut view = self.view.lock().unwrap();
+            view.state = "blocked";
+            view.message =
+                "Cached account metadata could not be updated; cache disabled until cleared."
+                    .into();
+        }
+        result
+    }
+    pub async fn read_offline<F, Fut>(
+        &self,
+        discovery: &crate::offline::Discovery,
+        query: Query,
+        mut emit: F,
+    ) where
+        F: FnMut(std::result::Result<Page, ProviderError>, Info) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        // Re-read the active partition, so an old in-memory allowlist cannot survive
+        // account replacement, permission purge, budget zero or explicit cleanup.
+        let epoch = self.epoch();
+        let active = self.discovery().await;
+        if self.epoch() != epoch {
+            return;
+        }
+        if !discovery.valid()
+            || active.as_ref().is_none_or(|active| {
+                active.account != discovery.account
+                    || !active.libraries.iter().any(|l| l.id == query.source())
+            })
+        {
+            emit(Err(ProviderError::UnknownSource), Info::offline()).await;
+            return;
+        }
+        let page = match self.get(epoch, &query).await {
+            Some(hit) => Some(hit.page),
+            None => self.search(epoch, &query).await,
+        };
+        if self.epoch() != epoch || self.blocked.load(Ordering::Acquire) {
+            return;
+        }
+        let mut info = Info::offline();
+        if page.is_none() {
+            info.message = "No cached page or matches for this request · connect Plex to load it; library coverage is incomplete.";
+        }
+        emit(page.ok_or(ProviderError::MissingTrack), info).await;
     }
     pub async fn read<F, Fut>(&self, provider: Arc<dyn MusicProvider>, query: Query, mut emit: F)
     where
@@ -1517,7 +1716,7 @@ mod tests {
         store
             .connection()
             .unwrap()
-            .pragma_update(None, "user_version", 2)
+            .pragma_update(None, "user_version", 3)
             .unwrap();
         drop(store);
         let before = std::fs::read(&path).unwrap();
@@ -2006,6 +2205,294 @@ mod tests {
         task.abort();
         cache.clear().await;
         assert_eq!(cache.view().pages, 0);
+        cache.shutdown().await;
+    }
+    fn discovery(account: char, sources: &[SourceId]) -> crate::offline::Discovery {
+        crate::offline::Discovery {
+            version: 1,
+            account: account.to_string().repeat(64),
+            fetched: now(),
+            libraries: sources
+                .iter()
+                .map(|id| Library {
+                    id: *id,
+                    title: "Fixture library".into(),
+                    server: "Fixture server".into(),
+                })
+                .collect(),
+        }
+    }
+    #[tokio::test]
+    async fn offline_discovery_survives_cold_start_and_expired_pages_remain_read_only() {
+        let fixture = Fixture::new();
+        let source = SourceId::new();
+        let request = query(source, 0, "");
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        let saved = discovery('a', &[source]);
+        store.install_discovery(&saved).unwrap();
+        store.put(&request, &page(&request, &["A"])).unwrap();
+        store
+            .connection()
+            .unwrap()
+            .execute("UPDATE pages SET fetched=?1", [now() - 86400])
+            .unwrap();
+        drop(store);
+        let cache = Cache::start(Ok(fixture.paths.clone())).await;
+        let cached = cache.discovery().await.unwrap();
+        assert_eq!(cached.account, saved.account);
+        let mut replies = Vec::new();
+        crate::offline::Access::Cached(cached.clone())
+            .read(&cache, request, |page, info| {
+                replies.push((page, info));
+                async {}
+            })
+            .await;
+        assert_eq!(replies.len(), 1);
+        assert!(replies[0].0.is_ok());
+        assert_eq!(replies[0].1.origin, "offline");
+        assert!(replies[0].1.stale && replies[0].1.incomplete && !replies[0].1.refreshing);
+        let mut missing = Vec::new();
+        cache
+            .read_offline(&cached, query(source, 100, ""), |page, _| {
+                missing.push(page);
+                async {}
+            })
+            .await;
+        assert!(missing[0].is_err());
+        cache.shutdown().await;
+    }
+    #[tokio::test]
+    async fn account_replacement_fences_late_writes_and_even_reused_source_ids() {
+        let fixture = Fixture::new();
+        let cache = Cache::start(Ok(fixture.paths.clone())).await;
+        let source = SourceId::new();
+        let old = discovery('a', &[source]);
+        let request = query(source, 0, "");
+        cache.install_discovery(old.clone()).await.unwrap();
+        let epoch = cache.epoch();
+        cache
+            .put(epoch, &request, &page(&request, &["Old account"]))
+            .await;
+        assert!(cache.get(epoch, &request).await.is_some());
+        cache
+            .install_discovery(discovery('b', &[source]))
+            .await
+            .unwrap();
+        cache
+            .put(epoch, &request, &page(&request, &["Late result"]))
+            .await;
+        assert!(cache.get(cache.epoch(), &request).await.is_none());
+        let mut replies = Vec::new();
+        cache
+            .read_offline(&old, request, |page, _| {
+                replies.push(page);
+                async {}
+            })
+            .await;
+        assert!(matches!(replies[0], Err(ProviderError::UnknownSource)));
+        assert_eq!(cache.discovery().await.unwrap().account, "b".repeat(64));
+        cache.shutdown().await;
+    }
+    #[tokio::test]
+    async fn clearing_disabling_and_revocation_remove_discovery_and_cannot_resurrect_it() {
+        let fixture = Fixture::new();
+        let cache = Cache::start(Ok(fixture.paths.clone())).await;
+        let a = SourceId::new();
+        let b = SourceId::new();
+        let old = discovery('a', &[a, b]);
+        cache.install_discovery(old.clone()).await.unwrap();
+        cache.purge_source(a).await;
+        assert_eq!(cache.discovery().await.unwrap().libraries[0].id, b);
+        let epoch = cache.epoch();
+        cache.clear().await;
+        assert!(
+            cache
+                .request(epoch, Op::InstallDiscovery(old.clone()))
+                .await
+                .is_err()
+        );
+        assert!(cache.discovery().await.is_none());
+        cache.install_discovery(old.clone()).await.unwrap();
+        cache.budget(0).await.unwrap();
+        assert!(cache.discovery().await.is_none());
+        assert_eq!(cache.view().bytes, 0);
+        cache.budget(1).await.unwrap();
+        assert!(cache.discovery().await.is_none());
+        cache.shutdown().await;
+        let cache = Cache::start(Ok(fixture.paths.clone())).await;
+        assert!(cache.discovery().await.is_none());
+        cache.shutdown().await;
+    }
+    #[test]
+    fn same_account_discovery_preserves_only_current_sources_and_legacy_migration_invents_no_identity()
+     {
+        let fixture = Fixture::new();
+        let a = SourceId::new();
+        let b = SourceId::new();
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        store
+            .put(&query(a, 0, ""), &page(&query(a, 0, ""), &["Legacy"]))
+            .unwrap();
+        store
+            .connection()
+            .unwrap()
+            .execute_batch("DROP TABLE discovery;PRAGMA user_version=1")
+            .unwrap();
+        drop(store);
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        assert!(store.discovery().unwrap().is_none());
+        assert!(store.get(&query(a, 0, "")).unwrap().is_some());
+        store.install_discovery(&discovery('a', &[a, b])).unwrap();
+        assert!(store.get(&query(a, 0, "")).unwrap().is_none());
+        for source in [a, b] {
+            store
+                .put(
+                    &query(source, 0, ""),
+                    &page(&query(source, 0, ""), &["New"]),
+                )
+                .unwrap();
+        }
+        store.install_discovery(&discovery('a', &[a])).unwrap();
+        assert!(store.get(&query(a, 0, "")).unwrap().is_some());
+        assert!(store.get(&query(b, 0, "")).unwrap().is_none());
+    }
+    #[test]
+    fn malformed_newer_duplicate_and_oversized_discovery_is_preserved_and_never_loaded() {
+        let fixture = Fixture::new();
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        let source = SourceId::new();
+        store.install_discovery(&discovery('a', &[source])).unwrap();
+        let mut newer = discovery('a', &[source]);
+        newer.version = 2;
+        let duplicate = discovery('a', &[source, source]);
+        for payload in [
+            b"damaged".to_vec(),
+            serde_json::to_vec(&newer).unwrap(),
+            serde_json::to_vec(&duplicate).unwrap(),
+            vec![b'x'; crate::offline::MAX_DISCOVERY + 1],
+        ] {
+            store
+                .connection()
+                .unwrap()
+                .execute("UPDATE discovery SET payload=?1", [&payload])
+                .unwrap();
+            assert!(store.discovery().is_err());
+            assert!(store.install_discovery(&discovery('b', &[source])).is_err());
+            let after: Vec<u8> = store
+                .connection()
+                .unwrap()
+                .query_row("SELECT payload FROM discovery", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(after, payload);
+        }
+    }
+    #[test]
+    fn failed_account_partition_write_is_purged_before_offline_restart() {
+        let fixture = Fixture::new();
+        let source = SourceId::new();
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        store.install_discovery(&discovery('a', &[source])).unwrap();
+        store
+            .put(
+                &query(source, 0, ""),
+                &page(&query(source, 0, ""), &["Old account"]),
+            )
+            .unwrap();
+        store
+            .connection()
+            .unwrap()
+            .pragma_update(None, "query_only", true)
+            .unwrap();
+        assert!(store.install_discovery(&discovery('b', &[source])).is_err());
+        assert!(store.prefs.purge_pending);
+        drop(store);
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        assert!(store.discovery().unwrap().is_none());
+        assert!(store.get(&query(source, 0, "")).unwrap().is_none());
+    }
+    #[tokio::test]
+    async fn partial_connection_reads_unreachable_sources_only_from_cache_without_provider_calls() {
+        struct Live {
+            source: SourceId,
+            calls: Arc<AtomicUsize>,
+        }
+        impl MusicProvider for Live {
+            fn libraries(&self) -> Vec<Library> {
+                vec![Library {
+                    id: self.source,
+                    title: "Live".into(),
+                    server: "Reachable".into(),
+                }]
+            }
+            fn tracks(
+                &self,
+                source: SourceId,
+                offset: u64,
+                text: String,
+            ) -> ProviderFuture<'_, CatalogPage> {
+                assert_eq!(
+                    source, self.source,
+                    "Cached-only source was sent to the provider"
+                );
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    let Page::Tracks(page) = page(&query(source, offset, &text), &["Live"]) else {
+                        unreachable!()
+                    };
+                    Ok(page)
+                })
+            }
+            fn prepare(
+                &self,
+                _: SourceId,
+                _: ProviderTrackKey,
+            ) -> ProviderFuture<'_, PreparedMedia> {
+                panic!("Catalog reads must not prepare media")
+            }
+        }
+        let fixture = Fixture::new();
+        let live = SourceId::new();
+        let offline = SourceId::new();
+        let saved = discovery('a', &[live, offline]);
+        let mut store = Store::open(&fixture.paths, false).unwrap();
+        store.install_discovery(&saved).unwrap();
+        store
+            .put(
+                &query(offline, 0, ""),
+                &page(&query(offline, 0, ""), &["Cached"]),
+            )
+            .unwrap();
+        drop(store);
+        let cache = Cache::start(Ok(fixture.paths.clone())).await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let access = crate::offline::Access::Hybrid(
+            Arc::new(Live {
+                source: live,
+                calls: calls.clone(),
+            }),
+            saved,
+        );
+        assert_eq!(access.libraries().len(), 2);
+        let mut offline_replies = Vec::new();
+        access
+            .read(&cache, query(offline, 0, ""), |page, info| {
+                offline_replies.push((page, info));
+                async {}
+            })
+            .await;
+        assert!(offline_replies[0].0.is_ok());
+        assert_eq!(offline_replies[0].1.origin, "offline");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let mut live_replies = Vec::new();
+        access
+            .read(&cache, query(live, 0, ""), |page, info| {
+                live_replies.push((page, info));
+                async {}
+            })
+            .await;
+        assert!(live_replies[0].0.is_ok());
+        assert_eq!(live_replies[0].1.origin, "live");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
         cache.shutdown().await;
     }
 }
