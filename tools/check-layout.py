@@ -38,6 +38,16 @@ HOOKS = """
         function capture(path: string): void { fullFrame.grabToImage(result => result.saveToFile(path)); }
         function captureQueue(path: string): void { queuePane.grabToImage(result => result.saveToFile(path)); }
         function closeQueue(): void { queueDrawer.close(); }
+        function scrollRail(): void { railScroll.contentItem.contentY = Math.max(0, railScroll.contentHeight - railScroll.availableHeight); }
+        function searchFixture(): void {
+            const next = Object.assign({}, root.snapshot);
+            next.search = {revision: "9007199254740993", query: "fixture", busy: false, partial: true, message: "2 matches · 2/3 libraries ready · partial results", sources: [{library: "Archive", server: "Studio", phase: "timeout", count: 0, has_more: false, error: "Fixture server unavailable", cache: {stale: false}}], results: [
+                {track: {reference: {source: "source-A", key: "42"}, title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry"}, library: "Music", server: "Home", actionable: true},
+                {track: {reference: {source: "source-B", key: "42"}, title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry"}, library: "Music", server: "Studio", actionable: true}]};
+            next.recovery = {phase: "idle"};
+            root.snapshot = next; root.globalQuery = "fixture"; libraryTabs.currentIndex = 4;
+        }
+
         function recoveryFixture(): void { const next = Object.assign({}, root.snapshot); next.recovery = {phase: "exhausted", attempts: 2, limit: 2, message: "Connection interrupted; recovery stopped. Retry or Skip explicitly."}; root.snapshot = next; root.audioExpanded = false; }
 """
 
@@ -202,9 +212,23 @@ def check(output=None):
                 ipc("resize", 540, 760)
                 time.sleep(0.15)
                 capture("audio-small")
+                ipc("scrollRail")
+                time.sleep(0.15)
+                rail = status()["geometry"]
+                assert rail["railContentHeight"] > rail["railHeight"]
+                assert rail["accountTop"] >= 0 and rail["accountBottom"] <= rail["railHeight"] + 1, rail
+                capture("audio-rail-scrolled")
                 ipc("recoveryFixture")
                 time.sleep(0.15)
                 capture("recovery-small")
+                ipc("searchFixture")
+                ipc("resize", 1320, 820)
+                time.sleep(0.15)
+                assert status()["tab"] == 4 and len(status()["search"]["results"]) == 2
+                capture("search-wide")
+                ipc("resize", 540, 760)
+                time.sleep(0.15)
+                capture("search-small")
                 assert state["intent"] == "paused"
                 assert all(request["op"] == "hello" for request in requests), requests
                 log.flush()

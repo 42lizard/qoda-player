@@ -78,6 +78,14 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   assert state['replaygain']['mode']=='auto' and state['queue']==before_gain_queue
   command('set_replaygain',mode='track');until(lambda v:v['replaygain']['mode']=='track' and not v.get('error'),allow_error=True)
   print('ReplayGain mode changes persisted without queue/playback changes; invalid mode rejected',flush=True)
+  before_search=state['queue'];before_gapless=state['gapless']
+  command('search_all',query='fictional');until(lambda v:bool(v.get('error')),allow_error=True)
+  assert state['error']=='Connect Plex to search music libraries.' and state['search']['results']==[]
+  command('search_play',source=str(uuid.uuid4()),key='42',search_revision=state['search']['revision'],queue_session=state['queue']['session'],queue_revision=state['queue']['revision'])
+  until(lambda v:v.get('error')=='Connect Plex before using search results.',allow_error=True)
+  assert state['queue']==before_search and state['gapless']==before_gapless and state['intent']=='paused'
+  command('set_replaygain',mode='track');until(lambda v:not v.get('error'),allow_error=True)
+  print('Offline cross-library search and result actions refused without changing queue, gapless plan or playback',flush=True)
   for method in ['Play','Pause','Stop','Next','Previous']:bus('call',name,path,player,method)
   bus('call',name,path,player,'Seek','x','1000000');bus('call',name,path,player,'SetPosition','ox','/org/mpris/MediaPlayer2/TrackList/NoTrack','1000000')
   assert bus('set-property',name,path,player,'Volume','d','0.5',ok=False).returncode!=0
@@ -99,6 +107,7 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   else:raise AssertionError('UI never connected')
   until(lambda v:v.get('ui',{}).get('can_raise'))
   assert bus('get-property',name,path,'org.mpris.MediaPlayer2','CanRaise').stdout.strip()=='b true'
+  ipc('showSearch');search_info=json.loads(ipc('status'));assert search_info['tab']==4 and search_info['search']['results']==[]
   ipc('showAudio');audio_settings=json.loads(ipc('status'));assert audio_settings['audioExpanded'] and audio_settings['replaygain']['mode']=='track'
   ipc('showCache');initial=json.loads(ipc('status'));assert initial['form']=='full' and initial['cacheExpanded'] and initial['artworkCache']['budget_mib']==1
   assert not initial['presentation']['known'] and initial['presentation']['track'] is None
@@ -164,7 +173,7 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   hung.close();hung=None
   command('quit');p.wait(timeout=15);assert p.returncode==0;ui.wait(timeout=5);assert ui.returncode==0
   print('Native recovery controls started a bounded hung-bus retry while other controls stayed responsive; timeout remained nonfatal',flush=True)
-  log.flush();log.seek(0);errors=[line for line in log.read().splitlines() if any(e in line for e in ['TypeError','ReferenceError','Cannot assign','Failed to load','SyntaxError'])];assert not errors,'QML runtime error: '+repr(errors)
+  log.flush();log.seek(0);errors=[line for line in log.read().splitlines() if any(e in line for e in ['TypeError','ReferenceError','Cannot assign','Unable to assign','Failed to load','SyntaxError','Binding loop'])];assert not errors,'QML runtime error: '+repr(errors)
   print('No real music, credentials or Plex requests were used; scoped processes stopped',flush=True)
  finally:
   if hung:hung.close()

@@ -14,6 +14,7 @@ mod playlists;
 mod proxy;
 mod queue;
 mod recovery;
+mod search;
 mod source_format;
 mod storage;
 mod vault;
@@ -43,6 +44,7 @@ enum Event {
     Advance(u64),
     StreamFailed(qoda_provider::ProviderError, bool),
     Recovery(recovery::Reply),
+    Search(search::Reply),
     Stored(storage::Reply),
     Checkpoint,
     Playlists(playlists::Reply),
@@ -382,6 +384,9 @@ fn guarded_queue_command(op: &str) -> bool {
             | "playlist_enqueue"
             | "disconnect"
             | "forget_signin"
+            | "search_play"
+            | "search_next"
+            | "search_enqueue"
             | "quit"
     )
 }
@@ -406,6 +411,7 @@ fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
             | "forget_signin"
             | "quit"
             | "set_output"
+            | "search_play"
     ) || op == "queue_remove"
         && serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
             == queue.selected()
@@ -613,6 +619,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|track| json!(track))
         .unwrap_or(Value::Null);
     state["presentation"] = mpris::View::default().presentation();
+    let mut search = search::Controller::default();
+    state["search"] = search.view();
     let (updates, rx) = watch::channel(state.clone());
     let vault = vault::start(tx.clone());
     let mut vault_generation = 0_u64;
@@ -811,6 +819,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             event
         };
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
+            && matches!(
+                request["op"].as_str(),
+                Some("search_play" | "search_next" | "search_enqueue")
+            )
+            && let Err(error) = check_queue(&queue, request)
+                .map_err(|error| error.to_string())
+                .and_then(|()| {
+                    if provider.is_some() {
+                        search
+                            .resolve(request, auth_generation)
+                            .map(|_| ())
+                            .map_err(str::to_owned)
+                    } else {
+                        Err("Connect Plex before using search results.".into())
+                    }
+                })
+        {
+            state["error"] = json!(error);
+            event = Event::Checkpoint;
+        }
         if let Event::Request(request) = &event
             && request["instance"] == instance
             && catalog::is_batch(request["op"].as_str().unwrap_or(""))
@@ -1042,6 +1072,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut force_save = false;
         let mut seeked = false;
         match event {
+            Event::Search(reply) => {
+                search.accept(reply, auth_generation)?;
+            }
             Event::StreamFailed(error, playing) => {
                 desired_playing = false;
                 if let Some(task) = prepare_task.take() {
@@ -1318,6 +1351,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     state["page"] = Value::Null;
                                     state["catalog"] = json!({"revision":catalog_revision.to_string(),"busy":false});
                                     albums.invalidate();
+                                    search.invalidate()?;
                                     artwork.revoke(false).await;
                                     state["status"] = json!(
                                         "Metadata cache clearing. Browse again to load catalog pages."
@@ -1461,6 +1495,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             updates.send_replace(state.clone());
                             continue;
                         }
+                        search.invalidate()?;
                         if let Some(task) = auth_task.take() {
                             task.abort();
                         }
@@ -1581,6 +1616,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         })();
                         if let Err(error) = result {
                             state["error"] = json!(error);
+                        }
+                    }
+                    "search_all" => {
+                        if let Some(provider) = provider.clone() {
+                            if let Err(error) = search.begin(
+                                v["query"].as_str().unwrap_or(""),
+                                auth_generation,
+                                provider,
+                                metadata.clone(),
+                                tx.clone(),
+                            ) {
+                                state["error"] = json!(error);
+                            }
+                        } else {
+                            state["error"] = json!("Connect Plex to search music libraries.");
+                        }
+                    }
+                    "search_play" | "search_next" | "search_enqueue" => {
+                        let result = check_queue(&queue, &v)
+                            .map_err(|error| error.to_string())
+                            .and_then(|()| {
+                                search.resolve(&v, auth_generation).map_err(str::to_owned)
+                            });
+                        match result {
+                            Ok(track) => {
+                                let result = match v["op"].as_str() {
+                                    Some("search_play") => queue.replace(track.clone()).map(|_| {
+                                        desired_playing = true;
+                                        to_prepare = Some(track);
+                                    }),
+                                    Some("search_next") => queue.enqueue(track, true).map(|_| ()),
+                                    _ => queue.enqueue(track, false).map(|_| ()),
+                                };
+                                if let Err(error) = result {
+                                    state["error"] = json!(error.to_string());
+                                }
+                            }
+                            Err(error) => state["error"] = json!(error),
                         }
                     }
                     "browse" => {
@@ -1977,6 +2050,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         epochs.reset()?;
                         gapless.invalidate();
                         provider = None;
+                        search.invalidate()?;
                         playlists.invalidate();
                         albums.invalidate();
                         player.send(Command::Pause(true));
@@ -2065,6 +2139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if save_identities(&ids).is_err() {
                         state["error"] = json!("Library identities could not be saved");
                     }
+                    search.invalidate()?;
                     state["libraries"] = json!(p.libraries());
                     state["status"] = json!("Choose a music library");
                     provider = Some(Arc::new(p));
@@ -2319,6 +2394,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         state["navigation"] = json!(queue.navigation_page(navigation_offset));
         state["queue"] = json!(queue.snapshot());
         state["recovery"] = json!(recovery.view);
+        state["search"] = search.view();
         state["playlists"] = json!(playlists.view);
         albums.view.covers = artwork.urls().await;
         state["albums"] = json!(albums.view);

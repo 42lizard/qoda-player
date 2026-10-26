@@ -16,7 +16,7 @@ ColumnLayout {
         actionRequested(op, {queue_session: queue.session, queue_revision: queue.revision, occurrence: queue.selected});
     }
     Label {
-        text: recovery.snapshot ? recovery.snapshot.message : ""
+        text: recovery.snapshot ? recovery.snapshot.message || "" : ""
         textFormat: Text.PlainText
         color: recovery.exhausted ? "#f2a89b" : "#a4b0a7"
         wrapMode: Text.Wrap
