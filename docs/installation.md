@@ -101,3 +101,8 @@ using a test manager adapter and a private empty backend. It verifies native
 unit/desktop syntax and never reloads or starts units in the host user manager.
 It requires `desktop-file-validate` and `systemd-analyze` in addition to the build
 dependencies. No real account, credentials, library or audio is used.
+
+The generated-unit test requires the full native Quickshell runtime because
+`systemd-analyze verify` also checks executable availability. The Qt-only CI
+image skips that native test; ownership, transactions, protocol and GIO fixtures
+remain active. The full native installer check runs separately on Omarchy.

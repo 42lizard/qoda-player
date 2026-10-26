@@ -256,11 +256,12 @@ class Installation(unittest.TestCase):
             time.sleep(.05)
         self.assertEqual(json.loads(result.read_text()), ["show"])
 
-    @unittest.skipUnless(shutil.which("systemd-analyze") and shutil.which("desktop-file-validate"), "native integration validators unavailable")
+    @unittest.skipUnless(all(shutil.which(name) for name in ["quickshell", "systemd-analyze", "desktop-file-validate"]), "full Quickshell runtime and native validators required")
     def test_native_desktop_and_unit_parsers_accept_generated_special_paths(self):
         self.install()
         subprocess.run(["desktop-file-validate", str(self.prefix / "share/applications/qoda-player.desktop")], check=True, capture_output=True)
-        subprocess.run(["systemd-analyze", "--user", "verify", *[str(self.config / name) for name in installer.EXTERNAL["config"]]], check=True, capture_output=True)
+        result = subprocess.run(["systemd-analyze", "--user", "verify", *[str(self.config / name) for name in installer.EXTERNAL["config"]]], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class ReleaseBuild(unittest.TestCase):
