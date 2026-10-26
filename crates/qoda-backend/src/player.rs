@@ -141,6 +141,12 @@ struct Entry {
     gain: Option<Applied>,
     source: Option<Format>,
 }
+#[derive(Clone, Copy)]
+struct PendingStart {
+    target: f64,
+    loaded: bool,
+    deadline: std::time::Instant,
+}
 struct Active {
     source: Format,
     sample: output::Sample,
@@ -203,6 +209,7 @@ struct Native {
     extra: Vec<(String, String)>,
     route: Option<output::Selection>,
     active: Option<Active>,
+    pending_start: Option<PendingStart>,
     future: Option<(i64, u64)>,
     ended: Option<(i64, u64)>,
     intent: Arc<AtomicBool>,
@@ -216,6 +223,7 @@ impl Native {
         }
         alsa_guard::disable();
         self.active = None;
+        self.pending_start = None;
         self.entry = None;
         self.entries.clear();
         self.future = None;
@@ -331,6 +339,30 @@ impl Native {
         {
             self.call(&["set", "pause", "yes"]);
         }
+        if let Some(start) = self.pending_start {
+            self.call(&["set", "pause", "yes"]);
+            let position = if start.loaded && self.playing() == self.entry {
+                unsafe { property::<f64>(self.h, "time-pos", 5) }
+            } else {
+                None
+            };
+            if position.is_some_and(|position| {
+                position.is_finite()
+                    && position >= start.target - 0.05
+                    && position <= start.target + 0.25
+            }) {
+                self.pending_start = None;
+                if self.intent.load(Ordering::Acquire) && self.current.error.is_none() {
+                    self.call(&["set", "pause", "no"]);
+                }
+            } else if std::time::Instant::now() >= start.deadline {
+                self.current.error = Some(
+                    "Resume position could not be verified; source may not support seeking. Playback stays paused.",
+                );
+                self.intent.store(false, Ordering::Release);
+                self.stop();
+            }
+        }
         let before = self.playing();
         let pts = unsafe { property::<f64>(self.h, "audio-pts", 5) }
             .filter(|p| p.is_finite() && *p >= 0.0);
@@ -346,9 +378,15 @@ impl Native {
             } else {
                 None
             };
-        self.current.position_seconds = if self.current.entry_ready { pts } else { None };
+        self.current.position_seconds = if self.current.entry_ready && self.pending_start.is_none()
+        {
+            pts
+        } else {
+            None
+        };
     }
     fn stop(&mut self) -> bool {
+        self.pending_start = None;
         let stopped = self.h.is_null() || self.call(&["stop"]);
         self.entry = None;
         self.entries.clear();
@@ -406,6 +444,12 @@ impl Native {
                         self.future = None;
                     }
                 }
+            }
+            if event.id == 8
+                && self.entry.is_some()
+                && let Some(start) = &mut self.pending_start
+            {
+                start.loaded = true;
             }
             if event.id == 7 && !event.data.is_null() {
                 let end = unsafe { &*event.data.cast::<EndFile>() };
@@ -485,6 +529,12 @@ impl Native {
             self.intent.store(false, Ordering::Release);
             return;
         }
+        self.call(&["set", "pause", "yes"]);
+        self.pending_start = (position > 0.0).then(|| PendingStart {
+            target: position,
+            loaded: false,
+            deadline: std::time::Instant::now() + Duration::from_secs(5),
+        });
         let options = match &gain {
             Some(gain) => format!("start={position},{}", gain.filter()),
             None => format!("start={position}"),
@@ -679,6 +729,7 @@ impl Player {
                 extra,
                 route: Some(output::Selection::Desktop),
                 active: None,
+                pending_start: None,
             };
             let _ = ready_tx.send(true);
             loop {
@@ -689,7 +740,9 @@ impl Player {
                     Ok(Command::Quit) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                     Ok(Command::Pause(p)) => {
-                        let pause = p || !native.intent.load(Ordering::Acquire);
+                        let pause = p
+                            || !native.intent.load(Ordering::Acquire)
+                            || native.pending_start.is_some();
                         if !native.h.is_null()
                             && !native.call(&["set", "pause", if pause { "yes" } else { "no" }])
                         {
@@ -741,6 +794,7 @@ impl Player {
                                 native.stop();
                             }
                             let playing = !stale
+                                && native.pending_start.is_none()
                                 && native.current.error.is_none()
                                 && native.intent.load(Ordering::Acquire);
                             if !native.h.is_null() {

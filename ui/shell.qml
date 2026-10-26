@@ -310,6 +310,14 @@ ShellRoot {
                 onRetryRequested: root.send("retry_desktop")
             }
             Label { visible: !!root.snapshot.gapless && ["review", "fallback"].includes(root.snapshot.gapless.phase); text: root.snapshot.gapless ? root.snapshot.gapless.message : ""; color: root.snapshot.gapless && root.snapshot.gapless.phase === "review" ? "#f2a89b" : "#a4b0a7"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+            StreamRecovery {
+                Layout.fillWidth: true
+                snapshot: root.snapshot.recovery || null
+                queue: root.snapshot.queue || null
+                connected: socket.connected
+                canRetry: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
+                onActionRequested: (op, fields) => root.send(op, fields)
+            }
             Label { visible: !socket.connected || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || !!root.snapshot.error; text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: "#a4b0a7"; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
             Label { visible: !!root.snapshot.error; text: root.snapshot.error || ""; color: "#f2a89b"; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
             RowLayout {

@@ -288,6 +288,10 @@ impl Queue {
             Ok(())
         }
     }
+    pub fn selected_version(&self) -> Option<&str> {
+        self.selected()
+            .and_then(|id| self.versions.get(&id).map(String::as_str))
+    }
     pub fn selected(&self) -> Option<OccurrenceId> {
         self.selected
     }

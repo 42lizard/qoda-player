@@ -268,6 +268,11 @@ impl Controller {
         if !self.matches(&plan.key, queue, epochs.current) {
             return Err("The native transition no longer matches the queue".into());
         }
+        // A failed current grant cannot be consumed as natural completion just
+        // because the decoder already selected its prefetched successor.
+        if proxy.failed().await {
+            return Ok(false);
+        }
         let (track, version, url) = plan
             .prepared
             .as_ref()
@@ -463,6 +468,55 @@ mod tests {
             );
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
+    }
+    #[tokio::test]
+    async fn failed_current_stream_does_not_consume_a_prefetched_successor() {
+        struct Interrupted;
+        impl MediaSource for Interrupted {
+            fn open(&self, _: Option<ByteRange>, _: bool) -> ProviderFuture<'_, MediaResponse> {
+                Box::pin(async { Err(ProviderError::Network) })
+            }
+        }
+        let provider = Provider::new();
+        let mut queue = provider.queue();
+        let before = serde_json::to_value(&queue).unwrap();
+        let (next, track, _) = successor(&queue).unwrap().unwrap();
+        let proxy = Proxy::start().await.unwrap();
+        let current = proxy.grant(Box::new(Interrupted)).await;
+        let url = proxy.grant_next(Box::new(Audio(wav()))).await.unwrap();
+        assert_eq!(reqwest::get(current).await.unwrap().status(), 502);
+        let mut epochs = Epochs::default();
+        epochs.reset().unwrap();
+        let next_gen = epochs.allocate().unwrap();
+        let mut controller = Controller {
+            plan: Some(Plan {
+                key: Key {
+                    session: queue.snapshot().session,
+                    owner: queue.selected().unwrap(),
+                    next,
+                    owner_gen: epochs.current,
+                    next_gen,
+                    reference: track.reference.clone(),
+                },
+                prepared: Some((track, "v1".into(), url)),
+            }),
+            ..Default::default()
+        };
+        let audio = Status {
+            generation: next_gen,
+            handoff_from: Some(epochs.current),
+            ..Default::default()
+        };
+        assert!(
+            !controller
+                .handoff(&mut queue, &mut epochs, &audio, &proxy)
+                .await
+                .unwrap()
+        );
+        assert_eq!(serde_json::to_value(&queue).unwrap(), before);
+        assert_eq!(epochs.current, 1);
+        assert!(proxy.failed().await);
+        proxy.revoke().await;
     }
     #[test]
     fn speculative_successor_is_stable_and_does_not_mutate_duplicates_modes_or_priority() {

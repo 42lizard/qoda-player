@@ -278,16 +278,20 @@ pub async fn prepare(
     provider: &dyn MusicProvider,
     request: Request,
 ) -> Result<Prepared, PrepareError> {
+    let media = provider
+        .prepare(request.reference.source, request.reference.key.clone())
+        .await
+        .map_err(PrepareError::Provider)?;
+    describe(media, request).await
+}
+// Recovery verifies pinned provider identity before reading source/tag bytes.
+pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared, PrepareError> {
     let Request {
-        reference,
         mode,
         album_session,
         fidelity,
+        ..
     } = request;
-    let media = provider
-        .prepare(reference.source, reference.key)
-        .await
-        .map_err(PrepareError::Provider)?;
     let source = if fidelity {
         Some(
             tokio::time::timeout(

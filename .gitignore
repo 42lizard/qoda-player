@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 
-/target/
+/target
 
 __pycache__/
 *.pyc

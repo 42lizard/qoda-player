@@ -7,11 +7,11 @@ use axum::{
     routing::get,
 };
 use futures_util::StreamExt;
-use qoda_provider::{ByteRange, MediaSource};
+use qoda_provider::{ByteRange, MediaSource, ProviderError};
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -21,6 +21,18 @@ struct Grant {
     source: Arc<dyn MediaSource>,
     cancel: watch::Sender<bool>,
     failed: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<ProviderError>>>,
+}
+impl Grant {
+    fn fail(&self, error: ProviderError) {
+        let mut failure = self.failure.lock().unwrap_or_else(|e| e.into_inner());
+        // Concurrent range requests must not downgrade terminal auth/missing
+        // failures to a later generic network failure.
+        if failure.is_none() || *failure == Some(ProviderError::Network) {
+            *failure = Some(error);
+        }
+        self.failed.store(true, Ordering::Release);
+    }
 }
 #[derive(Default)]
 struct Grants {
@@ -55,6 +67,14 @@ impl Proxy {
             .and_then(|id| grants.entries.get(id))
             .is_some_and(|grant| grant.failed.load(Ordering::Acquire))
     }
+    pub async fn failure(&self) -> Option<ProviderError> {
+        let grants = self.grants.read().await;
+        let grant = grants
+            .current
+            .as_ref()
+            .and_then(|id| grants.entries.get(id))?;
+        *grant.failure.lock().unwrap_or_else(|e| e.into_inner())
+    }
     pub async fn revoke(&self) {
         let mut grants = self.grants.write().await;
         for grant in grants.entries.values() {
@@ -83,6 +103,14 @@ impl Proxy {
         let mut grants = self.grants.write().await;
         if !grants.entries.contains_key(id) {
             return Err("The prepared media grant expired");
+        }
+        if grants
+            .current
+            .as_ref()
+            .and_then(|id| grants.entries.get(id))
+            .is_some_and(|grant| grant.failed.load(Ordering::Acquire))
+        {
+            return Err("Current stream failed before handoff; its occurrence remains selected.");
         }
         grants.entries.retain(|key, grant| {
             if key == id {
@@ -116,6 +144,7 @@ impl Proxy {
             Grant {
                 source: Arc::from(source),
                 failed: Arc::new(AtomicBool::new(false)),
+                failure: Arc::new(Mutex::new(None)),
                 cancel,
             },
         );
@@ -153,7 +182,7 @@ async fn media(
                 .and_then(|s| ByteRange::try_from(s).map_err(|_| StatusCode::RANGE_NOT_SATISFIABLE))
         })
         .transpose()?;
-    let response = tokio::select! {r=grant.source.open(range,method==axum::http::Method::HEAD)=>r.map_err(|_|{grant.failed.store(true,Ordering::Release);StatusCode::BAD_GATEWAY})?,_=cancel.changed()=>return Err(StatusCode::NOT_FOUND)};
+    let response = tokio::select! {r=grant.source.open(range,method==axum::http::Method::HEAD)=>r.map_err(|error|{grant.fail(error);StatusCode::BAD_GATEWAY})?,_=cancel.changed()=>return Err(StatusCode::NOT_FOUND)};
     let mut builder = Response::builder().status(response.status);
     for (k, v) in [
         ("content-type", response.content_type),
@@ -168,12 +197,11 @@ async fn media(
             builder = builder.header(k, v);
         }
     }
-    let failed = grant.failed.clone();
     let upstream = response
         .body
         .inspect(move |chunk| {
-            if chunk.is_err() {
-                failed.store(true, Ordering::Release);
+            if let Err(error) = chunk {
+                grant.fail(*error);
             }
         })
         .boxed();
@@ -232,6 +260,44 @@ mod tests {
         fn open(&self, _: Option<ByteRange>, _: bool) -> ProviderFuture<'_, MediaResponse> {
             Box::pin(async { Err(qoda_provider::ProviderError::Network) })
         }
+    }
+    struct BrokenBody;
+    impl MediaSource for BrokenBody {
+        fn open(&self, _: Option<ByteRange>, _: bool) -> ProviderFuture<'_, MediaResponse> {
+            Box::pin(async {
+                Ok(MediaResponse {
+                    status: 200,
+                    content_type: None,
+                    content_length: None,
+                    content_range: None,
+                    etag: None,
+                    body: futures_util::stream::once(async { Err(ProviderError::Network) }).boxed(),
+                })
+            })
+        }
+    }
+    #[tokio::test]
+    async fn body_failure_is_typed_and_concurrent_network_errors_do_not_mask_terminal_errors() {
+        let proxy = Proxy::start().await.unwrap();
+        let url = proxy.grant(Box::new(BrokenBody)).await;
+        if let Ok(response) = reqwest::get(&url).await {
+            let _ = response.bytes().await;
+        }
+        assert_eq!(proxy.failure().await, Some(ProviderError::Network));
+        let grant = proxy
+            .grants
+            .read()
+            .await
+            .entries
+            .values()
+            .next()
+            .unwrap()
+            .clone();
+        grant.fail(ProviderError::AccessDenied);
+        grant.fail(ProviderError::Network);
+        assert_eq!(proxy.failure().await, Some(ProviderError::AccessDenied));
+        proxy.revoke().await;
+        assert_eq!(proxy.failure().await, None);
     }
     #[tokio::test]
     async fn upstream_failure_is_visible_only_for_its_own_grant() {
@@ -351,6 +417,18 @@ mod gapless_tests {
         assert_eq!(reqwest::get(current).await.unwrap().status(), 404);
         proxy.revoke().await;
         assert_eq!(reqwest::get(next).await.unwrap().status(), 404);
+    }
+    #[tokio::test]
+    async fn failed_current_grant_cannot_be_discarded_by_successor_promotion() {
+        let proxy = Proxy::start().await.unwrap();
+        let current = proxy.grant(Box::new(Source(true))).await;
+        let next = proxy.grant_next(Box::new(Source(false))).await.unwrap();
+        assert_eq!(reqwest::get(&current).await.unwrap().status(), 502);
+        assert!(proxy.promote(&next).await.is_err());
+        assert!(proxy.failed().await);
+        assert_eq!(proxy.failure().await, Some(ProviderError::Network));
+        assert_eq!(reqwest::get(current).await.unwrap().status(), 502);
+        proxy.revoke().await;
     }
     #[tokio::test]
     async fn cancelling_only_future_keeps_current_access_and_allows_one_replacement() {

@@ -38,6 +38,7 @@ HOOKS = """
         function capture(path: string): void { fullFrame.grabToImage(result => result.saveToFile(path)); }
         function captureQueue(path: string): void { queuePane.grabToImage(result => result.saveToFile(path)); }
         function closeQueue(): void { queueDrawer.close(); }
+        function recoveryFixture(): void { const next = Object.assign({}, root.snapshot); next.recovery = {phase: "exhausted", attempts: 2, limit: 2, message: "Connection interrupted; recovery stopped. Retry or Skip explicitly."}; root.snapshot = next; root.audioExpanded = false; }
 """
 
 
@@ -201,6 +202,9 @@ def check(output=None):
                 ipc("resize", 540, 760)
                 time.sleep(0.15)
                 capture("audio-small")
+                ipc("recoveryFixture")
+                time.sleep(0.15)
+                capture("recovery-small")
                 assert state["intent"] == "paused"
                 assert all(request["op"] == "hello" for request in requests), requests
                 log.flush()

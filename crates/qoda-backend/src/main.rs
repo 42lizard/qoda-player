@@ -13,6 +13,7 @@ mod player;
 mod playlists;
 mod proxy;
 mod queue;
+mod recovery;
 mod source_format;
 mod storage;
 mod vault;
@@ -40,6 +41,8 @@ enum Event {
     DesktopReady(Result<mpris::Service, ()>),
     UiPeer(uuid::Uuid, bool),
     Advance(u64),
+    StreamFailed(qoda_provider::ProviderError, bool),
+    Recovery(recovery::Reply),
     Stored(storage::Reply),
     Checkpoint,
     Playlists(playlists::Reply),
@@ -284,8 +287,9 @@ async fn finish_gapless_reset(
     presented: &mut Option<u64>,
     proxy: &proxy::Proxy,
 ) -> Result<(), String> {
+    let stream_failed = proxy.failed().await;
     let promoted = gapless.handoff(queue, epochs, before, proxy).await;
-    record_clock(queue, before, epochs.current, presented, false);
+    record_clock(queue, before, epochs.current, presented, stream_failed);
     gapless.invalidate();
     proxy.revoke().await;
     epochs.reset().map_err(str::to_owned)?;
@@ -640,6 +644,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut auth_generation, mut browse_generation) = (0_u64, 0_u64);
     let mut epochs = gapless::Epochs::default();
     let mut gapless = gapless::Controller::default();
+    let mut recovery = recovery::Controller::default();
+    state["recovery"] = json!(recovery.view);
     state["gapless"] = json!(gapless.view);
     let mut desired_playing = false;
     let mut automatic_preparation = None;
@@ -689,14 +695,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(true) => { gapless_changed=true; state["selection"]=queue.selected().and_then(|id|queue.visible_track(id).ok()).map(|track|json!(track)).unwrap_or(Value::Null); handled_end=None; },
                     Ok(false) if audio.generation<=epochs.current => {},
                     result => {
+                        if !proxy.failed().await {
                         desired_playing=false;
                         if let Ok(before)=player.barrier().await {let _=finish_gapless_reset(&mut gapless,&mut queue,&mut epochs,&before,&mut presented_generation,&proxy).await;}
                         else {gapless.invalidate();proxy.revoke().await;epochs.reset()?;gapless.review();}
                         state["error"]=json!(result.err().unwrap_or_else(||"An unbound native transition was reset; review the selected occurrence.".into()));
                         state["intent"]=json!("paused");gapless_changed=true;
+                        }
                     },
                 }
                 let stream_failed=proxy.failed().await;
+                let interrupted = stream_failed && !last_stream_failed && alsa_guard::error().is_none();
+                let interrupted_playing = desired_playing;
                 let observed_at=std::time::Instant::now();
                 desktop_clock.observe(&audio,observed_at);
                 let clock_stale=desktop_clock.stale(&audio,observed_at);
@@ -724,7 +734,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     updates.send_replace(state.clone());
                     if let Some(desktop) = &mut desktop { desktop.publish(view); }
                 }
-                if audio.generation==epochs.current && audio.idle && audio.natural_eof && handled_end!=Some(epochs.current) && audio.error.is_none() && !stream_failed {
+                if interrupted {
+                    Event::StreamFailed(proxy.failure().await.unwrap_or(qoda_provider::ProviderError::Network), interrupted_playing)
+                } else if audio.generation==epochs.current && audio.idle && audio.natural_eof && handled_end!=Some(epochs.current) && audio.error.is_none() && !stream_failed {
                     handled_end=Some(epochs.current);
                     Event::Advance(epochs.current)
                 } else if presentation_changed || gapless_changed || state["queue"]["selected"]!=json!(queue.selected()) {Event::Checkpoint} else {continue}
@@ -807,6 +819,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state["error"] = json!(error);
             event = Event::Checkpoint;
         }
+        if let Event::Request(request) = &mut event
+            && request["instance"] == instance
+            && matches!(request["op"].as_str(), Some("retry_stream" | "skip_stream"))
+        {
+            if recovery.view.phase != "exhausted"
+                || check_queue(&queue, request).is_err()
+                || serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
+                    != queue.selected()
+            {
+                state["error"] = json!("Recovery selection changed; review the current queue.");
+                event = Event::Checkpoint;
+            } else {
+                request["op"] = json!(if request["op"] == "retry_stream" {
+                    "play"
+                } else {
+                    "next"
+                });
+            }
+        }
         // Reject stale/invalid path rows before cancelling any speculative output.
         if let Event::Request(request) = &event
             && request["instance"] == instance
@@ -873,6 +904,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     event = Event::Checkpoint;
                 }
             }
+        }
+        if let Event::Request(request) = &event
+            && request["instance"] == instance
+            && (guarded_queue_command(request["op"].as_str().unwrap_or(""))
+                || request["op"] == "pause")
+            && (request.get("queue_session").is_none() || check_queue(&queue, request).is_ok())
+            && recovery.cancel()
+        {
+            desired_playing = false;
+            player.send(Command::Pause(true));
+            player.send(Command::Stop);
+            epochs.reset()?;
+            player.invalidate_load(epochs.current);
+            gapless.invalidate();
+            proxy.revoke().await;
+            presented_generation = None;
+            state["audio"] = Value::Null;
+            state["intent"] = json!("paused");
+            state["status"] = json!("Recovery cancelled; resume explicitly.");
         }
         if let Event::Request(request) = &event
             && request["instance"] == instance
@@ -957,11 +1007,95 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap_or(Event::Checkpoint);
             }
         }
+        if let Event::Recovery(reply) = event {
+            let generation = reply.key.generation;
+            if !recovery.owns(reply.key) {
+                event = Event::Checkpoint;
+            } else if !reply.key.matches(&queue, auth_generation, epochs.current) {
+                recovery.cancel();
+                event = Event::Checkpoint;
+            } else {
+                event = match recovery.accept(reply) {
+                    Some((playing, Ok(prepared))) => {
+                        desired_playing = playing;
+                        state["error"] = Value::Null;
+                        Event::Media(generation, Ok(prepared))
+                    }
+                    Some((_, Err(error))) => {
+                        desired_playing = false;
+                        state["intent"] = json!("paused");
+                        state["error"] = json!(error.message());
+                        state["status"] = json!("Recovery exhausted; Retry or Skip explicitly.");
+                        if let Some(reason) = error.reason()
+                            && let Some(id) = queue.selected()
+                        {
+                            let _ = queue.mark_unavailable(id, reason);
+                        }
+                        Event::Checkpoint
+                    }
+                    None => Event::Checkpoint,
+                };
+            }
+        }
         let mut to_prepare = None;
         let mut automatic_next = false;
         let mut force_save = false;
         let mut seeked = false;
         match event {
+            Event::StreamFailed(error, playing) => {
+                desired_playing = false;
+                if let Some(task) = prepare_task.take() {
+                    task.abort();
+                }
+                automatic_preparation = None;
+                let _ = player.barrier().await;
+                gapless.invalidate();
+                proxy.revoke().await;
+                epochs.reset()?;
+                player.invalidate_load(epochs.current);
+                presented_generation = None;
+                state["audio"] = Value::Null;
+                state["intent"] = json!("paused");
+                if let (Some(provider), Some(key), Some(version), Some(track)) = (
+                    provider.clone(),
+                    recovery::Key::capture(&queue, auth_generation, epochs.current),
+                    queue.selected_version().map(str::to_owned),
+                    queue.selected().and_then(|id| queue.visible_track(id).ok()),
+                ) {
+                    if let Some(reason) = queue::Unavailable::from_provider(error) {
+                        let _ = queue.mark_unavailable(queue.selected().unwrap(), reason);
+                    }
+                    recovery.begin(
+                        recovery::Work {
+                            key,
+                            version,
+                            playing,
+                            failure: error,
+                            request: gain::Request {
+                                reference: track.reference,
+                                mode: gain_settings.mode,
+                                album_session: queue.album_gain_eligible(),
+                                fidelity: output_settings
+                                    .selection
+                                    .as_ref()
+                                    .is_some_and(output::Selection::fidelity),
+                            },
+                        },
+                        provider,
+                        tx.clone(),
+                    );
+                    state["error"] = if recovery.view.phase == "recovering" {
+                        Value::Null
+                    } else {
+                        json!(error.to_string())
+                    };
+                    state["status"] = json!(recovery.view.message);
+                } else {
+                    state["error"] = json!(
+                        "Stream interrupted without a pinned recovery target; retry explicitly."
+                    );
+                }
+            }
             Event::Gapless(reply) => {
                 let unavailable = gapless.unavailable_reply(&reply, &queue, &epochs);
                 if let Err(error) = gapless.ready(reply, &queue, &epochs, &player, &proxy).await {
@@ -2097,6 +2231,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             _ => continue,
         }
+        // A normal queue visit gets a fresh recovery budget; recovery reloads
+        // enter Event::Media directly and retain the existing budget.
+        if to_prepare.is_some() {
+            recovery.cancel();
+        }
         if let Some(track) = to_prepare.as_ref()
             && provider.is_none()
         {
@@ -2179,6 +2318,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         state["navigation"] = json!(queue.navigation_page(navigation_offset));
         state["queue"] = json!(queue.snapshot());
+        state["recovery"] = json!(recovery.view);
         state["playlists"] = json!(playlists.view);
         albums.view.covers = artwork.urls().await;
         state["albums"] = json!(albums.view);
