@@ -43,25 +43,18 @@ BarWidget {
         value: ({background: Commons.Color.background, foreground: Commons.Color.foreground, accent: Commons.Color.accent, urgent: Commons.Color.urgent})
     }
     Qoda.WidgetClient { id: client }
-    Item {
-        anchors.centerIn: parent
-        width: 22; height: 22
-        opacity: client.connected ? 1 : 0.55
-        readonly property color ink: root.bar ? root.bar.barForeground : Commons.Color.foreground
-        Rectangle { x: 5; y: 4; width: 2; height: 13; color: parent.ink; antialiasing: true }
-        Rectangle { x: 15; y: 2; width: 2; height: 13; color: parent.ink; antialiasing: true }
-        Rectangle { x: 5; y: 4; width: 12; height: 3; rotation: -10; transformOrigin: Item.TopLeft; color: parent.ink; antialiasing: true }
-        Rectangle { x: 0; y: 14; width: 7; height: 5; radius: 3; rotation: -15; color: parent.ink; antialiasing: true }
-        Rectangle { x: 10; y: 12; width: 7; height: 5; radius: 3; rotation: -15; color: parent.ink; antialiasing: true }
-        Rectangle { x: 19; y: 18; width: 4; height: 4; radius: 2; color: Commons.Color.accent; visible: client.connected && client.playing }
-    }
     WidgetButton {
         id: iconButton
         objectName: "qodaWidgetButton"
         anchors.fill: parent
         bar: root.bar
-        hasVisualContent: true
-        labelVisible: false
+        text: "\uf001"
+        Rectangle {
+            anchors { right: parent.right; bottom: parent.bottom; rightMargin: 3; bottomMargin: 3 }
+            width: 3; height: 3; radius: 1.5
+            color: Commons.Color.accent
+            visible: client.connected && client.playing
+        }
         tooltipText: "Qoda Player · click for controls"
         onPressed: button => { if (button === Qt.LeftButton) root.toggle(); }
     }
