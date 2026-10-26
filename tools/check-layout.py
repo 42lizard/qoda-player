@@ -31,15 +31,17 @@ Item {
 }
 """
 HOOKS = """
+        property string captureDone: ""
+        function captureStatus(): string { return captureDone; }
         function resize(w: int, h: int): void {
             window.contentItem.Window.window.width = w;
             window.contentItem.Window.window.height = h;
         }
-        function capture(path: string): void { fullFrame.grabToImage(result => result.saveToFile(path)); }
-        function captureSettings(path: string): void { settingsSheet.contentItem.grabToImage(result => result.saveToFile(path)); }
+        function capture(path: string): void { captureDone = ""; fullFrame.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
+        function captureSettings(path: string): void { captureDone = ""; settingsSheet.contentItem.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function settingsGeometry(): string { function walk(item) { return {type: String(item), x:item.x,y:item.y,w:item.width,h:item.height,ih:item.implicitHeight,visible:item.visible,children:(item.children || []).map(walk)}; } return JSON.stringify(walk(settingsSheet.contentItem)); }
         function closeSettings(): void { root.closeSettings(); }
-        function captureQueue(path: string): void { queuePane.grabToImage(result => result.saveToFile(path)); }
+        function captureQueue(path: string): void { captureDone = ""; queuePane.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function closeQueue(): void { queueDrawer.close(); }
         function queueDragStart(id: string): bool { queueTabs.currentIndex = 0; return queueReorder.begin(id); }
         function queueDragDrop(id: string, after: bool): bool { return queueReorder.propose(id, after) && queueReorder.finish(true); }
@@ -63,6 +65,15 @@ HOOKS = """
             root.snapshot = next;
         }
 
+        function libraryFixture(): void {
+            const next = Object.assign({}, root.snapshot);
+            next.libraries = [{id: "fixture", title: "Music", server: "Home library"}, {id: "sameprefix-A", title: "Music", server: "Studio library"}, {id: "sameprefix-B", title: "Music", server: "Studio library"}];
+            root.snapshot = next; root.libraryModel = next.libraries;
+            root.libraryId = ""; libraryTabs.currentIndex = 2; root.libraryId = "fixture";
+        }
+        function openLibraries(): void { libraryPicker.children.find(item => item.objectName === "libraryCombo").popup.open(); }
+        function captureLibraries(path: string): void { captureDone = ""; libraryPicker.children.find(item => item.objectName === "libraryCombo").popup.contentItem.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
+        function chooseLibrary(source: string): void { libraryPicker.chosen(source); }
         function scrollRail(): void { railScroll.contentItem.contentY = Math.max(0, railScroll.contentHeight - railScroll.availableHeight); }
         function conversionFixture(): void {
             const next = Object.assign({}, root.snapshot);
@@ -182,12 +193,12 @@ def check(output=None):
                         time.sleep(0.05)
                     raise AssertionError("UI state did not settle: " + repr(value))
 
-                def capture(label, queue=False, settings=False):
+                def capture(label, queue=False, settings=False, libraries=False):
                     path = output / (label + ".png")
                     path.unlink(missing_ok=True)
-                    ipc("captureSettings" if settings else "captureQueue" if queue else "capture", path)
+                    ipc("captureLibraries" if libraries else "captureSettings" if settings else "captureQueue" if queue else "capture", path)
                     for _ in range(50):
-                        if path.exists() and path.stat().st_size > 0:
+                        if ipc("captureStatus") == str(path) and path.exists() and path.stat().st_size > 0:
                             return
                         time.sleep(0.05)
                     log.flush(); log.seek(0)
@@ -334,7 +345,25 @@ def check(output=None):
                 capture("playlist-drag-small")
                 assert len([request for request in requests if request["op"] == "queue_move"]) == 1
                 assert len([request for request in requests if request["op"] == "playlist_edit"]) == 1
-                assert all(request["op"] in ["hello", "queue_move", "playlist_edit"] for request in requests), requests
+                before_library = len(requests)
+                ipc("libraryFixture")
+                ipc("openLibraries")
+                wait_for(lambda value: value["libraryPicker"]["open"])
+                capture("library-choices-small", libraries=True)
+                ipc("showSearch")
+                wait_for(lambda value: value["searchFocused"] and not value["libraryPicker"]["open"])
+                ipc("libraryFixture")
+                ipc("chooseLibrary", "sameprefix-B")
+                chosen = wait_for(lambda value: value["libraryPicker"]["source"] == "sameprefix-B")
+                assert chosen["libraryPicker"]["label"] == "Music · Studio library · sameprefix-B"
+                deadline = time.monotonic() + 3
+                while len(requests) < before_library + 1:
+                    assert time.monotonic() < deadline
+                    time.sleep(0.01)
+                assert [request["op"] for request in requests[before_library:]] == ["album_list"]
+                assert requests[-1]["source"] == "sameprefix-B"
+                capture("library-selected-small")
+                assert all(request["op"] in ["hello", "queue_move", "playlist_edit", "album_list"] for request in requests), requests
                 log.flush()
                 log.seek(0)
                 errors = [line for line in log.read().splitlines() if any(text in line for text in
@@ -344,6 +373,7 @@ def check(output=None):
                 print("Wide/narrow/small full-window rendering, queue drawer, Previous viewport and retained browser/queue state passed")
                 print("Settings retained browser space; narrow content bounds and delayed Search focus passed")
                 print("Production queue/playlist drag wiring preserved frozen fences and backend-owned order; stale/restricted moves refused")
+                print("Source-labelled duplicate libraries, popup dismissal/Search focus and one-source browse without playback passed")
                 print("Fictional socket only; no backend, credentials, Plex, audio or compositor changes")
                 if output != base / "captures":
                     print("Captures: " + str(output))
