@@ -1,6 +1,8 @@
 # Plex playback reporting contract
 
-Researched 2026-10-26 for #26. **Keep live reporting disabled pending #16.** This
+Researched 2026-10-26 for #26. The original recommendation was to keep live
+reporting disabled pending #16; subsequent [scoped live qualification and current
+implementation](../plex-reporting.md) supersede that implementation gate. This
 note used public first-party documentation and source only; no user server,
 credentials, playback, history mutation or API request was exercised.
 

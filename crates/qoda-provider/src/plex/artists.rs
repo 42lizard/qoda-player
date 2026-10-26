@@ -184,6 +184,7 @@ mod tests {
         });
         let source = SourceId::new();
         let provider = PlexProvider {
+            timeline_capabilities: Default::default(),
             account_scope: "a".repeat(64),
             unavailable_sources: HashSet::new(),
             unavailable_servers: 0,

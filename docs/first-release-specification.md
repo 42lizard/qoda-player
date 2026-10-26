@@ -104,7 +104,7 @@ recorded when resolving #45.
 | ReplayGain/native gapless | Native FLAC extraction and 36 named player-side WAV/FLAC gain/transition cases. | Other embedded containers #30. Final named-device PCM/profile/continuity claims from #27 remain unverified and excluded. |
 | Optional converted output | SoXR VHQ, explicit plans and precision/layout policies. | Continuous converted DSP state across boundaries #41; do not call reset/transient behavior transparent. |
 | Recovery | Bounded pinned-version/visit recovery with synthetic native position checks. | Owned-server interruption/permission behavior #16. |
-| Plex listening/reporting | [Typed provider transport and bounded nominal observer](plex-reporting.md), with fake-provider/HTTP tests; preparation is excluded. Both production dispatch gates remain off. | Controlled live contract/history validation #16 before enabling or resolving #26. |
+| Plex listening/reporting | [Typed provider transport and bounded nominal observer](plex-reporting.md), with fake-provider/HTTP tests and scoped live pause/resume/stop/duplicate-handoff qualification; preparation is excluded. | Broader owned-server cases #16. No played-state/history synchronization claim. |
 | History | Bounded Previous path is implemented and separate from a complete archive. | Complete nominal history, retention/export/migration/privacy contract and storage #32. |
 | Lifecycle/install | Ownership/rollback fixtures, installed launcher stubs, native process shutdown, private-bus activation, native widget and UI fixtures; software increment #45 complete. | In-use updates/rollback #46. Actual installed manager/logout/crash behavior remains unqualified and excluded from supported claims. |
 | Physical/hardware claims | Explicitly separated from digital/sample and IPC-driven evidence. | #18/#27, outside the accepted narrower first-release claim. |
@@ -117,7 +117,7 @@ commits and CI/measurement records live in the linked issues and topic documents
 
 The [implementation queue](implementation-roadmap.md) maps #21 and #23–#30 to their
 focused follow-ups. #28 groups offline startup (implemented #31), history #32 and
-packaging #33. Remaining software work includes #26/#30/#32/#41/#46; the support
+packaging #33. Remaining software work includes #30/#32/#41/#46; the support
 proposal does not cancel it. #45's remaining real-manager qualification is separate
 from its implemented shutdown and activation changes.
 

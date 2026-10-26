@@ -846,8 +846,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     account:auth_generation,generation:epochs.current,confirmed:presented_generation,
                     failed_or_stale:stream_failed || clock_stale,
                 }),observed_at);
+                let reporting_view=reporting.view();
+                let reporting_changed=state["reporting"]!=reporting_view;
+                state["reporting"]=reporting_view;
                 let mut presentation_changed=false;
-                if audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale {
+                if audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale || reporting_changed {
                     last_stream_failed=stream_failed;
                     last_clock_stale=clock_stale;
                     presentation_changed=record_clock(&mut queue,&audio,epochs.current,&mut presented_generation,stream_failed);

@@ -1,8 +1,18 @@
 # Controlled live reporting qualification plan
 
-Prepared for #16/#26; **not executed**. The production reporting gates stay off.
-This is a proposal for a deliberately selected disposable Plex fixture, not
-authorization to play arbitrary library music or mutate listening history.
+Historical plan for #16/#26. **Executed for the scoped owned-server baseline.**
+The user delegated selection while requiring the item remain intact. The initial
+two runs were followed by separately bounded duplicate-handoff, diagnostic and
+cache-verification runs on the same uniquely reidentified 19,737 ms item. All
+runs stayed below their 60-second watchdog. Production timeline activation is
+recorded in [the current implementation scope](plex-reporting.md).
+
+[Initial evidence and subsequent retained cases](https://github.com/42lizard/qoda-player/tree/e3af727/prototypes/plex-reporting)
+include the incomplete early successor observation as well as the later timing
+diagnosis and successful cache verification. No track was deleted, no scrobble or
+metadata edit was sent, and no metadata/history change was observed. The original
+bounded proposal below is retained for context; it is not a claim that broader
+live acceptance or additional test authorization follows automatically.
 
 ## Required test subject
 

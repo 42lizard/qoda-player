@@ -229,7 +229,6 @@ impl Drop for Dispatch {
     }
 }
 pub struct Controller {
-    enabled: bool,
     account: u64,
     provider: Option<Arc<dyn MusicProvider>>,
     tracker: Tracker,
@@ -241,12 +240,9 @@ pub struct Controller {
 }
 impl Controller {
     pub fn new() -> Self {
-        // Deliberate build-time gate. #16 must qualify real history effects.
-        Self::with_policy(false)
-    }
-    fn with_policy(enabled: bool) -> Self {
+        // Owned-server timeline/session contract qualified under #16/#26.
+        // Scrobble and unverified history/completion effects are separate.
         Self {
-            enabled,
             account: 0,
             provider: None,
             tracker: Tracker::default(),
@@ -275,9 +271,7 @@ impl Controller {
         self.congested = false;
         self.account = account;
         self.provider = provider;
-        if self.enabled
-            && let Some(provider) = &self.provider
-        {
+        if let Some(provider) = &self.provider {
             self.dispatch = Some(Dispatch::new(provider.clone(), self.serial.clone()));
         }
     }
@@ -297,8 +291,7 @@ impl Controller {
                 self.congested = true;
             }
             self.dispatch = None;
-            if self.enabled
-                && !self.congested
+            if !self.congested
                 && let Some(provider) = &self.provider
             {
                 self.dispatch = Some(Dispatch::new(provider.clone(), self.serial.clone()));
@@ -320,7 +313,7 @@ impl Controller {
         }
     }
     pub fn observe(&mut self, observation: Observation, now: Instant) {
-        if !self.enabled || self.congested || self.provider.is_none() {
+        if self.congested || self.provider.is_none() {
             return;
         }
         if let Some(sample) = observation.0
@@ -388,9 +381,7 @@ impl Controller {
         self.dispatch = None;
     }
     pub fn view(&self) -> serde_json::Value {
-        let state = if !self.enabled {
-            "disabled_pending_live_qualification"
-        } else if self.congested {
+        let state = if self.congested {
             "suspended"
         } else if let Some(dispatch) = &self.dispatch {
             *dispatch.status.borrow()

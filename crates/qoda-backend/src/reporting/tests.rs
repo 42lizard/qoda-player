@@ -245,26 +245,28 @@ async fn pump() {
     }
 }
 fn enabled(fake: Arc<Fake>) -> Controller {
-    let mut controller = Controller::with_policy(true);
+    let mut controller = Controller::new();
     controller.bind(1, Some(fake));
     controller
 }
 
 #[tokio::test]
-async fn public_controller_is_disabled_even_with_a_provider_and_confirmed_clock() {
+async fn default_controller_reports_only_after_binding_and_a_positive_clock() {
     let fake = Arc::new(Fake::default());
     let mut controller = Controller::new();
+    let k = key();
+    let now = Instant::now();
+    controller.observe(Observation(Some(sample(k.clone(), 1250, false))), now);
+    assert_eq!(controller.view()["state"], "disconnected");
     controller.bind(1, Some(fake.clone()));
-    controller.observe(
-        Observation(Some(sample(key(), 1250, false))),
-        Instant::now(),
-    );
+    controller.observe(Observation(None), now);
+    controller.observe(Observation(Some(sample(k.clone(), 1250, true))), now);
     pump().await;
     assert!(fake.calls.lock().unwrap().is_empty());
-    assert_eq!(
-        controller.view()["state"],
-        "disabled_pending_live_qualification"
-    );
+    controller.observe(Observation(Some(sample(k, 1250, false))), now);
+    pump().await;
+    assert_eq!(fake.calls.lock().unwrap().len(), 1);
+    assert_eq!(controller.view()["state"], "accepted");
 }
 
 #[tokio::test]
