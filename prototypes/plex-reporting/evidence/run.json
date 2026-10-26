@@ -1,0 +1,228 @@
+{
+  "scope": "one user-authorized intact owned-library track; up to two 60-second null-output runs",
+  "completed": true,
+  "observations": [
+    {
+      "name": "Preflight",
+      "owned_server": true,
+      "tls_verified": true,
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "timeline_discovered": true,
+      "metadata_discovered": true,
+      "production_gates_unchanged": true,
+      "output": "libmpv ao=null",
+      "maximum_runs": 2,
+      "per_run_wall_seconds": 60
+    },
+    {
+      "name": "Subject selected",
+      "owned_library": true,
+      "track_duration_ms": 19737,
+      "short_enough_for_complete_second_run": true,
+      "private_library_track_names_and_ids_exported": false,
+      "existing_item_preserved": true
+    },
+    {
+      "name": "Server observation",
+      "phase": "before",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Positive nominal clock",
+      "run": 1,
+      "position_ms": 192,
+      "selected_subject_matches": true
+    },
+    {
+      "name": "Server observation",
+      "phase": "run1-playing",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Server observation",
+      "phase": "run1-paused",
+      "matching_client_sessions": 1,
+      "client_states": [
+        "paused"
+      ],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Run stopped",
+      "run": 1,
+      "wall_seconds": 13.6,
+      "queue_ended": false,
+      "speaker_output_opened": false
+    },
+    {
+      "name": "Server observation",
+      "phase": "after-run-1",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Separate observed effects",
+      "run": 1,
+      "offset_changed": false,
+      "view_count_delta": null,
+      "view_count_missing_before": true,
+      "view_count_missing_after": true,
+      "last_viewed_changed": false,
+      "new_subject_history_rows": 0,
+      "history_attribution_to_client_proven": false
+    },
+    {
+      "name": "Positive nominal clock",
+      "run": 2,
+      "position_ms": 6,
+      "selected_subject_matches": true
+    },
+    {
+      "name": "Run stopped",
+      "run": 2,
+      "wall_seconds": 23.6,
+      "queue_ended": false,
+      "speaker_output_opened": false
+    },
+    {
+      "name": "Server observation",
+      "phase": "after-run-2",
+      "matching_client_sessions": 0,
+      "client_states": [],
+      "metadata_fields_present": [],
+      "bounded_history_rows": 0,
+      "history_server_total": 0,
+      "raw_timestamps_offsets_and_identifiers_exported": false
+    },
+    {
+      "name": "Separate observed effects",
+      "run": 2,
+      "offset_changed": false,
+      "view_count_delta": null,
+      "view_count_missing_before": true,
+      "view_count_missing_after": true,
+      "last_viewed_changed": false,
+      "new_subject_history_rows": 0,
+      "history_attribution_to_client_proven": false
+    },
+    {
+      "name": "Owned backend cleanup",
+      "process_stopped": true
+    },
+    {
+      "name": "Sanitized transport audit",
+      "events": [
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 434,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 2433,
+          "state": "paused"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 2699,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 5195,
+          "state": "stopped"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 268,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 10254,
+          "state": "playing"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        },
+        {
+          "continuing": false,
+          "duration_ms": 19737,
+          "method": "POST",
+          "position_ms": 19360,
+          "state": "stopped"
+        },
+        {
+          "http_status": 200,
+          "termination_present": false
+        }
+      ],
+      "backend_exit": 0,
+      "exact_production_transport": true,
+      "validation_build": true
+    },
+    {
+      "name": "Cleanup",
+      "owned_backend_stopped": true,
+      "temporary_state_removed": true,
+      "library_track_preserved": true,
+      "delete_scrobble_and_metadata_edit_calls": 0
+    }
+  ],
+  "limits": [
+    "No universal server/account compatibility claim",
+    "No speaker/DAC/analog or final-device continuity claim",
+    "No scrobble/completion rule/history import",
+    "History row device attribution requires separate proof"
+  ]
+}

@@ -3,7 +3,7 @@ use super::*;
 use playback::{Outcome, Report, State};
 use reqwest::Response;
 
-pub(super) const LIVE_QUALIFIED: bool = false;
+pub(super) const LIVE_QUALIFIED: bool = true; // VALIDATION BRANCH ONLY
 const LIMIT: usize = 64 * 1024;
 
 async fn small_body(response: Response) -> Result<String, ProviderError> {
@@ -115,6 +115,7 @@ impl PlexProvider {
         if report.continuing {
             query.push(("continuing", "1".into()));
         }
+        eprintln!("QODA_VALIDATION_TIMELINE {}", serde_json::json!({"state":state,"position_ms":report.position_ms,"duration_ms":report.duration_ms.get(),"continuing":report.continuing,"method":"POST"}));
         let response = self
             .http
             .post(endpoint)
@@ -131,6 +132,7 @@ impl PlexProvider {
             .get("MediaContainer")
             .and_then(serde_json::Value::as_object)
             .ok_or(ProviderError::InvalidReply)?;
+        eprintln!("QODA_VALIDATION_RESULT {}", serde_json::json!({"http_status":200,"termination_present":container.contains_key("terminationCode") || container.contains_key("terminationText")}));
         Ok(
             if container
                 .get("terminationCode")

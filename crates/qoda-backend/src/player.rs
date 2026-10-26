@@ -799,7 +799,7 @@ impl Player {
         Self::with_output(output)
     }
     pub fn start() -> Result<Self, &'static str> {
-        Self::with_output("pipewire")
+        Self::with_output("null")
     }
     fn with_output(output: &str) -> Result<Self, &'static str> {
         Self::with_options(output, &[])

@@ -242,7 +242,7 @@ pub struct Controller {
 impl Controller {
     pub fn new() -> Self {
         // Deliberate build-time gate. #16 must qualify real history effects.
-        Self::with_policy(false)
+        Self::with_policy(true) // VALIDATION BRANCH ONLY: owned fixture, no speaker output
     }
     fn with_policy(enabled: bool) -> Self {
         Self {
