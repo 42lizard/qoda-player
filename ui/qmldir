@@ -1,0 +1,23 @@
+singleton Theme 1.0 Theme.qml
+AlbumBrowser 1.0 AlbumBrowser.qml
+ArtistBrowser 1.0 ArtistBrowser.qml
+AudioSettings 1.0 AudioSettings.qml
+CompactPlayer 1.0 CompactPlayer.qml
+DesktopControls 1.0 DesktopControls.qml
+LibraryPicker 1.0 LibraryPicker.qml
+NavigationBrowser 1.0 NavigationBrowser.qml
+OmarchyTheme 1.0 OmarchyTheme.qml
+OutputPresentation 1.0 OutputPresentation.qml
+PlayerTransport 1.0 PlayerTransport.qml
+ReorderDrop 1.0 ReorderDrop.qml
+ReorderHandle 1.0 ReorderHandle.qml
+ReorderScroll 1.0 ReorderScroll.qml
+ReorderState 1.0 ReorderState.qml
+SearchBrowser 1.0 SearchBrowser.qml
+SettingsSheet 1.0 SettingsSheet.qml
+StreamRecovery 1.0 StreamRecovery.qml
+TrackRow 1.0 TrackRow.qml
+TrackSelection 1.0 TrackSelection.qml
+UiRequests 1.0 UiRequests.qml
+UnavailableBrowser 1.0 UnavailableBrowser.qml
+ThemedControl 1.0 ThemedControl.qml

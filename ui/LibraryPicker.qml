@@ -54,9 +54,9 @@ ColumnLayout {
             padding: 1; margins: 12; focus: true
             palette: combo.palette
             onClosed: picker.dismissed()
-            background: Rectangle { color: "#191f1c"; border.color: "#53634f"; radius: 5 }
+            background: Rectangle { color: Theme.surface; border.color: Theme.border; radius: 5 }
             contentItem: Rectangle {
-                color: "#191f1c"
+                color: Theme.surface
                 implicitHeight: Math.min(sourceChoices.contentHeight, picker.Window.window ? Math.max(80, picker.Window.window.height - 80) : 320)
                 ListView {
                     id: sourceChoices
@@ -76,12 +76,12 @@ ColumnLayout {
             highlighted: combo.highlightedIndex === index
             required property int index
             Accessible.name: picker.label(modelData)
-            background: Rectangle { color: parent.highlighted ? "#303f32" : parent.hovered ? "#242e27" : "#191f1c" }
+            background: Rectangle { color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.button : Theme.surface }
             contentItem: ColumnLayout {
                 id: details
                 spacing: 3
-                Label { text: picker.title(modelData); font.bold: true; color: "#e8eee8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0 }
-                Label { text: picker.caption(modelData); color: "#a4b0a7"; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                Label { text: picker.title(modelData); font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+                Label { text: picker.caption(modelData); color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.minimumWidth: 0 }
             }
         }
     }
@@ -90,7 +90,7 @@ ColumnLayout {
         Layout.minimumWidth: 0
         text: picker.selected && picker.suffix(picker.selected) ? picker.suffix(picker.selected) + "\n" + picker.server(picker.selected) : picker.caption(picker.selected)
         font.pixelSize: 12
-        color: "#a4b0a7"; textFormat: Text.PlainText
+        color: Theme.muted; textFormat: Text.PlainText
         wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
         ToolTip.visible: sourceHover.hovered; ToolTip.text: picker.label(picker.selected)
         HoverHandler { id: sourceHover }

@@ -19,7 +19,7 @@ Rectangle {
     signal transportRequested(string op)
     signal queueRequested(string op)
     signal seekRequested(real seconds)
-    color: "#1c251e"
+    color: Theme.surface
     radius: 8
     implicitHeight: body.implicitHeight + 24
 
@@ -37,11 +37,11 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredWidth: 230
             spacing: 3
-            Label { text: transport.track ? transport.track.title : "Choose something to play"; color: "#e8eee8"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-            Label { text: transport.track ? transport.track.artist + (transport.track.album ? " · " + transport.track.album : "") : "Browse your Plex music library"; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-            Label { visible: transport.width < 800; text: transport.gainText; color: "#a4b0a7"; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: smallGainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: smallGainHover } }
-            Label { visible: transport.width < 800 && outputView.fidelity; text: transport.outputText; color: "#a4b0a7"; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { visible: !!transport.track && !transport.known; text: "Selected · playback unconfirmed"; color: "#a4b0a7"; font.pixelSize: 11 }
+            Label { text: transport.track ? transport.track.title : "Choose something to play"; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { text: transport.track ? transport.track.artist + (transport.track.album ? " · " + transport.track.album : "") : "Browse your Plex music library"; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { visible: transport.width < 800; text: transport.gainText; color: Theme.muted; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: smallGainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: smallGainHover } }
+            Label { visible: transport.width < 800 && outputView.fidelity; text: transport.outputText; color: Theme.muted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { visible: !!transport.track && !transport.known; text: "Selected · playback unconfirmed"; color: Theme.muted; font.pixelSize: 11 }
         }
         ColumnLayout {
             Layout.fillWidth: true
@@ -55,7 +55,7 @@ Rectangle {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: transport.timestamp(transport.position); color: "#a4b0a7"; font.pixelSize: 11 }
+                Label { text: transport.timestamp(transport.position); color: Theme.muted; font.pixelSize: 11 }
                 Slider {
                     id: progress
                     objectName: "seekPosition"
@@ -67,15 +67,15 @@ Rectangle {
                     onMoved: if (!pressed) transport.seekRequested(value)
                     onPressedChanged: if (!pressed && enabled) transport.seekRequested(value)
                 }
-                Label { text: transport.duration > 0 ? transport.timestamp(transport.duration) : "—"; color: "#a4b0a7"; font.pixelSize: 11 }
+                Label { text: transport.duration > 0 ? transport.timestamp(transport.duration) : "—"; color: Theme.muted; font.pixelSize: 11 }
             }
         }
         ColumnLayout {
             visible: transport.width >= 800
             Layout.fillWidth: true
             Layout.preferredWidth: 210
-            Label { text: transport.outputText; color: "#e8eee8"; Layout.alignment: Qt.AlignRight; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: outputHover.hovered; ToolTip.text: transport.outputText + " · Hardware qualification pending"; HoverHandler { id: outputHover } }
-            Label { text: transport.gainText; color: "#a4b0a7"; Layout.alignment: Qt.AlignRight; ToolTip.visible: gainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: gainHover } }
+            Label { text: transport.outputText; color: Theme.foreground; Layout.alignment: Qt.AlignRight; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: outputHover.hovered; ToolTip.text: transport.outputText + " · Hardware qualification pending"; HoverHandler { id: outputHover } }
+            Label { text: transport.gainText; color: Theme.muted; Layout.alignment: Qt.AlignRight; ToolTip.visible: gainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: gainHover } }
         }
     }
 }

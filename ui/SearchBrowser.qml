@@ -27,7 +27,7 @@ ColumnLayout {
     }
     Label {
         text: browser.currentQuery ? browser.snapshot.message : "Search query changed · waiting for results"
-        color: "#a4b0a7"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
+        color: Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
     }
     ScrollView {
         Layout.fillWidth: true
@@ -40,7 +40,7 @@ ColumnLayout {
                 required property var modelData
                 width: ListView.view.width
                 text: modelData.library + " · " + modelData.server + " · " + modelData.phase + (modelData.has_more ? " · more matches available" : "") + (modelData.error ? " · " + modelData.error : "") + (modelData.cache && modelData.cache.origin && modelData.cache.origin !== "live" ? " · cached metadata" : "") + (modelData.cache && modelData.cache.stale ? " · stale" : "") + (modelData.cache && modelData.cache.incomplete ? " · incomplete" : "")
-                color: ["failed", "timeout"].includes(modelData.phase) ? "#f2a89b" : "#a4b0a7"
+                color: ["failed", "timeout"].includes(modelData.phase) ? Theme.danger : Theme.muted
                 textFormat: Text.PlainText; wrapMode: Text.Wrap
             }
         }
@@ -57,14 +57,14 @@ ColumnLayout {
             required property var modelData
             required property int index
             width: results.width; height: width >= 640 ? 88 : 124; radius: 5
-            color: index % 2 ? "#161c18" : "#191f1c"
+            color: index % 2 ? Theme.alternate : Theme.surface
             GridLayout {
                 anchors.fill: parent; anchors.margins: 10; columns: resultRow.width >= 640 ? 2 : 1; columnSpacing: 12; rowSpacing: 4
                 ColumnLayout {
                     Layout.fillWidth: true; spacing: 4
-                    Label { text: modelData.track.title; font.bold: true; color: "#e8eee8"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                    Label { text: modelData.track.artist + " · " + modelData.track.album; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                    Label { text: modelData.library + " · " + modelData.server + (modelData.actionable ? "" : " · awaiting fresh library data"); color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.track.artist + " · " + modelData.track.album; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.library + " · " + modelData.server + (modelData.actionable ? "" : " · awaiting fresh library data"); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
                 RowLayout {
                     Layout.alignment: resultRow.width >= 640 ? Qt.AlignRight : Qt.AlignLeft

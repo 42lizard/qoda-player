@@ -19,7 +19,7 @@ DropArea {
         else event.accepted = false;
     }
     Rectangle {
-        width: parent.width; height: 2; color: "#a4c287"
+        width: parent.width; height: 2; color: Theme.accent
         y: zone.after ? parent.height - height : 0
         visible: zone.containsDrag && zone.controller.active
     }

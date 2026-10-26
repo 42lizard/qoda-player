@@ -11,7 +11,7 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         text: controls.snapshot ? controls.snapshot.message : ""
-        color: "#a4b0a7"; wrapMode: Text.Wrap; textFormat: Text.PlainText
+        color: Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText
     }
     Button {
         objectName: "retryDesktopControls"

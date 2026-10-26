@@ -18,7 +18,7 @@ ColumnLayout {
     Label {
         text: recovery.snapshot ? recovery.snapshot.message || "" : ""
         textFormat: Text.PlainText
-        color: recovery.exhausted ? "#f2a89b" : "#a4b0a7"
+        color: recovery.exhausted ? Theme.danger : Theme.muted
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }

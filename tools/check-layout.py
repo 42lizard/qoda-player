@@ -137,7 +137,7 @@ def fixture():
     }
 
 
-def check(output=None):
+def check(output=None, theme_check=False):
     with tempfile.TemporaryDirectory(prefix="qoda-layout-") as temporary:
         base = Path(temporary)
         output = Path(output).resolve() if output else base / "captures"
@@ -146,6 +146,16 @@ def check(output=None):
         shutil.copytree(ROOT / "ui", ui)
         (ui / "CompactPlayer.qml").write_text(COMPACT_STUB)
         shell = ui / "shell.qml"
+        if theme_check:
+            assert shutil.which("omarchy"), "--theme-check requires Omarchy's installed color resolver"
+            themes = base / "themes"
+            for name, background, foreground, accent in [("dark", "#202830", "#efe0cc", "#69c9ba"), ("light", "#fff8ec", "#222222", "#992244")]:
+                directory = themes / name
+                directory.mkdir(parents=True)
+                (directory / "colors.toml").write_text(f'bg = "{background}"\nfg = "{foreground}"\ncolor4 = "{accent}"\ncolor1 = "#ee4455"\n')
+            active_theme = themes / "current"
+            active_theme.symlink_to(themes / "dark", target_is_directory=True)
+            shell.write_text(shell.read_text().replace("OmarchyTheme {}", "OmarchyTheme { currentPath: " + json.dumps(str(active_theme / "colors.toml")) + "; legacyPath: " + json.dumps(str(themes / "missing/colors.toml")) + " }"))
         shell.write_text(shell.read_text().replace("        function status(): string", HOOKS + "        function status(): string"))
         runtime = base / "runtime"
         (runtime / "qoda").mkdir(parents=True, mode=0o700)
@@ -185,8 +195,8 @@ def check(output=None):
                 def status():
                     return json.loads(ipc("status"))
 
-                def wait_for(predicate):
-                    for _ in range(60):
+                def wait_for(predicate, attempts=60):
+                    for _ in range(attempts):
                         value = status()
                         if predicate(value):
                             return value
@@ -216,6 +226,8 @@ def check(output=None):
                     time.sleep(0.1)
                 else:
                     raise AssertionError("Fixture UI did not connect")
+                if theme_check:
+                    wait_for(lambda value: value["theme"]["system"] and value["theme"]["background"] == "#202830" and value["theme"]["controlText"] == "#efe0cc", attempts=120)
                 for label, width, height in [("wide", 1320, 820), ("narrow", 760, 820), ("small", 540, 760)]:
                     ipc("resize", width, height)
                     info = wait_for(lambda value: value["geometry"]["width"] == width and value["geometry"]["height"] == height and value["geometry"]["queueVisible"] == (label == "wide"))
@@ -364,6 +376,31 @@ def check(output=None):
                 assert requests[-1]["source"] == "sameprefix-B"
                 capture("library-selected-small")
                 assert all(request["op"] in ["hello", "queue_move", "playlist_edit", "album_list"] for request in requests), requests
+                if theme_check:
+                    before_theme = status()
+                    request_count = len(requests)
+                    replacement = themes / "next"
+                    replacement.symlink_to(themes / "light", target_is_directory=True)
+                    replacement.replace(active_theme)
+                    light = wait_for(lambda value: value["theme"]["background"] == "#fff8ec" and value["theme"]["controlText"] == "#222222" and value["theme"]["controlHighlight"] == "#992244", attempts=160)
+                    assert light["queue"] == before_theme["queue"]
+                    assert light["libraryPicker"]["source"] == before_theme["libraryPicker"]["source"]
+                    assert light["tab"] == before_theme["tab"] and light["query"] == before_theme["query"]
+                    assert len(requests) == request_count
+                    ipc("resize", 1320, 820)
+                    capture("theme-light-wide")
+                    ipc("showAudio")
+                    wait_for(lambda value: value["settings"]["visible"])
+                    capture("theme-light-settings", settings=True)
+                    # Incomplete updates keep the last valid palette; restoration is retried.
+                    (themes / "light/colors.toml").write_text('background = "#000000"\n')
+                    time.sleep(3)
+                    assert status()["theme"]["background"] == "#fff8ec"
+                    replacement.symlink_to(themes / "dark", target_is_directory=True)
+                    replacement.replace(active_theme)
+                    wait_for(lambda value: value["theme"]["background"] == "#202830" and value["theme"]["controlHighlight"] == "#69c9ba", attempts=160)
+                    assert len(requests) == request_count
+                    print("Live dark/light palette, canonical aliases, atomic theme replacement, partial-file retention and unchanged queue/browser state passed")
                 log.flush()
                 log.seek(0)
                 errors = [line for line in log.read().splitlines() if any(text in line for text in
@@ -388,4 +425,6 @@ def check(output=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", help="Keep fictional UI PNGs in this directory")
-    check(parser.parse_args().output)
+    parser.add_argument("--theme-check", action="store_true", help="Check live palette changes using private theme files and the installed Omarchy resolver")
+    args = parser.parse_args()
+    check(args.output, args.theme_check)

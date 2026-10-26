@@ -46,12 +46,12 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         text: "Confirmed nominal navigation only. Selected or skipped tracks without a clock are excluded. Go here keeps paused/playing intent."
-        wrapMode: Text.Wrap; textFormat: Text.PlainText; color: "#a4b0a7"
+        wrapMode: Text.Wrap; textFormat: Text.PlainText; color: Theme.muted
     }
     Label {
         visible: navigation.rows.length === 0
         text: "No confirmed entries in the Previous path."
-        wrapMode: Text.Wrap; color: "#a4b0a7"; Layout.fillWidth: true
+        wrapMode: Text.Wrap; color: Theme.muted; Layout.fillWidth: true
     }
     ListView {
         id: pathView
@@ -62,11 +62,11 @@ ColumnLayout {
         delegate: Rectangle {
             required property var modelData
             width: pathView.width; height: 112
-            color: modelData.selected ? "#303f32" : "#191f1c"; radius: 5
+            color: modelData.selected ? Theme.selected : Theme.surface; radius: 5
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 8; spacing: 3
-                Label { text: (modelData.selected ? "Selected path entry · " : "") + modelData.track.title; color: "#e8eee8"; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                Label { text: modelData.track.artist + " · " + modelData.track.album; color: "#a4b0a7"; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { text: (modelData.selected ? "Selected path entry · " : "") + modelData.track.title; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { text: modelData.track.artist + " · " + modelData.track.album; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 Button { objectName: "revisitNavigation"; text: "Go here"; enabled: navigation.connected; onClicked: navigation.revisit(modelData) }
             }
         }
@@ -74,7 +74,7 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         text: snapshot && snapshot.total !== "0" ? "Entries " + (Number(snapshot.offset) + 1) + "–" + (Number(snapshot.offset) + navigation.rows.length) + " of " + snapshot.total : "0 entries"
-        color: "#a4b0a7"; wrapMode: Text.Wrap
+        color: Theme.muted; wrapMode: Text.Wrap
     }
     Flow {
         Layout.fillWidth: true

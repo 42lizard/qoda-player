@@ -16,15 +16,15 @@ Drawer {
     focus: true
     leftPadding: 16; rightPadding: 16; topPadding: 16; bottomPadding: 16
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    background: Rectangle { color: "#191f1c"; border.color: "#303a33" }
+    background: Rectangle { color: Theme.surface; border.color: Theme.border }
     contentItem: Rectangle {
-        color: "#191f1c"
+        color: Theme.surface
         ColumnLayout {
             anchors.fill: parent
             spacing: 12
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Settings"; color: "#e8eee8"; font.pixelSize: 20; font.bold: true; Layout.fillWidth: true }
+                Label { text: "Settings"; color: Theme.foreground; font.pixelSize: 20; font.bold: true; Layout.fillWidth: true }
                 Button { text: "Close"; Accessible.name: "Close settings"; onClicked: sheet.closeRequested() }
             }
             RowLayout {

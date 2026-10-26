@@ -36,17 +36,17 @@ Item {
     }
     Rectangle {
         anchors.fill: parent; radius: 4
-        color: mouse.containsMouse ? "#303f32" : "#222c25"
+        color: mouse.containsMouse ? Theme.selected : Theme.button
         opacity: handle.enabled ? 1 : 0.35
-        Text { anchors.centerIn: parent; text: "≡"; color: "#a4b0a7"; font.pixelSize: 20 }
+        Text { anchors.centerIn: parent; text: "≡"; color: Theme.muted; font.pixelSize: 20 }
     }
     Rectangle {
         id: ghost
         parent: handle.windowOverlay && handle.windowOverlay.visible ? handle.windowOverlay : handle.viewport && handle.viewport.Window.window ? handle.viewport.Window.window.contentItem : handle
         width: 30; height: 30; radius: 4; z: 10000
-        color: "#466348"; border.color: "#a4c287"
+        color: Theme.selected; border.color: Theme.accent
         visible: mouse.drag.active && !!handle.controller && handle.controller.active && handle.pressedId === handle.controller.itemId && handle.pressedGeneration === handle.controller.generation
-        Text { anchors.centerIn: parent; text: "≡"; color: "#e8eee8"; font.pixelSize: 20 }
+        Text { anchors.centerIn: parent; text: "≡"; color: Theme.foreground; font.pixelSize: 20 }
         Drag.active: mouse.drag.active && !!handle.controller && handle.controller.active && handle.pressedId === handle.controller.itemId && handle.pressedGeneration === handle.controller.generation
         Drag.dragType: Drag.Internal
         Drag.source: payload

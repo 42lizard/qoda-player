@@ -60,11 +60,11 @@ ColumnLayout {
             enabled: settings.connected && !!settings.output && settings.output.available
             onActivated: index => settings.outputDeviceDraft = settings.devices[index].id
             Accessible.name: "Direct ALSA device"
-            contentItem: Text { text: outputDevices.displayText; color: "#e8eee8"; font: outputDevices.font; textFormat: Text.PlainText; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+            contentItem: Text { text: outputDevices.displayText; color: Theme.foreground; font: outputDevices.font; textFormat: Text.PlainText; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
             delegate: ItemDelegate {
                 required property var modelData
                 width: ListView.view.width
-                contentItem: Text { text: modelData.name; color: "#e8eee8"; textFormat: Text.PlainText; elide: Text.ElideRight }
+                contentItem: Text { text: modelData.name; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight }
             }
         }
         Button { objectName: "applyOutput"; text: "Apply output"; enabled: settings.canApplyOutput; onClicked: settings.outputRequested(settings.requestedOutputMode, settings.outputDeviceDraft, settings.requestedOutputMode === "fidelity_resampled" && settings.assumeStereoDraft) }
@@ -85,13 +85,13 @@ ColumnLayout {
         checked: settings.assumeStereoDraft
         enabled: settings.connected && !!settings.output && settings.output.available && settings.output.fidelity_available
         onToggled: settings.assumeStereoDraft = checked
-        contentItem: Text { text: parent.text; font: parent.font; color: "#e8eee8"; wrapMode: Text.Wrap; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter }
+        contentItem: Text { text: parent.text; font: parent.font; color: Theme.foreground; wrapMode: Text.Wrap; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter }
         Layout.fillWidth: true
     }
     Label {
         visible: settings.outputModeDraft === 1
         text: settings.allowConversionDraft ? "Exact format first; otherwise SoXR VHQ resampling and dithered precision reduction. Converted output is not sample-perfect." : "Strict: refuse unsupported rates and precision."
-        color: "#a4b0a7"; wrapMode: Text.Wrap; Layout.fillWidth: true
+        color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true
     }
     Label {
         objectName: "outputProcessing"
@@ -103,15 +103,15 @@ ColumnLayout {
             const reduced = plan.source.bits > plan.target.bits;
             return "Processing plan · " + plan.source.rate + " → " + plan.target.rate + " Hz · " + plan.source.bits + " → " + plan.target.bits + " bit · " + (resampled ? "SoXR VHQ" : "exact rate") + (resampled || reduced ? " · TPDF dither" : "") + (resampled || reduced ? " · converted" : " · no format conversion");
         }
-        color: "#a4b0a7"; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
+        color: Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
     }
-    Label { text: settings.output ? settings.output.message || "" : "Output settings unavailable"; color: "#a4b0a7"; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
-    Label { visible: !!settings.output && settings.outputModeDraft === 1 && !settings.output.fidelity_available; text: "Fidelity unavailable: the ALSA submission guard could not be verified."; color: "#f2a89b"; wrapMode: Text.Wrap; Layout.fillWidth: true }
-    Label { visible: !!settings.output && !!settings.output.source; text: settings.output && settings.output.source ? "Source header · " + settings.output.source.rate + " Hz · stereo · " + settings.output.source.bits + " bit" : ""; color: "#a4b0a7"; wrapMode: Text.Wrap; Layout.fillWidth: true }
-    Label { visible: !!settings.output && !!settings.output.observed; text: { const observed = settings.output ? settings.output.observed : null; return observed ? "Observed ALSA · " + observed.rate + " Hz · " + observed.format + " · " + observed.valid_bits + " valid bits · " + (observed.stereo_layout ? "FL/FR reported" : observed.stereo_assumed ? "stereo assumed; unverified" : "mapping pending") : ""; } color: "#a4b0a7"; wrapMode: Text.Wrap; Layout.fillWidth: true }
-    Label { visible: !!settings.output && !!settings.output.selection && ["fidelity", "fidelity_resampled"].includes(settings.output.selection.mode); text: "Configured fidelity · final PCM/device qualification pending"; color: "#a4b0a7"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { text: settings.output ? settings.output.message || "" : "Output settings unavailable"; color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { visible: !!settings.output && settings.outputModeDraft === 1 && !settings.output.fidelity_available; text: "Fidelity unavailable: the ALSA submission guard could not be verified."; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { visible: !!settings.output && !!settings.output.source; text: settings.output && settings.output.source ? "Source header · " + settings.output.source.rate + " Hz · stereo · " + settings.output.source.bits + " bit" : ""; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { visible: !!settings.output && !!settings.output.observed; text: { const observed = settings.output ? settings.output.observed : null; return observed ? "Observed ALSA · " + observed.rate + " Hz · " + observed.format + " · " + observed.valid_bits + " valid bits · " + (observed.stereo_layout ? "FL/FR reported" : observed.stereo_assumed ? "stereo assumed; unverified" : "mapping pending") : ""; } color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { visible: !!settings.output && !!settings.output.selection && ["fidelity", "fidelity_resampled"].includes(settings.output.selection.mode); text: "Configured fidelity · final PCM/device qualification pending"; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
     RowLayout {
-        Label { text: "ReplayGain"; color: "#e8eee8"; font.bold: true }
+        Label { text: "ReplayGain"; color: Theme.foreground; font.bold: true }
         ComboBox {
             objectName: "replaygainMode"
             model: ["Off", "Track", "Album", "Auto"]
@@ -120,9 +120,9 @@ ColumnLayout {
             onActivated: index => settings.modeRequested(["off", "track", "album", "auto"][index])
             Accessible.name: "ReplayGain mode"
         }
-        Label { text: "Preamp 0 dB · clipping prevention"; color: "#a4b0a7"; visible: settings.width > 500 }
+        Label { text: "Preamp 0 dB · clipping prevention"; color: Theme.muted; visible: settings.width > 500 }
     }
-    Label { text: "Auto uses album gain for unshuffled album sessions; otherwise track gain. Missing album gain falls back to track, then unity."; color: "#a4b0a7"; wrapMode: Text.Wrap; Layout.fillWidth: true }
-    Label { text: settings.snapshot ? settings.snapshot.message : "Audio settings unavailable"; color: "#a4b0a7"; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
-    Label { text: settings.snapshot ? settings.snapshot.metadata_scope : ""; color: "#a4b0a7"; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { text: "Auto uses album gain for unshuffled album sessions; otherwise track gain. Missing album gain falls back to track, then unity."; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { text: settings.snapshot ? settings.snapshot.message : "Audio settings unavailable"; color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { text: settings.snapshot ? settings.snapshot.metadata_scope : ""; color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
 }
