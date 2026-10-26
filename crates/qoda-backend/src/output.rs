@@ -92,6 +92,39 @@ pub fn identity(card: i32, device: u32, pcm_id: &[u8]) -> Option<String> {
     }
     Some(format!("{:x}", hash.finalize()))
 }
+fn device_name(card: &str, pcm: &str, pcm_id: &str, device: u32) -> String {
+    let card = if card.trim().is_empty() {
+        "ALSA card"
+    } else {
+        card.trim()
+    };
+    let fallback = format!("Playback {device}");
+    let pcm = [pcm.trim(), pcm_id.trim()]
+        .into_iter()
+        .find(|value| !value.is_empty())
+        .unwrap_or(&fallback);
+    format!("{card} · {pcm}").chars().take(160).collect()
+}
+pub fn explain_preflight(error: &str, source: Option<Format>) -> String {
+    match source {
+        Some(source)
+            if matches!(
+                error,
+                "Fidelity device does not support the exact source rate"
+                    | "Fidelity device has insufficient native sample precision"
+                    | "Fidelity device does not support the exact source format."
+            ) =>
+        {
+            format!(
+                "{}. Source: {} Hz, {}-bit stereo. Choose Desktop/PipeWire or a compatible device; Fidelity does not resample or reduce precision.",
+                error.trim_end_matches('.'),
+                source.rate,
+                source.bits
+            )
+        }
+        _ => error.to_owned(),
+    }
+}
 pub fn discover() -> Vec<Device> {
     let mut devices = Vec::new();
     for card in alsa::card::Iter::new().take(64).flatten() {
@@ -122,14 +155,12 @@ pub fn discover() -> Vec<Device> {
             let Some(id) = identity(card.get_index(), device as u32, pcm_id.as_bytes()) else {
                 continue;
             };
-            let name = format!(
-                "{} · {}",
+            let name = device_name(
                 info.get_name().unwrap_or("ALSA card"),
-                pcm.get_name().unwrap_or("Playback")
-            )
-            .chars()
-            .take(160)
-            .collect();
+                pcm.get_name().unwrap_or("Playback"),
+                pcm_id,
+                device as u32,
+            );
             devices.push(Device {
                 id,
                 name,
@@ -389,6 +420,57 @@ mod tests {
             b"preserve existing identities"
         );
         std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn unnamed_driver_pcms_keep_speaker_hdmi_and_headset_labels_distinct() {
+        assert_eq!(
+            device_name("Sound card", "", "Built-in Speakers (*)", 1),
+            "Sound card · Built-in Speakers (*)"
+        );
+        assert_eq!(
+            device_name("Sound card", "", "HDMI2 (*)", 2),
+            "Sound card · HDMI2 (*)"
+        );
+        assert_eq!(
+            device_name("Sound card", "Headphones", "Headset (*)", 1),
+            "Sound card · Headphones"
+        );
+        assert_eq!(device_name("", "", "", 3), "ALSA card · Playback 3");
+        assert_eq!(
+            device_name(&"a".repeat(200), "", "", 0).chars().count(),
+            160
+        );
+    }
+    #[test]
+    fn refused_source_rate_reports_format_and_explicit_desktop_alternative() {
+        let error = explain_preflight(
+            "Fidelity device does not support the exact source rate",
+            Some(Format {
+                rate: 44100,
+                bits: 16,
+            }),
+        );
+        assert!(error.contains("44100 Hz"));
+        assert!(error.contains("16-bit"));
+        assert!(error.contains("Desktop/PipeWire"));
+        assert!(error.contains("does not resample"));
+        assert_eq!(
+            explain_preflight(
+                "Fidelity device is busy",
+                Some(Format {
+                    rate: 48000,
+                    bits: 24
+                })
+            ),
+            "Fidelity device is busy"
+        );
+        assert_eq!(
+            explain_preflight(
+                "Fidelity device does not support the exact source rate",
+                None
+            ),
+            "Fidelity device does not support the exact source rate"
+        );
     }
     #[test]
     fn raw_or_missing_device_names_are_not_accepted_as_fidelity_identity() {

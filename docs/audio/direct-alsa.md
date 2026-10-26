@@ -67,3 +67,25 @@ and never labels a discovered device bit-perfect. The player-side PCM matrix in
 capture. Issue #27 retains physical PCM/device qualification, per-profile rate,
 precision, channel ordering, gain and gapless boundary measurements. No physical
 PCM was opened or sound played for the implementation checks.
+
+## Built-in output compatibility observation (2026-10-26)
+
+A no-write ALSA capability query on the development machine's currently exposed
+speaker, HDMI and headset PCMs accepted only stereo S16_LE at 48000 Hz among
+Qoda's declared 44100/48000/96000 Hz source rates for RW-interleaved access.
+S32_LE, S24_LE and S24_3LE were rejected. The query opened each route nonblocking, restricted the
+in-memory configuration space and tested rates; it did not install hardware
+parameters, submit frames, change mixers or reconfigure PipeWire. All handles
+were closed. This is an advertised capability observation, not proof that a
+48000 Hz stream plays correctly or a hardware fidelity qualification.
+
+A 44100 Hz source cannot play through those routes under the strict Fidelity
+contract. Desktop/PipeWire remains the explicit conversion-capable alternative;
+Fidelity needs a device that accepts the source rate and precision. Rate/precision
+refusals now include the source's verified rate/bit depth and that alternative.
+Drivers with an empty PCM name use their PCM identifier for display, so speaker,
+HDMI and headset routes remain distinguishable.
+
+The query follows ALSA's [configuration-space and test-rate API](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m___h_w___params.html).
+No application policy should hard-code these machine-specific observations as
+capabilities of other devices or future kernel/driver profiles.

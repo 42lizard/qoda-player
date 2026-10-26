@@ -727,7 +727,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     last_audio = audio.clone();
                     state["audio"] = json!(audio);
                     if let Some(error) = audio.error.filter(|_|audio.generation==epochs.current).or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
-                        state["error"] = json!(error);
+                        state["error"] = json!(output::explain_preflight(error, audio.source));
                         desired_playing = false;
                         state["intent"] = json!("paused");
                         player.send(Command::Pause(true));
