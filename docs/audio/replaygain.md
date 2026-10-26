@@ -18,13 +18,43 @@ Both current loads and appended successors receive per-file `af` options. Non-un
 
 Effective gain, basis and limiting/fallback reason are attached to the native render generation. The full transport and compact surface distinguish prepared/unconfirmed state from nominal playback. The requested setting can differ from an already prepared file's immutable gain.
 
-## Initial metadata reader
+## Native FLAC metadata reader
 
 The reader accepts native FLAC metadata framing and Vorbis comments, as defined by [RFC 9639](https://www.rfc-editor.org/rfc/rfc9639.html#section-8.6). It reads through the prepared provider-neutral `MediaSource`; credentials and authenticated upstream URLs never enter QML or subprocess arguments.
 
-A requested prefix is at most 1 MiB, with a five-second tag-read timeout inside the existing twenty-second preparation budget. At most 1 MiB is retained; a chunk crossing the limit is truncated and the response dropped. Scanning stops after a complete comment block or final metadata block. The parser bounds metadata blocks and comment counts and checks lengths/UTF-8 before parsing values. Off does not open a tag probe. No decoder, audio device or playback report is started for metadata extraction.
+The reader requests a 64 KiB prefix, then walks metadata headers through the final
+block. Large picture, padding and application payloads are skipped using their
+validated lengths; only comment bodies and missing headers require further reads.
+The first block must be a 34-byte STREAMINFO; repeated STREAMINFO, reserved types,
+duplicate comment blocks, invalid lengths and malformed UTF-8 are rejected. A
+usable early comment is not accepted until the remaining metadata framing has
+been checked. Payload contents of skipped opaque blocks are not decoded/validated.
 
-Other formats, non-native FLAC layouts, comments beyond the prefix, malformed/truncated data, interrupted reads and timeouts use unity with an explicit reason. A partial scan does not establish missing tags. Playback of those formats remains available; their gain metadata is not assumed to be supported. [Issue #30](https://github.com/42lizard/qoda-player/issues/30) tracks wider tag/container coverage and bounded reads past large artwork or end-of-file metadata. Plex gain/loudness fields remain excluded until their units and applicability are verified in #16.
+A scan allows at most 64 blocks, 64 requests, 64 MiB of logical metadata span and
+1 MiB of response-body bytes, under the existing five-second tag-read timeout
+inside the twenty-second preparation budget. Oversized body chunks cause immediate
+fallback rather than being retained or silently truncated. Prefix and comment
+storage are bounded by that byte budget; no artwork-sized allocation is made.
+Off does not open a tag probe. No decoder, audio device or playback report is
+started for metadata extraction.
+
+Sparse reads require HTTP 206 with an exact Content-Range interval (clamped only
+at EOF), numeric consistent object length, matching Content-Length when supplied,
+and an exact body length. ETags must remain consistent when supplied, including
+not disappearing mid-scan. All requests use the same prepared MediaSource/version;
+this is not a cryptographic content guarantee for servers that supply no validator.
+A server ignoring the initial Range can still supply complete metadata within the
+byte budget. An ignored nonzero Range is rejected; the reader never downloads and
+discards a cover to simulate seeking.
+
+Other formats, non-native FLAC layouts, over-budget metadata, malformed/truncated
+data, inconsistent ranges, interrupted reads and timeouts use unity with an
+explicit reason. A partial scan does not establish missing tags. Playback of
+those formats remains available; their gain metadata is not assumed supported.
+[FLAC sparse reads #43](https://github.com/42lizard/qoda-player/issues/43) extend the
+initial prefix reader; [#30](https://github.com/42lizard/qoda-player/issues/30) still
+tracks other containers and end-of-file metadata. Plex gain/loudness fields remain
+excluded until their units and applicability are verified in #16.
 
 ## Recorded player-side qualification
 

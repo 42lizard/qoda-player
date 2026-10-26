@@ -1,8 +1,10 @@
 //! Embedded gain metadata, pure selection/clipping policy and private preferences.
 //! No Plex loudness fields, decoder events or native ReplayGain are used here.
-use futures_util::StreamExt;
 use qoda_core::TrackRef;
-use qoda_provider::{ByteRange, MediaSource, MusicProvider, PreparedMedia, ProviderError};
+use qoda_provider::{MusicProvider, PreparedMedia, ProviderError};
+
+mod reader;
+use reader::probe;
 use serde::{Deserialize, Serialize};
 use std::{io::Read, path::PathBuf, time::Duration};
 
@@ -73,32 +75,6 @@ fn number(value: &str, gain: bool) -> Option<f64> {
             n > 0.0
         })
     .then_some(n)
-}
-// FLAC's metadata framing and Vorbis comment length fields are checked before
-// slicing or allocating. A partial prefix never establishes missing tags.
-fn tags(bytes: &[u8]) -> Result<Tags, &'static str> {
-    if bytes.len() < 4 {
-        return Err(INCOMPLETE);
-    }
-    if !bytes.starts_with(b"fLaC") {
-        return Err("Embedded tags unavailable for this format");
-    }
-    let mut pos = 4usize;
-    for _ in 0..1024 {
-        let header = bytes.get(pos..pos + 4).ok_or(INCOMPLETE)?;
-        let size =
-            usize::from(header[1]) << 16 | usize::from(header[2]) << 8 | usize::from(header[3]);
-        pos += 4;
-        let block = bytes.get(pos..pos + size).ok_or(INCOMPLETE)?;
-        if header[0] & 127 == 4 {
-            return comments(block);
-        }
-        if header[0] & 128 != 0 {
-            return Ok(Tags::default());
-        }
-        pos += size;
-    }
-    Err("Embedded tag scan exceeded its block limit")
 }
 fn comments(mut bytes: &[u8]) -> Result<Tags, &'static str> {
     fn take<'a>(bytes: &mut &'a [u8], size: usize) -> Result<&'a [u8], &'static str> {
@@ -203,46 +179,6 @@ fn select(mode: Mode, album_session: bool, tags: Result<Tags, &'static str>) -> 
             "Embedded FLAC ReplayGain; preamp 0 dB"
         },
     }
-}
-async fn probe(stream: &dyn MediaSource) -> Result<Tags, &'static str> {
-    const LIMIT: usize = 1024 * 1024;
-    let range = ByteRange::try_from("bytes=0-1048575").unwrap();
-    let mut response = stream
-        .open(Some(range), false)
-        .await
-        .map_err(|_| "Embedded tags could not be read")?;
-    if response.status != 200 && response.status != 206 {
-        return Err("Embedded tags could not be read");
-    }
-    if response.status == 206
-        && !response
-            .content_range
-            .as_deref()
-            .is_some_and(|s| s.starts_with("bytes 0-"))
-    {
-        return Err("Embedded tag range was not confirmed");
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.body.next().await {
-        let chunk = chunk.map_err(|_| "Embedded tag read interrupted")?;
-        let size = chunk.len().min(LIMIT - bytes.len());
-        bytes.extend_from_slice(&chunk[..size]);
-        if bytes.len() >= 4 && !bytes.starts_with(b"fLaC") {
-            return tags(&bytes);
-        }
-        if bytes.len() < 4 {
-            continue;
-        }
-        // Stop as soon as a complete tag block (or final metadata block) exists.
-        let result = tags(&bytes);
-        if !matches!(result, Err(INCOMPLETE)) {
-            return result;
-        }
-        if bytes.len() == LIMIT {
-            break;
-        }
-    }
-    tags(&bytes)
 }
 pub struct Prepared {
     pub media: PreparedMedia,
@@ -391,7 +327,10 @@ impl Settings {
 
 #[cfg(test)]
 mod tests {
+    use super::reader::tags;
     use super::*;
+    use futures_util::StreamExt;
+    use qoda_provider::{ByteRange, MediaSource};
     fn flac(values: &[&str]) -> Vec<u8> {
         let mut block = Vec::new();
         block.extend(0_u32.to_le_bytes());
@@ -518,10 +457,7 @@ mod tests {
         impl MediaSource for Source {
             fn open(&self, range: Option<ByteRange>, _: bool) -> ProviderFuture<'_, MediaResponse> {
                 Box::pin(async move {
-                    assert_eq!(
-                        range.as_ref().map(ByteRange::header),
-                        Some("bytes=0-1048575")
-                    );
+                    assert_eq!(range.as_ref().map(ByteRange::header), Some("bytes=0-65535"));
                     self.reads.fetch_add(1, Ordering::SeqCst);
                     Ok(MediaResponse {
                         status: 206,
