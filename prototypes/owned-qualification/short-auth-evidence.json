@@ -1,0 +1,46 @@
+{
+  "auth_path": "SDK short-PIN control",
+  "recorded_utc": "2026-10-26T22:14:16.303334+00:00",
+  "scope": "fresh SDK short-PIN control client only; no music or metadata mutations",
+  "observations": [
+    {
+      "name": "short_pin_linked",
+      "parent_credential_retained": true,
+      "http_status": 204
+    },
+    {
+      "name": "fresh_client_identity",
+      "same_account": true,
+      "distinct_token": true,
+      "exact_pin_client_device_association": true,
+      "device_token_returned": false,
+      "token_shape": "opaque"
+    },
+    {
+      "name": "owned_pms_before_removal",
+      "fresh_token_http": 200,
+      "original_token_http": 200
+    },
+    {
+      "name": "targeted_device_removal",
+      "http_status": 200,
+      "exact_device_absent": true,
+      "child_cloud_http": 401,
+      "child_pms_http": 200,
+      "observation_seconds": 30.8,
+      "original_cloud_http": 200,
+      "original_pms_http": 200
+    },
+    {
+      "name": "finished",
+      "fresh_device_removed": true,
+      "original_keyring_untouched": true,
+      "no_music_playlist_or_timeline_mutations": true,
+      "limits": [
+        "No account expiry measurement",
+        "No universal immediate PMS revocation guarantee"
+      ]
+    }
+  ],
+  "completed": true
+}

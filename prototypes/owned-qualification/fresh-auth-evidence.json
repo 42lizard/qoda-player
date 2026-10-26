@@ -1,0 +1,20 @@
+{
+  "recorded_utc": "2026-10-26T22:09:52.478226+00:00",
+  "scope": "fresh strong browser PIN client only; no music or metadata mutations",
+  "observations": [
+    {
+      "name": "awaiting_browser",
+      "opened_in_brave": true,
+      "parent_credential_retained": true
+    },
+    {
+      "name": "stopped_safely",
+      "error_class": "AssertionError",
+      "fresh_device_removed": false,
+      "fresh_credential_acquired": true,
+      "cleanup_identity_established": true,
+      "original_keyring_untouched": true
+    }
+  ],
+  "completed": false
+}

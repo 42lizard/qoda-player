@@ -1,0 +1,15 @@
+{
+  "completed": true,
+  "selection": "one fresh same-product client within first-run creation window; distinct from original device",
+  "targeted_removal_http": 200,
+  "fixture_device_absent": true,
+  "original_device_present": true,
+  "original_cloud_http": 200,
+  "remaining_qualification_devices": 0,
+  "limits": [
+    "Cleanup only; original child token was not retained after safe stop",
+    "No claim of PMS revocation from device disappearance"
+  ],
+  "no_music_playlist_or_timeline_mutations": true,
+  "original_keyring_untouched": true
+}

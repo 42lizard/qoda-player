@@ -1,0 +1,22 @@
+{
+  "completed": true,
+  "facts": {
+    "desktop_bus_unavailable_in_namespace": true,
+    "private_bus_without_service_refuses_lookup": true,
+    "invalid_bus_refuses_lookup": true,
+    "owned_service_pid_verified": true,
+    "initial_roundtrip": true,
+    "private_collection_locked": true,
+    "locked_read_refused": true,
+    "restart_unlock_confirmed": true,
+    "persistent_marker_restored": true,
+    "replace_roundtrip": true,
+    "scoped_delete_succeeded": true,
+    "scoped_item_absent": true
+  },
+  "limits": [
+    "Synthetic credential only",
+    "Private daemon restart unlock; not desktop PAM or user prompt",
+    "No desktop keyring operation"
+  ]
+}
