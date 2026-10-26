@@ -63,7 +63,11 @@ reference files at the join. That is not a continuous album-wide resampler: a
 sine test found a 35-output-LSB transient relative to an uninterrupted ideal sine
 at the file boundary. The same experiment using mpv's internal SoXR resampler
 also reset state. Continuous resampler-state handoff is tracked in [#41](https://github.com/42lizard/qoda-player/issues/41);
-this increment does not claim that boundary is transparent.
+this increment does not claim that boundary is transparent. A reproducible
+[upstream-path comparison](../research/continuous-resampler.md) now distinguishes
+native playlist reset from EDL continuous-input behavior and its ownership/trust
+constraints. Run `python3 tools/check-resampler-boundary.py --expect-reset` from
+the repository root to reproduce the current limitation using synthetic files.
 
 ## Validation
 
