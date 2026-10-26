@@ -276,7 +276,9 @@ impl Controller {
             Err(error) => {
                 self.view.uncertain = matches!(
                     error,
-                    ProviderError::UncertainMutation | ProviderError::PlaylistChanged
+                    ProviderError::UncertainMutation
+                        | ProviderError::PlaylistChanged
+                        | ProviderError::PlaylistDuplicateUnconfirmed
                 );
                 self.view.message = error.to_string();
             }
@@ -387,6 +389,33 @@ mod tests {
         c.command(&request, p.clone(), 1, tx).unwrap();
         apply(&mut c, &mut rx).await;
         assert_eq!(p.writes.load(Ordering::SeqCst), 2);
+    }
+    #[tokio::test]
+    async fn unconfirmed_duplicate_keeps_the_explicit_refresh_fence_and_specific_message() {
+        let p = Fixture::new();
+        let mut controller = Controller::default();
+        controller.view.selected = Some(p.snapshot.clone());
+        controller.apply(
+            Reply {
+                auth: 1,
+                generation: controller.generation,
+                result: Err(ProviderError::PlaylistDuplicateUnconfirmed),
+            },
+            1,
+        );
+        assert!(controller.view.uncertain);
+        assert!(
+            controller
+                .view
+                .message
+                .contains("collapse playlist duplicates")
+        );
+        let (tx, mut rx) = mpsc::channel(4);
+        assert!(controller.command(&serde_json::json!({"op":"playlist_edit","id":"duplicate-retry","reference":p.snapshot.playlist.reference,"expected_revision":"snapshot-v1","edit":{"action":"rename","title":"blocked"}}),p.clone(),1,tx.clone()).is_err());
+        assert_eq!(p.writes.load(Ordering::SeqCst), 0);
+        controller.command(&serde_json::json!({"op":"playlist_refresh","source":p.snapshot.playlist.reference.source}),p,1,tx).unwrap();
+        apply(&mut controller, &mut rx).await;
+        assert!(!controller.view.uncertain);
     }
     #[tokio::test]
     async fn switching_source_drops_the_old_server_selection_and_rejects_stale_open() {

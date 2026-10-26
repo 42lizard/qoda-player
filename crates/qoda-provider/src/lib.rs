@@ -174,6 +174,7 @@ pub enum ProviderError {
     Unsupported,
     PlaylistChanged,
     UncertainMutation,
+    PlaylistDuplicateUnconfirmed,
     ReadOnly,
     InvalidPlaylist,
 }
@@ -192,6 +193,7 @@ impl std::fmt::Display for ProviderError {
             Self::InvalidRange => "The requested media range is invalid.",
             Self::Unsupported=>"This provider does not support this action.",
             Self::PlaylistChanged=>"The playlist changed. Refresh and review its contents before editing again.",
+            Self::PlaylistDuplicateUnconfirmed=>"Plex did not confirm another copy of this track. Some servers collapse playlist duplicates. Refresh before editing again; use the queue for repeats.",
             Self::UncertainMutation=>"The playlist edit may have reached Plex. Refresh and inspect the result before making another edit; the request was not retried.",
             Self::ReadOnly=>"This playlist is read-only in Qoda. Smart playlists cannot be edited here.",
             Self::InvalidPlaylist=>"The playlist request or complete playlist snapshot is not supported.",

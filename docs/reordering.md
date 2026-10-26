@@ -4,7 +4,19 @@ Drag the dedicated handle to move an ordinary upcoming queue occurrence or an
 editable plain-playlist item. The line above/below a target shows its insertion
 position; **Move to end** is available during a drag. The existing up/down buttons
 remain keyboard accessible. Queue occurrences and playlist items have independent
-identities, so duplicate tracks remain separate.
+identities, so existing duplicate occurrences remain separate. Plex controls which
+tracks it saves: the measured owned server collapsed duplicate additions, including
+imports from a duplicate-preserving server queue. Qoda does not assume every Plex
+version behaves the same. When an append of an existing track returns the same
+ordered playlist entries, Qoda explains that another copy was not confirmed and
+keeps the explicit-refresh fence. It sends no automatic retry. Use the local queue
+for repeated tracks; a confirmed distinct playlist entry remains supported.
+
+The retained owned-server observations are on the
+[`validation/plex-live` branch](https://github.com/42lizard/qoda-player/tree/9ef8a40/prototypes/plex-live/evidence)
+(`playlists.json` and `duplicate-queue.json`). The latter does not establish cleanup
+of the temporary source queue; it does establish removal of the imported test
+playlist. These limits are separate from the deterministic occurrence-edit tests.
 
 Selected/traversed/pinned queue entries cannot be dragged or used as ordinary
 anchors. Smart/read-only playlists, a busy playlist operation and an uncertain

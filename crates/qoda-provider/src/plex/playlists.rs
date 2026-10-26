@@ -372,6 +372,10 @@ impl PlexProvider {
                     .map_err(|_| ProviderError::UncertainMutation)?;
                 let old: Vec<_> = current.entries.iter().map(|e| e.id.as_str()).collect();
                 let new: Vec<_> = after.entries.iter().map(|e| e.id.as_str()).collect();
+                let duplicate_unconfirmed = matches!(&edit,PlaylistEdit::Append {track}
+                    if current.entries.iter().any(|entry|entry.track.as_ref().is_some_and(|old|old.reference==*track))
+                    && current.entries.len()==after.entries.len()
+                    && current.entries.iter().zip(&after.entries).all(|(before,after)|before.id==after.id && before.track.as_ref().map(|track|&track.reference)==after.track.as_ref().map(|track|&track.reference)));
                 let verified = match &edit {
                     PlaylistEdit::Rename { title } => after.playlist.title == *title && old == new,
                     PlaylistEdit::Append { track } => {
@@ -403,7 +407,11 @@ impl PlexProvider {
                     PlaylistEdit::Delete => false,
                 };
                 if !verified {
-                    return Err(ProviderError::UncertainMutation);
+                    return Err(if duplicate_unconfirmed {
+                        ProviderError::PlaylistDuplicateUnconfirmed
+                    } else {
+                        ProviderError::UncertainMutation
+                    });
                 }
                 Ok(PlaylistOutcome::Saved(after))
             }
@@ -436,6 +444,8 @@ mod tests {
         fail: bool,
         known: bool,
         deny: bool,
+        collapse: bool,
+        ignore_appends: bool,
     }
     fn escaped(s: &str) -> String {
         s.replace('&', "&amp;")
@@ -512,7 +522,9 @@ mod tests {
         } else if p == "/playlists/10/items" && method == Method::PUT {
             let key = params["uri"].rsplit('/').next().unwrap().to_owned();
             let id = (300 + d.writes).to_string();
-            d.rows.push((id, key));
+            if !d.ignore_appends && (!d.collapse || !d.rows.iter().any(|(_, old)| *old == key)) {
+                d.rows.push((id, key));
+            }
         } else if p.ends_with("/move") {
             let id = p.split('/').nth(4).unwrap();
             let index = d.rows.iter().position(|(entry, _)| entry == id).unwrap();
@@ -549,6 +561,8 @@ mod tests {
                 fail: false,
                 known: true,
                 deny: false,
+                collapse: false,
+                ignore_appends: false,
             }));
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
@@ -624,6 +638,31 @@ mod tests {
                 .unwrap()
                 .can_edit
         );
+    }
+    #[tokio::test]
+    async fn collapsed_duplicate_is_specific_and_never_retried_but_new_track_noop_stays_uncertain()
+    {
+        let f = Fixture::new().await;
+        f.data.lock().unwrap().collapse = true;
+        let before = f.snapshot().await;
+        let track = before.entries[0].track.as_ref().unwrap().reference.clone();
+        assert!(matches!(
+            f.edit(&before, PlaylistEdit::Append { track }).await,
+            Err(ProviderError::PlaylistDuplicateUnconfirmed)
+        ));
+        assert_eq!(f.data.lock().unwrap().writes, 1);
+        let after = f.snapshot().await;
+        assert_eq!(before.revision, after.revision);
+        f.data.lock().unwrap().ignore_appends = true;
+        let track = TrackRef {
+            source: f.source,
+            key: "999".to_owned().try_into().unwrap(),
+        };
+        assert!(matches!(
+            f.edit(&after, PlaylistEdit::Append { track }).await,
+            Err(ProviderError::UncertainMutation)
+        ));
+        assert_eq!(f.data.lock().unwrap().writes, 2);
     }
     #[tokio::test]
     async fn duplicate_occurrence_crud_is_verified_and_credentials_stay_private() {
