@@ -257,6 +257,7 @@ struct Source {
     key: String,
 }
 pub struct PlexProvider {
+    timeline_capabilities: std::sync::Mutex<HashMap<SourceId, reporting::Capability>>,
     account_scope: String,
     unavailable_sources: HashSet<SourceId>,
     unavailable_servers: usize,
@@ -420,6 +421,7 @@ impl PlexProvider {
         // must replace the former allowlist instead of looking like an outage.
         Ok((
             Self {
+                timeline_capabilities: Default::default(),
                 unavailable_sources: retained_sources(&identities, &account, &unavailable),
                 unavailable_servers: unavailable.len(),
                 account_scope: format!(
@@ -742,6 +744,7 @@ mod tests {
     async fn known_unreachable_source_pauses_as_network_failure_without_preparing_media() {
         let source = SourceId::new();
         let provider = PlexProvider {
+            timeline_capabilities: Default::default(),
             http: Client::new(),
             sources: HashMap::new(),
             account_scope: "a".repeat(64),

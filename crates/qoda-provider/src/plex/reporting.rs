@@ -5,6 +5,13 @@ use reqwest::Response;
 
 pub(super) const LIVE_QUALIFIED: bool = true; // VALIDATION BRANCH ONLY
 const LIMIT: usize = 64 * 1024;
+const CAPABILITY_TTL: Duration = Duration::from_secs(300);
+#[derive(Clone)]
+pub(super) struct Capability {
+    endpoint: Url,
+    metadata: Url,
+    validated: std::time::Instant,
+}
 
 async fn small_body(response: Response) -> Result<String, ProviderError> {
     use futures_util::StreamExt;
@@ -63,9 +70,49 @@ fn capabilities(base: &Url, body: &str) -> Result<(Url, Url), ProviderError> {
 }
 
 impl PlexProvider {
+    async fn timeline_capability(
+        &self,
+        id: SourceId,
+        source: &Source,
+    ) -> Result<Capability, ProviderError> {
+        let cached = {
+            let cache = self
+                .timeline_capabilities
+                .lock()
+                .map_err(|_| ProviderError::Network)?;
+            cache
+                .get(&id)
+                .filter(|capability| capability.validated.elapsed() < CAPABILITY_TTL)
+                .cloned()
+        };
+        if let Some(cached) = cached {
+            eprintln!(
+                "QODA_VALIDATION_DEBUG {}",
+                serde_json::json!({"event":"capability_cache_hit"})
+            );
+            return Ok(cached);
+        }
+        let discovery = self
+            .http
+            .get(path(&source.base, &["media", "providers"]))
+            .headers(source.headers.clone())
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+            .map_err(|_| ProviderError::Network)?;
+        let (endpoint, metadata) = capabilities(&source.base, &small_body(discovery).await?)?;
+        let capability = Capability {
+            endpoint,
+            metadata,
+            validated: std::time::Instant::now(),
+        };
+        self.timeline_capabilities
+            .lock()
+            .map_err(|_| ProviderError::Network)?
+            .insert(id, capability.clone());
+        Ok(capability)
+    }
     pub(super) async fn timeline(&self, report: Report) -> Result<Outcome, ProviderError> {
-        let diagnostic_start=std::time::Instant::now();
-        eprintln!("QODA_VALIDATION_DEBUG {}",serde_json::json!({"event":"transport_enter","state":format!("{:?}",report.state),"position_ms":report.position_ms}));
         let source = self
             .sources
             .get(&report.track.source)
@@ -80,19 +127,15 @@ impl PlexProvider {
         {
             return Err(ProviderError::InvalidReply);
         }
-        // Discovery and submission are serialized by the caller, with an overall
-        // deadline. Never route through the currently browsed source.
-        let discovery = self
-            .http
-            .get(path(&source.base, &["media", "providers"]))
-            .headers(source.headers.clone())
-            .timeout(Duration::from_secs(3))
-            .send()
-            .await
-            .map_err(|_| ProviderError::Network)?;
-        eprintln!("QODA_VALIDATION_DEBUG {}",serde_json::json!({"event":"discovery_response","http_status":discovery.status().as_u16(),"elapsed_ms":diagnostic_start.elapsed().as_millis()}));
-        let (endpoint, mut metadata) = capabilities(&source.base, &small_body(discovery).await?)?;
-        eprintln!("QODA_VALIDATION_DEBUG {}",serde_json::json!({"event":"capability_ready","elapsed_ms":diagnostic_start.elapsed().as_millis()}));
+        // Account/provider-scoped discovery avoids its round trip for every
+        // transition. The worker still bounds a cache miss plus POST to 3 seconds.
+        let Capability {
+            endpoint,
+            mut metadata,
+            ..
+        } = self
+            .timeline_capability(report.track.source, source)
+            .await?;
         metadata
             .path_segments_mut()
             .map_err(|_| ProviderError::InvalidReply)?
@@ -119,7 +162,10 @@ impl PlexProvider {
         if report.continuing {
             query.push(("continuing", "1".into()));
         }
-        eprintln!("QODA_VALIDATION_TIMELINE {}", serde_json::json!({"state":state,"position_ms":report.position_ms,"duration_ms":report.duration_ms.get(),"continuing":report.continuing,"method":"POST"}));
+        eprintln!(
+            "QODA_VALIDATION_TIMELINE {}",
+            serde_json::json!({"state":state,"position_ms":report.position_ms,"duration_ms":report.duration_ms.get(),"continuing":report.continuing,"method":"POST"})
+        );
         let response = self
             .http
             .post(endpoint)
@@ -129,6 +175,12 @@ impl PlexProvider {
             .send()
             .await
             .map_err(|_| ProviderError::Network)?;
+        if matches!(response.status().as_u16(), 404 | 410) {
+            self.timeline_capabilities
+                .lock()
+                .map_err(|_| ProviderError::Network)?
+                .remove(&report.track.source);
+        }
         let body = small_body(response).await?;
         let value: serde_json::Value =
             serde_json::from_str(&body).map_err(|_| ProviderError::InvalidReply)?;
@@ -136,7 +188,10 @@ impl PlexProvider {
             .get("MediaContainer")
             .and_then(serde_json::Value::as_object)
             .ok_or(ProviderError::InvalidReply)?;
-        eprintln!("QODA_VALIDATION_RESULT {}", serde_json::json!({"http_status":200,"termination_present":container.contains_key("terminationCode") || container.contains_key("terminationText")}));
+        eprintln!(
+            "QODA_VALIDATION_RESULT {}",
+            serde_json::json!({"http_status":200,"termination_present":container.contains_key("terminationCode") || container.contains_key("terminationText")})
+        );
         Ok(
             if container
                 .get("terminationCode")
@@ -170,17 +225,27 @@ mod tests {
     struct Fixture {
         requests: Arc<Mutex<Vec<(String, String, HeaderMap)>>>,
         reply: &'static str,
+        status: Arc<std::sync::atomic::AtomicU16>,
     }
-    async fn receive(AxumState(f): AxumState<Fixture>, request: Request) -> String {
+    async fn receive(
+        AxumState(f): AxumState<Fixture>,
+        request: Request,
+    ) -> (axum::http::StatusCode, String) {
         f.requests.lock().unwrap().push((
             request.method().to_string(),
             request.uri().to_string(),
             request.headers().clone(),
         ));
         if request.uri().path() == "/media/providers" {
-            DISCOVERY.into()
+            (axum::http::StatusCode::OK, DISCOVERY.into())
         } else {
-            f.reply.into()
+            (
+                axum::http::StatusCode::from_u16(
+                    f.status.load(std::sync::atomic::Ordering::SeqCst),
+                )
+                .unwrap(),
+                f.reply.into(),
+            )
         }
     }
     async fn fixture(
@@ -189,6 +254,7 @@ mod tests {
         let f = Fixture {
             requests: Arc::default(),
             reply,
+            status: Arc::new(std::sync::atomic::AtomicU16::new(200)),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
@@ -209,6 +275,7 @@ mod tests {
             key: "1".into(),
         };
         let provider = PlexProvider {
+            timeline_capabilities: Default::default(),
             account_scope: "fixture".into(),
             unavailable_sources: HashSet::new(),
             unavailable_servers: 0,
@@ -244,11 +311,11 @@ mod tests {
             assert_eq!(p.timeline(r.clone()).await.unwrap(), Outcome::Accepted);
         }
         let requests = f.requests.lock().unwrap();
-        assert_eq!(requests.len(), 6);
+        assert_eq!(requests.len(), 4);
         for (index, (method, uri, h)) in requests.iter().enumerate() {
             assert_eq!(h["X-Plex-Token"], "fake-token");
             assert_eq!(h["X-Plex-Client-Identifier"], "fake-client");
-            if index % 2 == 0 {
+            if index == 0 {
                 assert_eq!(method, "GET");
                 assert_eq!(uri, "/media/providers");
                 continue;
@@ -262,10 +329,10 @@ mod tests {
             assert_eq!(query["ratingKey"], "42");
             assert_eq!(query["time"], "1250");
             assert_eq!(query["duration"], "10000");
-            assert_eq!(query["state"], ["playing", "paused", "stopped"][index / 2]);
+            assert_eq!(query["state"], ["playing", "paused", "stopped"][index - 1]);
             assert!(!query.contains_key("playQueueItemID"));
             assert!(!uri.contains("fake-token"));
-            assert_eq!(query.contains_key("continuing"), index == 5);
+            assert_eq!(query.contains_key("continuing"), index == 3);
         }
         task.abort();
     }
@@ -278,6 +345,80 @@ mod tests {
         );
         assert!(f.requests.lock().unwrap().is_empty());
         task.abort();
+    }
+    #[tokio::test]
+    async fn expired_capabilities_are_rediscovered_without_sliding_freshness() {
+        let (p, id, f, task) = fixture(r#"{"MediaContainer":{}}"#).await;
+        p.timeline(report(id)).await.unwrap();
+        let validated = p.timeline_capabilities.lock().unwrap()[&id].validated;
+        p.timeline(report(id)).await.unwrap();
+        assert_eq!(
+            p.timeline_capabilities.lock().unwrap()[&id].validated,
+            validated
+        );
+        assert_eq!(f.requests.lock().unwrap().len(), 3);
+        p.timeline_capabilities
+            .lock()
+            .unwrap()
+            .get_mut(&id)
+            .unwrap()
+            .validated -= CAPABILITY_TTL;
+        p.timeline(report(id)).await.unwrap();
+        let requests = f.requests.lock().unwrap();
+        assert_eq!(requests.len(), 5);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(method, _, _)| method == "GET")
+                .count(),
+            2
+        );
+        task.abort();
+    }
+    #[tokio::test]
+    async fn source_and_provider_boundaries_do_not_reuse_other_discovery() {
+        let (mut p, id, f, task) = fixture(r#"{"MediaContainer":{}}"#).await;
+        let second = SourceId::new();
+        let mut source = p.sources[&id].clone();
+        source.view.id = second;
+        p.sources.insert(second, source);
+        p.timeline(report(id)).await.unwrap();
+        p.timeline(report(second)).await.unwrap();
+        assert_eq!(f.requests.lock().unwrap().len(), 4);
+        let other = PlexProvider {
+            timeline_capabilities: Default::default(),
+            account_scope: "different-account".into(),
+            http: p.http.clone(),
+            sources: p.sources.clone(),
+            unavailable_sources: HashSet::new(),
+            unavailable_servers: 0,
+        };
+        other.timeline(report(id)).await.unwrap();
+        let requests = f.requests.lock().unwrap();
+        assert_eq!(requests.len(), 6);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(method, _, _)| method == "GET")
+                .count(),
+            3
+        );
+        task.abort();
+    }
+    #[tokio::test]
+    async fn retired_route_invalidates_discovery_without_retrying_the_failed_post() {
+        for status in [404, 410] {
+            let (p, id, f, task) = fixture(r#"{"MediaContainer":{}}"#).await;
+            p.timeline(report(id)).await.unwrap();
+            f.status.store(status, std::sync::atomic::Ordering::SeqCst);
+            assert!(p.timeline(report(id)).await.is_err());
+            assert!(p.timeline_capabilities.lock().unwrap().is_empty());
+            assert_eq!(f.requests.lock().unwrap().len(), 3);
+            f.status.store(200, std::sync::atomic::Ordering::SeqCst);
+            p.timeline(report(id)).await.unwrap();
+            assert_eq!(f.requests.lock().unwrap().len(), 5);
+            task.abort();
+        }
     }
     #[tokio::test]
     async fn response_and_identity_errors_are_bounded_and_sanitized() {

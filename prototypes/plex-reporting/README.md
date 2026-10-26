@@ -2,7 +2,7 @@
 
 Validation branch only: **do not merge or install this build**. It changes the
 backend startup driver to `ao=null`, enables both reporting gates, and adds
-sanitized request/result instrumentation. Production main remains gated off.
+sanitized request/result instrumentation. Production activation is a separate reviewed change; these forced validation overrides must not be merged.
 The harness starts the real coordinator/provider/libmpv on private temporary XDG
 state, with no UI or working session bus. It reads only the dedicated validation
 credential, passing it over stdin. No credential enters arguments, environment,
@@ -75,3 +75,22 @@ Temporary trace instrumentation is validation-only and contains state/position,
 monotonic elapsed time and sanitized typed outcomes, never headers/URLs/IDs.
 Caching validated source/provider capabilities is the next measured optimization;
 it must not increase the three-second request deadline or weaken identity fences.
+
+## Cached capability verification
+
+The [final bounded cache run](cached-plan.md) completed in 28.46 seconds. Both
+matching predecessor/successor Playing sessions were observed, then absent after
+Stop. [Timing evidence](evidence/cached.json) shows the first discovery/POST took
+2,537 ms; cache-hit predecessor stop and successor start each took 7 ms. The
+continuing position update took 246 ms and final Stop took 9 ms. All five POSTs
+returned 200 without termination fields. The successor began at its own nominal
+488 ms, rather than inheriting the predecessor's 19,352 ms terminal position.
+No metadata offset/count/timestamp or history change was observed; those remain
+separate from timeline/session support. Item, credential and desktop configuration
+were preserved; the child exited 0 and private temporary state was removed.
+
+The cache is source/provider scoped, valid for five minutes without sliding its
+freshness on use; retired endpoints invalidate it without replaying the failed
+POST. The overall worker deadline remains three seconds. The initial negative
+sample and full slow-discovery diagnosis remain in their own commits/files.
+Use the relevant historical commit to reproduce a particular implementation.
