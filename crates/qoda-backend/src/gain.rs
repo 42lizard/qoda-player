@@ -26,6 +26,7 @@ pub struct Applied {
     pub db: f64,
     pub limited: bool,
     pub reason: &'static str,
+    pub metadata: Option<Metadata>,
 }
 impl Applied {
     pub fn off() -> Self {
@@ -35,6 +36,7 @@ impl Applied {
             db: 0.0,
             limited: false,
             reason: "ReplayGain off",
+            metadata: None,
         }
     }
     pub fn filter_graph(&self) -> Option<String> {
@@ -50,12 +52,109 @@ impl Applied {
             .map_or_else(|| "af=".into(), |graph| format!("af=lavfi=[{graph}]"))
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TagSource {
+    Flac,
+    Id3,
+    Ape,
+    Mp4,
+    Vorbis,
+    Opus,
+    WavId3,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldStatus {
+    #[default]
+    Missing,
+    Invalid,
+    Duplicate,
+    Valid,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Metadata {
+    pub source: Option<TagSource>,
+    pub track_gain: FieldStatus,
+    pub track_peak: FieldStatus,
+    pub album_gain: FieldStatus,
+    pub album_peak: FieldStatus,
+}
 #[derive(Clone, Debug, Default)]
 struct Tags {
     track: Option<f64>,
     track_peak: Option<f64>,
     album: Option<f64>,
     album_peak: Option<f64>,
+    metadata: Metadata,
+}
+impl Tags {
+    fn has_fields(&self) -> bool {
+        [
+            self.metadata.track_gain,
+            self.metadata.track_peak,
+            self.metadata.album_gain,
+            self.metadata.album_peak,
+        ]
+        .iter()
+        .any(|status| *status != FieldStatus::Missing)
+    }
+}
+const FIELD_NAMES: [&str; 4] = [
+    "REPLAYGAIN_TRACK_GAIN",
+    "REPLAYGAIN_TRACK_PEAK",
+    "REPLAYGAIN_ALBUM_GAIN",
+    "REPLAYGAIN_ALBUM_PEAK",
+];
+#[derive(Default)]
+struct Fields {
+    values: [Option<f64>; 4],
+    statuses: [FieldStatus; 4],
+    r128: bool,
+}
+impl Fields {
+    fn index(key: &str) -> Option<usize> {
+        FIELD_NAMES
+            .iter()
+            .position(|name| key.eq_ignore_ascii_case(name))
+    }
+    fn push(&mut self, key: &str, value: Option<&str>) {
+        if key
+            .get(..5)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("R128_"))
+        {
+            self.r128 = true;
+        }
+        if let Some(index) = Self::index(key) {
+            let parsed = value.and_then(|value| number(value, index % 2 == 0));
+            if self.statuses[index] != FieldStatus::Missing {
+                self.statuses[index] = FieldStatus::Duplicate;
+                self.values[index] = None;
+            } else {
+                self.statuses[index] = if parsed.is_some() {
+                    FieldStatus::Valid
+                } else {
+                    FieldStatus::Invalid
+                };
+                self.values[index] = parsed;
+            }
+        }
+    }
+    fn finish(self, source: TagSource) -> Tags {
+        Tags {
+            track: self.values[0],
+            track_peak: self.values[1],
+            album: self.values[2],
+            album_peak: self.values[3],
+            metadata: Metadata {
+                source: Some(source),
+                track_gain: self.statuses[0],
+                track_peak: self.statuses[1],
+                album_gain: self.statuses[2],
+                album_peak: self.statuses[3],
+            },
+        }
+    }
 }
 fn number(value: &str, gain: bool) -> Option<f64> {
     let value = value.trim();
@@ -76,7 +175,7 @@ fn number(value: &str, gain: bool) -> Option<f64> {
         })
     .then_some(n)
 }
-fn comments(mut bytes: &[u8]) -> Result<Tags, &'static str> {
+fn comment_fields(mut bytes: &[u8]) -> Result<(Fields, &[u8]), &'static str> {
     fn take<'a>(bytes: &mut &'a [u8], size: usize) -> Result<&'a [u8], &'static str> {
         let value = bytes.get(..size).ok_or("Invalid embedded tags")?;
         *bytes = &bytes[size..];
@@ -91,42 +190,25 @@ fn comments(mut bytes: &[u8]) -> Result<Tags, &'static str> {
     if count > 16384 {
         return Err("Embedded tag count exceeds limit");
     }
-    let mut fields: [Option<f64>; 4] = [None; 4];
-    let mut seen = [false; 4];
+    let mut fields = Fields::default();
     for _ in 0..count {
         let len = size(&mut bytes)?;
         let text =
             std::str::from_utf8(take(&mut bytes, len)?).map_err(|_| "Invalid embedded tags")?;
-        let Some((key, value)) = text.split_once('=') else {
-            continue;
-        };
-        let index = [
-            "REPLAYGAIN_TRACK_GAIN",
-            "REPLAYGAIN_TRACK_PEAK",
-            "REPLAYGAIN_ALBUM_GAIN",
-            "REPLAYGAIN_ALBUM_PEAK",
-        ]
-        .iter()
-        .position(|name| key.eq_ignore_ascii_case(name));
-        if let Some(i) = index {
-            // Conflicting or duplicated fields never supply an actionable gain/peak.
-            fields[i] = if seen[i] {
-                None
-            } else {
-                number(value, i % 2 == 0)
-            };
-            seen[i] = true;
+        if let Some((key, value)) = text.split_once('=') {
+            fields.push(key, Some(value));
+        } else {
+            fields.push(text, None);
         }
     }
+    Ok((fields, bytes))
+}
+fn comments(bytes: &[u8]) -> Result<Tags, &'static str> {
+    let (fields, bytes) = comment_fields(bytes)?;
     if !bytes.is_empty() {
         return Err("Invalid embedded tags");
     }
-    Ok(Tags {
-        track: fields[0],
-        track_peak: fields[1],
-        album: fields[2],
-        album_peak: fields[3],
-    })
+    Ok(fields.finish(TagSource::Flac))
 }
 fn select(mode: Mode, album_session: bool, tags: Result<Tags, &'static str>) -> Applied {
     if mode == Mode::Off {
@@ -141,6 +223,7 @@ fn select(mode: Mode, album_session: bool, tags: Result<Tags, &'static str>) -> 
                 db: 0.0,
                 limited: false,
                 reason,
+                metadata: None,
             };
         }
     };
@@ -158,6 +241,7 @@ fn select(mode: Mode, album_session: bool, tags: Result<Tags, &'static str>) -> 
             db: 0.0,
             limited: false,
             reason: "No valid embedded ReplayGain tag; unity gain",
+            metadata: Some(tags.metadata),
         };
     };
     let ceiling = peak.map(|p| -20.0 * p.log10()).unwrap_or(0.0);
@@ -167,6 +251,7 @@ fn select(mode: Mode, album_session: bool, tags: Result<Tags, &'static str>) -> 
         basis,
         db,
         limited: db < gain,
+        metadata: Some(tags.metadata),
         reason: if db < gain {
             if peak.is_some() {
                 "Gain capped by the matching embedded peak"
@@ -176,7 +261,16 @@ fn select(mode: Mode, album_session: bool, tags: Result<Tags, &'static str>) -> 
         } else if album && basis == "track" {
             "Album gain unavailable; using embedded track gain"
         } else {
-            "Embedded FLAC ReplayGain; preamp 0 dB"
+            match tags.metadata.source {
+                Some(TagSource::Flac) => "Embedded FLAC ReplayGain; preamp 0 dB",
+                Some(TagSource::Id3) => "Embedded ID3 ReplayGain; preamp 0 dB",
+                Some(TagSource::Ape) => "Embedded APEv2 ReplayGain; preamp 0 dB",
+                Some(TagSource::Mp4) => "Embedded MP4 ReplayGain; preamp 0 dB",
+                Some(TagSource::Vorbis) => "Embedded Vorbis ReplayGain; preamp 0 dB",
+                Some(TagSource::Opus) => "Embedded Opus ReplayGain; preamp 0 dB",
+                Some(TagSource::WavId3) => "Embedded WAV ID3 ReplayGain; preamp 0 dB",
+                None => "Embedded ReplayGain; preamp 0 dB",
+            }
         },
     }
 }

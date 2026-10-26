@@ -1,7 +1,12 @@
-//! Bounded native FLAC metadata reads over one pinned provider stream.
+//! Bounded container adapters over one pinned provider stream.
 use super::{INCOMPLETE, Tags, comments};
 use futures_util::StreamExt;
 use qoda_provider::{ByteRange, MediaResponse, MediaSource};
+mod ape;
+mod id3;
+mod mp4;
+mod ogg;
+mod wave;
 
 const PREFIX: usize = 64 * 1024;
 const BYTES: usize = 1024 * 1024;
@@ -12,6 +17,19 @@ const INVALID: &str = "Invalid embedded FLAC metadata";
 const RANGE: &str = "Embedded tag range was not confirmed";
 const LIMIT: &str = "Embedded tag scan exceeded its read limit";
 const CHANGED: &str = "Embedded tag media changed during the scan";
+const CONFLICT: &str = "Multiple embedded ReplayGain tag families or instances; unity gain";
+const SCALAR: usize = 64 * 1024;
+
+fn candidate(found: &mut Option<Tags>, next: Tags) -> Result<(), &'static str> {
+    match found {
+        Some(previous) if previous.has_fields() && next.has_fields() => Err(CONFLICT),
+        Some(previous) if previous.has_fields() || !next.has_fields() => Ok(()),
+        _ => {
+            *found = Some(next);
+            Ok(())
+        }
+    }
+}
 
 struct Block {
     kind: u8,
@@ -85,6 +103,8 @@ struct Reader<'a> {
     etag: Option<String>,
     requests: usize,
     transferred: usize,
+    lookahead: bool,
+    window: Option<(usize, Vec<u8>)>,
 }
 // Require the exact interval (clamped only at EOF) and a numeric object length.
 // Unknown totals cannot prove that skipped opaque blocks exist.
@@ -142,12 +162,21 @@ async fn body(
 }
 impl Reader<'_> {
     async fn get(&mut self, start: usize, size: usize) -> Result<Vec<u8>, &'static str> {
-        let end = end_offset(start, size)?;
+        // File offsets may cross large audio payloads. Container-specific
+        // metadata spans retain their own caps; response bytes/requests do not.
+        let end = start.checked_add(size).ok_or(LIMIT)?;
         if end > self.total {
             return Err(INCOMPLETE);
         }
         if let Some(bytes) = self.prefix.get(start..end) {
             return Ok(bytes.to_vec());
+        }
+        if self.lookahead
+            && let Some((base, bytes)) = &self.window
+            && start >= *base
+            && end - base <= bytes.len()
+        {
+            return Ok(bytes[start - base..end - base].to_vec());
         }
         if size == 0 {
             return Ok(Vec::new());
@@ -156,17 +185,67 @@ impl Reader<'_> {
             return Err(LIMIT);
         }
         self.requests += 1;
-        let range = ByteRange::try_from(format!("bytes={start}-{}", end - 1).as_str()).unwrap();
+        // New container walkers revisit adjacent tiny headers. A single bounded
+        // window avoids dozens of network round trips for a tail moov/APE tag.
+        // Native FLAC retains its exact sparse reads and existing qualification.
+        let (first, last) = if self.lookahead && size <= 4096 {
+            let first = start / 4096 * 4096;
+            let last = first
+                .checked_add(4096)
+                .unwrap_or(self.total)
+                .max(end)
+                .min(self.total);
+            if last - first <= BYTES - self.transferred {
+                (first, last)
+            } else {
+                (start, end)
+            }
+        } else {
+            (start, end)
+        };
+        let range = ByteRange::try_from(format!("bytes={first}-{}", last - 1).as_str()).unwrap();
         let response = self
             .stream
             .open(Some(range), false)
             .await
             .map_err(|_| "Embedded tags could not be read")?;
-        let total = interval(&response, start, end - 1)?;
+        let total = interval(&response, first, last - 1)?;
         if total != self.total || response.etag != self.etag {
             return Err(CHANGED);
         }
-        body(response, size, &mut self.transferred).await
+        let bytes = body(response, last - first, &mut self.transferred).await?;
+        if self.lookahead {
+            let result = bytes[start - first..end - first].to_vec();
+            self.window = Some((first, bytes));
+            Ok(result)
+        } else {
+            Ok(bytes)
+        }
+    }
+    async fn scan(&mut self) -> Result<Tags, &'static str> {
+        if self.prefix.len() < 4 {
+            return Err(INCOMPLETE);
+        }
+        if self.prefix.starts_with(b"fLaC") {
+            return self.flac().await;
+        }
+        self.lookahead = true;
+        if self.prefix.starts_with(b"OggS") {
+            return ogg::scan(self).await;
+        }
+        if [b"RIFF", b"RIFX", b"RF64", b"BW64"]
+            .iter()
+            .any(|magic| self.prefix.starts_with(*magic))
+        {
+            return wave::scan(self).await;
+        }
+        if self.prefix.get(4..8) == Some(b"ftyp") {
+            return mp4::scan(self).await;
+        }
+        if self.prefix.starts_with(b"ID3") || audio_signature(&self.prefix) {
+            return id3::scan(self).await;
+        }
+        Err("Embedded tags unavailable for this format")
     }
     async fn flac(&mut self) -> Result<Tags, &'static str> {
         signature(&self.prefix)?;
@@ -194,6 +273,15 @@ impl Reader<'_> {
         Err(LIMIT)
     }
 }
+fn audio_signature(bytes: &[u8]) -> bool {
+    bytes.get(..4).is_some_and(|head| {
+        head[0] == 0xff && head[1] & 0xe0 == 0xe0
+            || head == b"wvpk"
+            || head == b"MAC "
+            || head == b"MPCK"
+            || head.starts_with(b"MP+")
+    })
+}
 pub(super) async fn probe(stream: &dyn MediaSource) -> Result<Tags, &'static str> {
     let range = ByteRange::try_from("bytes=0-65535").unwrap();
     let mut response = stream
@@ -208,15 +296,32 @@ pub(super) async fn probe(stream: &dyn MediaSource) -> Result<Tags, &'static str
                 return Err(LIMIT);
             }
             bytes.extend_from_slice(&chunk);
-            let result = tags(&bytes);
-            if !matches!(result, Err(INCOMPLETE)) {
-                return result;
-            }
-            if bytes.len() == BYTES {
-                return Err(LIMIT);
+            if bytes.starts_with(b"fLaC") {
+                let result = tags(&bytes);
+                if !matches!(result, Err(INCOMPLETE)) {
+                    return result;
+                }
             }
         }
-        return tags(&bytes);
+        if response
+            .content_length
+            .is_some_and(|length| length != bytes.len() as u64)
+        {
+            return Err(INCOMPLETE);
+        }
+        let total = bytes.len();
+        return Reader {
+            stream,
+            prefix: bytes,
+            total,
+            etag: response.etag,
+            requests: 1,
+            transferred: total,
+            lookahead: false,
+            window: None,
+        }
+        .scan()
+        .await;
     }
     let total = interval(&response, 0, PREFIX - 1)?;
     let etag = response.etag.clone();
@@ -229,13 +334,16 @@ pub(super) async fn probe(stream: &dyn MediaSource) -> Result<Tags, &'static str
         etag,
         requests: 1,
         transferred,
+        lookahead: false,
+        window: None,
     }
-    .flac()
+    .scan()
     .await
 }
 
 #[cfg(test)]
 mod tests {
+    mod formats;
     use super::*;
     use bytes::Bytes;
     use qoda_provider::{ProviderError, ProviderFuture};

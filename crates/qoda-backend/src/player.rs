@@ -798,6 +798,13 @@ impl Player {
     pub(crate) fn test_output(output: &str) -> Result<Self, &'static str> {
         Self::with_output(output)
     }
+    #[cfg(test)]
+    pub(crate) fn test_options(
+        output: &str,
+        extra: &[(&str, String)],
+    ) -> Result<Self, &'static str> {
+        Self::with_options(output, extra)
+    }
     pub fn start() -> Result<Self, &'static str> {
         Self::with_output("pipewire")
     }
@@ -1468,6 +1475,7 @@ mod gapless_tests {
                             db,
                             limited: false,
                             reason: "Synthetic capture",
+                            metadata: None,
                         };
                         player.send(Command::LoadGain(
                             1,

@@ -101,7 +101,7 @@ recorded when resolving #45.
 | --- | --- | --- |
 | Browse, queue, playlist and UI contracts | Production Rust/QML plus deterministic provider/IPC/layout fixtures; scoped live owned-server baseline. | Complete owned-server cases #16. Physical input/multi-output claims from #18 are excluded by the accepted support revision. |
 | Source/auth/cache/privacy | Private credentials, account-scoped caches, offline read-only startup and cleanup/migration fixtures. | Live keyring/permission/revocation matrix #16; excluded server/account paths need an explicit support boundary. |
-| ReplayGain/native gapless | Native FLAC extraction and 36 named player-side WAV/FLAC gain/transition cases. | Other embedded containers #30. Final named-device PCM/profile/continuity claims from #27 remain unverified and excluded. |
+| ReplayGain/native gapless | Bounded embedded FLAC/ID3/APE/MP4/Vorbis/qualified Opus/WAV extraction, synthetic parser/Opus captures and 36 named player-side WAV/FLAC gain/transition cases. | Final named-device PCM/profile/continuity claims from #27 remain unverified and excluded. |
 | Optional converted output | SoXR VHQ, explicit plans and precision/layout policies. | Continuous converted DSP state across boundaries #41; do not call reset/transient behavior transparent. |
 | Recovery | Bounded pinned-version/visit recovery with synthetic native position checks. | Owned-server interruption/permission behavior #16. |
 | Plex listening/reporting | [Typed provider transport and bounded nominal observer](plex-reporting.md), with fake-provider/HTTP tests and scoped live pause/resume/stop/duplicate-handoff qualification; preparation is excluded. | Broader owned-server cases #16. No played-state/history synchronization claim. |
@@ -117,7 +117,7 @@ commits and CI/measurement records live in the linked issues and topic documents
 
 The [implementation queue](implementation-roadmap.md) maps #21 and #23–#30 to their
 focused follow-ups. #28 groups offline startup (implemented #31), history #32 and
-packaging #33. Remaining software work includes #30/#32/#41/#46; the support
+packaging #33. Remaining software work includes #32/#41/#46; the support
 proposal does not cancel it. #45's remaining real-manager qualification is separate
 from its implemented shutdown and activation changes.
 

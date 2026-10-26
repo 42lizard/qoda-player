@@ -1,0 +1,50 @@
+{
+  "source": "Original 0.25-second 1 kHz mathematical tone; no recorded or user-library audio",
+  "license": "MIT (repository original synthetic fixtures)",
+  "ffmpeg": "ffmpeg version n9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+  "tag_writer": "Mutagen 1.47.0",
+  "tags": {
+    "REPLAYGAIN_TRACK_GAIN": "-6.0 dB",
+    "REPLAYGAIN_TRACK_PEAK": "1.0",
+    "REPLAYGAIN_ALBUM_GAIN": "-12.0 dB",
+    "REPLAYGAIN_ALBUM_PEAK": "1.0"
+  },
+  "files": {
+    "id3v23.mp3": {
+      "bytes": 5096,
+      "sha256": "44f62d0a2a052aa4835027d9b4fe80e6319e72f4405b18c8b4936780ed59fb3e"
+    },
+    "id3v24.mp3": {
+      "bytes": 4967,
+      "sha256": "7bacc8c6ae8ea5485942d03c4c25da1d35aa2c42ab3fabca50b2193ee544d9b3"
+    },
+    "ape.mp3": {
+      "bytes": 5025,
+      "sha256": "5510a124bd7ed2b4850fccfacc00eb81c3ee8e8beeb65d3233f0948228838bac"
+    },
+    "gain.m4a": {
+      "bytes": 5597,
+      "sha256": "f7e410657b29b24006c0624cd7cb32e2136e62934f47725ea9a89ad23102533d"
+    },
+    "gain.ogg": {
+      "bytes": 5185,
+      "sha256": "208895abf26aad78b7cf9cf5e479cb32f1a6392a74782be6ec4006a20890ebb3"
+    },
+    "gain.opus": {
+      "bytes": 4905,
+      "sha256": "4d1c298f8c1df1a9f645903fcd1e327730de5c57c762c296d666f793eeaa9021"
+    },
+    "gain.wav": {
+      "bytes": 48220,
+      "sha256": "b716cab31cf43be3a7d889e58253a450b1340c91a85eb4d8efe4b38b769a26c1"
+    },
+    "opus-base.opus": {
+      "bytes": 4780,
+      "sha256": "1ff7b88674f9fcafdde82b0703ad95e45ec006c3259eb033b0172cbbedd123e7"
+    },
+    "opus-r128.opus": {
+      "bytes": 4926,
+      "sha256": "ec9e43e575d4bb6e8330688070a59321c17fe9ba457febf39af86c60785da817"
+    }
+  }
+}
