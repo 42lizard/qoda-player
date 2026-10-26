@@ -64,7 +64,7 @@ def activate(config, root):
     if any(isinstance(entry, dict) and entry.get("id") == "omarchy.audio" for entry in right):
         placement += ["--before", "omarchy.audio"]
     subprocess.run(["omarchy-shell", "shell", "rescanPlugins"], check=True, timeout=15)
-    subprocess.run(["omarchy", "bar", "set", PLUGIN_ID, "playerPath", str(root), *placement], check=True, timeout=15)
+    subprocess.run(["omarchy", "bar", "set", PLUGIN_ID, "playerPath", str(root), "--section", "right"], check=True, timeout=15)
     subprocess.run(["omarchy", "plugin", "enable", PLUGIN_ID, *placement], check=True, timeout=15)
 
 

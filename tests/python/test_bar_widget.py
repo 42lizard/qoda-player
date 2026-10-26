@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("bar_widget", ROOT / "tools/bar-widget.py")
@@ -63,6 +64,20 @@ class Installer(unittest.TestCase):
         with self.assertRaises(ValueError):
             widget.install(self.config)
         self.assertEqual((outside / "sentinel").read_text(), "preserved")
+
+    def test_activation_uses_supported_cli_arguments_and_preserves_a_config_backup(self):
+        shell = self.config / "omarchy/shell.json"
+        shell.parent.mkdir(parents=True)
+        original = b'{"bar":{"layout":{"right":[{"id":"omarchy.audio"}]}},"version":1}\n'
+        shell.write_bytes(original)
+        with mock.patch.object(widget, "config_home", return_value=self.config), mock.patch.object(widget.subprocess, "run") as run:
+            widget.activate(self.config, ROOT)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[1], ["omarchy", "bar", "set", "qoda.player", "playerPath", str(ROOT), "--section", "right"])
+        self.assertEqual(commands[2], ["omarchy", "plugin", "enable", "qoda.player", "--section", "right", "--before", "omarchy.audio"])
+        backups = list((self.config / "omarchy/qoda-widget-backups").glob("*/shell.json"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
 
     def test_alternate_profile_cannot_activate_the_real_desktop(self):
         with self.assertRaises(ValueError):
