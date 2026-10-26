@@ -108,6 +108,7 @@ struct AlbumSession {
 #[derive(Clone, Serialize)]
 pub struct Queue {
     membership: QueueMembership,
+    visit: uuid::Uuid,
     revision: Counter,
     metadata: HashMap<OccurrenceId, Track>,
     selected: Option<OccurrenceId>,
@@ -131,6 +132,7 @@ impl Default for Queue {
     fn default() -> Self {
         Self {
             membership: QueueMembership::new(),
+            visit: uuid::Uuid::new_v4(),
             revision: Counter::ZERO,
             metadata: HashMap::new(),
             selected: None,
@@ -159,6 +161,9 @@ impl Queue {
             self.revision,
             self.position_seconds.to_bits(),
         )
+    }
+    pub fn visit(&self) -> uuid::Uuid {
+        self.visit
     }
     pub fn position(&self) -> f64 {
         self.position_seconds
@@ -482,6 +487,7 @@ impl Queue {
             .copied()
             .collect();
         self.selected = Some(id);
+        self.visit = uuid::Uuid::new_v4();
         self.position_seconds = 0.0;
         self.ended = false;
         self.navigating = false;
@@ -524,6 +530,7 @@ impl Queue {
         let track = self.metadata.get(&id).cloned().ok_or(Error::Missing)?;
         let revision = self.next_revision()?;
         self.selected = Some(id);
+        self.visit = uuid::Uuid::new_v4();
         self.cursor = Some(cursor);
         self.navigating = true;
         self.recorded = true;
@@ -617,6 +624,7 @@ impl Queue {
             self.ended = false;
             self.navigating = false;
             self.recorded = false;
+            self.visit = uuid::Uuid::new_v4();
             self.revision = revision;
             return Ok(Some(track));
         }
@@ -765,6 +773,7 @@ impl Queue {
         self.priority.retain(|entry| *entry != id);
         if selected {
             self.selected = successor;
+            self.visit = uuid::Uuid::new_v4();
             self.position_seconds = 0.0;
             self.ended = successor.is_none();
             self.navigating = false;
@@ -839,6 +848,7 @@ impl Queue {
                 "navigation_dropped",
                 "unavailable",
                 "album_session",
+                "visit",
             ] {
                 if fields.contains_key(key) {
                     return Err(<serde_json::Error as serde::de::Error>::custom(
@@ -846,6 +856,7 @@ impl Queue {
                     ));
                 }
             }
+            fields.insert("visit".into(), serde_json::json!(uuid::Uuid::new_v4()));
             fields.insert("order".into(), serde_json::json!(order));
             fields.insert("shuffled".into(), serde_json::json!(false));
             fields.insert("repeat".into(), serde_json::json!("off"));
@@ -864,6 +875,7 @@ impl<'de> Deserialize<'de> for Queue {
         #[serde(deny_unknown_fields)]
         struct Wire {
             membership: QueueMembership,
+            visit: uuid::Uuid,
             revision: Counter,
             metadata: HashMap<OccurrenceId, Track>,
             selected: Option<OccurrenceId>,
@@ -901,7 +913,8 @@ impl<'de> Deserialize<'de> for Queue {
         let entries = w.membership.entries();
         let ids: HashSet<_> = entries.iter().map(|e| e.id).collect();
         let invalid = || D::Error::custom("invalid saved session invariants");
-        if entries.len() > LIMIT
+        if w.visit.is_nil()
+            || entries.len() > LIMIT
             || w.metadata.len() != ids.len()
             || w.metadata.keys().any(|id| !ids.contains(id))
             || w.traversed.iter().any(|id| !ids.contains(id))
@@ -964,6 +977,7 @@ impl<'de> Deserialize<'de> for Queue {
         }
         Ok(Self {
             membership: w.membership,
+            visit: w.visit,
             revision: w.revision,
             metadata: w.metadata,
             selected: w.selected,

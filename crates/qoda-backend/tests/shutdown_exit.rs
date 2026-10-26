@@ -185,7 +185,7 @@ fn ipc_quit_and_service_signal_exit_cleanly_after_successful_checkpoint() {
             .unwrap();
         assert_eq!(
             serde_json::from_str::<Value>(&payload).unwrap()["format"],
-            4
+            5
         );
     }
 }
@@ -304,4 +304,60 @@ fn startup_preserves_a_live_unmanaged_socket() {
     assert_eq!(fixture.wait(), 78);
     assert!(fixture.root.join("runtime/qoda/backend.sock").exists());
     drop(listener);
+}
+
+#[test]
+fn archive_controls_use_account_fences_and_export_a_private_empty_snapshot() {
+    fn until(reader: &mut BufReader<UnixStream>, predicate: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            let state: Value = serde_json::from_str(&line).unwrap();
+            if predicate(&state) {
+                return state;
+            }
+            assert!(Instant::now() < deadline, "Archive operation timed out");
+        }
+    }
+    let mut fixture = Fixture::start();
+    let mut reader = fixture.connect();
+    let state = Fixture::ready(&mut reader);
+    let instance = state["instance"].clone();
+    if state["archive"]["available"] != true {
+        until(&mut reader, |v| v["archive"]["available"] == true);
+    }
+    writeln!(reader.get_mut(),"{}",serde_json::json!({"op":"archive_retention","instance":instance,"account_epoch":"0","days":30})).unwrap();
+    until(&mut reader, |v| v["archive"]["retention_days"] == 30);
+    writeln!(reader.get_mut(),"{}",serde_json::json!({"op":"archive_retention","instance":instance,"account_epoch":"stale-account","days":7})).unwrap();
+    let denied = until(&mut reader, |v| {
+        v["error"]
+            .as_str()
+            .is_some_and(|s| s.contains("account changed"))
+    });
+    assert_eq!(denied["archive"]["retention_days"], 30);
+    writeln!(
+        reader.get_mut(),
+        "{}",
+        serde_json::json!({"op":"archive_export","instance":instance,"account_epoch":"0"})
+    )
+    .unwrap();
+    let exported = until(&mut reader, |v| v["archive"]["export_path"].is_string());
+    let path = PathBuf::from(exported["archive"]["export_path"].as_str().unwrap());
+    assert!(path.starts_with(fixture.root.join("state/qoda/archive/exports")));
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let document: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(document["format"], 1);
+    assert_eq!(document["retention_days"], 30);
+    assert!(document["entries"].as_array().unwrap().is_empty());
+    writeln!(
+        reader.get_mut(),
+        "{}",
+        serde_json::json!({"op":"quit","instance":instance})
+    )
+    .unwrap();
+    assert_eq!(fixture.wait(), 0);
 }

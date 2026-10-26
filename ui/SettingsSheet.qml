@@ -27,15 +27,19 @@ Drawer {
                 Label { text: "Settings"; color: Theme.foreground; font.pixelSize: 20; font.bold: true; Layout.fillWidth: true }
                 Button { text: "Close"; Accessible.name: "Close settings"; onClicked: sheet.closeRequested() }
             }
-            RowLayout {
+            Flow {
+                id: sectionTabs
                 Layout.fillWidth: true
+                Layout.preferredHeight: childrenRect.height
+                property int columns: width >= 380 ? 4 : 2
+                spacing: 6
                 Repeater {
-                    model: [{key: "account", title: "Account"}, {key: "audio", title: "Audio"}, {key: "cache", title: "Cache"}]
+                    model: [{key: "account", title: "Account"}, {key: "audio", title: "Audio"}, {key: "cache", title: "Cache"}, {key: "history", title: "History"}]
                     Button {
                         required property var modelData
                         text: modelData.title
                         highlighted: sheet.section === modelData.key
-                        Layout.fillWidth: true
+                        width: (sectionTabs.width - sectionTabs.spacing * (sectionTabs.columns - 1)) / sectionTabs.columns
                         onClicked: sheet.sectionRequested(modelData.key)
                     }
                 }

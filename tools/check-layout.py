@@ -40,6 +40,7 @@ HOOKS = """
         function capture(path: string): void { captureDone = ""; fullFrame.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function captureSettings(path: string): void { captureDone = ""; settingsSheet.contentItem.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function settingsGeometry(): string { function walk(item) { return {type: String(item), x:item.x,y:item.y,w:item.width,h:item.height,ih:item.implicitHeight,visible:item.visible,children:(item.children || []).map(walk)}; } return JSON.stringify(walk(settingsSheet.contentItem)); }
+        function showArchive(): void { root.showSettings("history"); }
         function closeSettings(): void { root.closeSettings(); }
         function captureQueue(path: string): void { captureDone = ""; queuePane.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function closeQueue(): void { queueDrawer.close(); }
@@ -113,6 +114,13 @@ def fixture():
         "sign_in": {"connected": True, "saved": "present", "message": "",
                     "can_save": False, "keyring_action": None},
         "storage": {"state": "saved", "message": "Saved"},
+        "archive": {"available": True, "retention_days": 90, "cleanup_pending": False,
+                    "total": 2, "offset": 0, "has_next": False,
+                    "message": "Nominal observations · 90 days · at most 10000 visits.",
+                    "entries": [{"visit": str(index), "title": "Fictional repeated track",
+                                 "artist": "Mira Vale", "album": "Soft geometry", "track": {"source": "fixture"},
+                                 "first_observed_ms": 1700000000000 + index * 1000,
+                                 "last_position_ms": 1200, "max_position_ms": 9000} for index in range(2)]},
         "mpris": {"state": "available", "message": "Available"},
         "gapless": {"enabled": True, "phase": "idle", "message": ""},
         "albums": {
@@ -272,7 +280,12 @@ def check(output=None, theme_check=False):
                         return
                     for child in item["children"]:
                         if child["visible"] and child["w"] > 0 and child["h"] > 0:
-                            assert child["w"] <= item["w"] + 1, (item, child)
+                            # ListView can retain a plain, childless QQuickItem
+                            # layout placeholder at the old width during reuse.
+                            # It has no paint content; check every painted node.
+                            placeholder = child["type"].startswith("QQuickItem(") and not child["children"]
+                            if not placeholder:
+                                assert child["w"] <= item["w"] + 1, (item, child)
                             assert_bounds(child)
                 assert_bounds(settings_geometry)
                 ipc("showAccount")
@@ -281,6 +294,15 @@ def check(output=None, theme_check=False):
                 ipc("showCache")
                 time.sleep(0.15)
                 capture("cache-small", settings=True)
+                ipc("showArchive")
+                time.sleep(0.15)
+                capture("archive-small", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("resize", 340, 640)
+                time.sleep(0.15)
+                capture("archive-narrow", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("resize", 540, 760)
                 ipc("conversionFixture")
                 time.sleep(0.15)
                 capture("hq-conversion-small", settings=True)

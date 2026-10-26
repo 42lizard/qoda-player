@@ -281,7 +281,7 @@ The native surface check also opens the unavailable-bus UI and invokes Retry thr
 
 Album-detail cover validation verifies that metadata loading issues no image request, shared grants prioritize/deduplicate the selected album within the 100-album bound, denial clears the grant set, and QML uses only the shared cover grant while visible. Existing artwork checks cover memory/disk reuse, restart, expiry, revocation and sign-out cleanup for the shared image path.
 
-Unavailable-entry and album-origin persistence use session schema/payload 4. Opening schemas 1–3 first creates a consistent pre-migration backup, then rewrites the checkpoint transactionally with unknown availability where no failure was recorded and no invented album origin. Unsupported future formats are preserved. Restore accepts supported version 1–4 backups. Failure records contain occurrence identity and a bounded typed reason, not provider diagnostics or temporary access. Startup remains paused; no failed entry is retried automatically on restart.
+Unavailable-entry, album-origin and current-visit persistence use session schema/payload 5. Opening schemas 1–4 first creates a consistent pre-migration backup, then rewrites the checkpoint transactionally with unknown availability where no failure was recorded and no invented album origin. Unsupported future formats are preserved. Restore accepts supported version 1–5 backups. Failure records contain occurrence identity and a bounded typed reason, not provider diagnostics or temporary access. Startup remains paused; no failed entry is retried automatically on restart.
 
 Validation covers duplicate-isolated failures, explicit retry with pinned media versions, retained/removable traversed failures, unknown-member refusal, missing-field legacy restoration, bounded all-unavailable scans in both repeat modes, pause/explicit-selection gates, source-wide failure non-consumption, malformed-version refusal, stale request fences and stale gapless-preparation replies. `python tools/check-navigation.py --unavailable` additionally checks native inspection, disabled offline Retry, compact/full retention, paused failure restoration and identity-fenced removal without provider requests or audio.
 
@@ -298,3 +298,5 @@ and running `cargo test -p qoda-backend selected_hardware_hq_preflight_submits_n
 That test currently asserts the measured development speaker's 48 kHz/S16 result,
 not arbitrary devices; it installs/closes parameters and writes no audio frames.
 Do not run it as part of general CI or assume it qualifies physical playback.
+
+The [nominal listening archive](listening-archive.md) is independent of Previous and session checkpoint backups. Its retention, export and migration contract was recorded before storage was added.

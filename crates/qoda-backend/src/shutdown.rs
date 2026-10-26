@@ -12,13 +12,14 @@ pub const CLEANUP_FAILED: u8 = 76;
 #[derive(Debug)]
 pub enum Error {
     Checkpoint(storage::Error),
+    Archive(&'static str),
     Backup(storage::Error),
     Cleanup(std::io::Error),
 }
 impl Error {
     pub fn exit_status(&self) -> u8 {
         match self {
-            Self::Checkpoint(_) => CHECKPOINT_FAILED,
+            Self::Checkpoint(_) | Self::Archive(_) => CHECKPOINT_FAILED,
             Self::Backup(_) => BACKUP_WARNING,
             Self::Cleanup(_) => CLEANUP_FAILED,
         }
@@ -27,6 +28,7 @@ impl Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Archive(error) => write!(f, "final archive checkpoint failed: {error}"),
             Self::Checkpoint(error) => write!(f, "final checkpoint failed: {error}"),
             Self::Backup(error) => write!(f, "session saved; final backup update failed: {error}"),
             Self::Cleanup(error) => write!(f, "runtime socket cleanup failed: {error}"),

@@ -131,6 +131,6 @@ These are synthetic digital captures at a named PCM-file boundary, for the liste
 
 ## Persistence and checks
 
-Session schema/payload 4 adds validated album-origin membership. Opening schemas 1–3 creates a consistent pre-migration backup before transactional rewrite; old sessions restore without inventing an album origin. Restore accepts supported backups 1–4. Future schemas/payloads are preserved. Gain settings are separate from the session, sign-in and caches; disconnecting does not erase general preferences.
+Session schema/payload 5 retains validated album-origin membership and adds durable visit identity for the [listening archive](../listening-archive.md). Opening schemas 1–4 creates a consistent pre-migration backup before transactional rewrite; old sessions restore without inventing an album origin or archive evidence. Restore accepts supported backups 1–5. Future schemas/payloads are preserved. Gain settings are separate from the session, sign-in and caches; disconnecting does not erase general preferences.
 
 Run `./tools/check.sh` for Clippy, workspace tests and QML input checks. After `cargo build -p qoda-backend --locked`, `python tools/check-surfaces.py` checks real-backend mode changes, invalid-mode rejection, private persistence, UI controls and paused restart with an empty isolated profile. No credentials, Plex requests or real music are needed. `python tools/check-layout.py` checks the production full-window layout offscreen; physical/native input claims from #18 remain unverified and excluded by the accepted first-release boundary.

@@ -274,7 +274,7 @@ ShellRoot {
                 spacing: 6
                 visible: root.accountExpanded
                 Button { text: "Connect Plex"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
-                Button { text: "Disconnect"; enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes cached metadata, artwork and the saved session. Keeps saved sign-in."; onClicked: root.send("disconnect") }
+                Button { text: "Disconnect"; enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes cached metadata, artwork and the saved session and listening archive. Keeps saved sign-in."; onClicked: root.send("disconnect") }
                 Button { text: "Restore saved sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
                 Button { text: "Reconnect Plex"; visible: !!root.snapshot.sign_in && !!root.snapshot.sign_in.can_reconnect; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connecting && !root.snapshot.sign_in.keyring_action; onClicked: root.editQueue("reconnect", {}) }
                 Button { text: "Save sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
@@ -316,6 +316,16 @@ ShellRoot {
                     Button { text: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? "Retry metadata cleanup" : "Clear metadata"; enabled: socket.connected && !root.snapshot.metadata_cache_action; ToolTip.visible: hovered; ToolTip.text: "Resets loaded browser views and cached metadata. Keeps your queue, sign-in, artwork and cache targets."; onClicked: root.send("clear_metadata_cache") }
                     Label { visible: !!root.snapshot.metadata_cache_action; text: "Updating metadata cache…"; color: Theme.muted; padding: 6 }
                 }
+            }
+            ArchiveBrowser {
+                objectName: "listeningArchive"
+                visible: root.settingsSection === "history"
+                width: parent.width
+                snapshot: root.snapshot.archive || null
+                connected: socket.connected
+                accountEpoch: root.snapshot.account_epoch || ""
+                libraries: root.snapshot.libraries || []
+                onRequested: (operation, fields) => root.send(operation, fields)
             }
             RowLayout {
                 width: parent.width
@@ -374,6 +384,7 @@ ShellRoot {
                     MenuItem { text: "Account"; onTriggered: root.showSettings("account") }
                     MenuItem { text: "Audio settings"; onTriggered: root.showSettings("audio") }
                     MenuItem { text: "Cache settings"; onTriggered: root.showSettings("cache") }
+                    MenuItem { text: "Listening archive"; onTriggered: root.showSettings("history") }
                     MenuItem { text: "Gapless"; checkable: true; checked: !!root.snapshot.gapless && root.snapshot.gapless.enabled; enabled: socket.connected && !!root.snapshot.gapless; onTriggered: root.send("set_gapless", {enabled: checked}) }
                     MenuSeparator {}
                     MenuItem { text: "Hide player"; onTriggered: root.hideSurface() }

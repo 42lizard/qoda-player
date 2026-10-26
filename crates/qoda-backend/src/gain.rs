@@ -415,7 +415,7 @@ impl Settings {
         Ok(())
     }
     pub fn view(&self) -> serde_json::Value {
-        serde_json::json!({"mode":self.mode,"applied":null,"message":self.issue.unwrap_or("Changes apply to upcoming preparations; restart/reselect a track to apply now."),"available":self.issue.is_none(),"metadata_scope":"Embedded FLAC ReplayGain; other formats use unity when tags are unavailable"})
+        serde_json::json!({"mode":self.mode,"applied":null,"message":self.issue.unwrap_or("Changes apply to upcoming preparations; restart/reselect a track to apply now."),"available":self.issue.is_none(),"metadata_scope":"Embedded ReplayGain; unsupported or unavailable tags use unity"})
     }
 }
 

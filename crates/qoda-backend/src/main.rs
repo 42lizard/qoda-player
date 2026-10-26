@@ -1,6 +1,7 @@
 mod activation;
 mod albums;
 mod alsa_guard;
+mod archive;
 mod artwork;
 mod artwork_store;
 mod cache_files;
@@ -720,6 +721,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(error) = start_error {
         storage_result(&mut state, Err(error));
     }
+    let mut archive = archive::Controller::start(archive::path());
+    state["archive"] = json!(archive.view());
     let mut navigation_offset = None;
     state["navigation"] = json!(queue.navigation_page(navigation_offset));
     state["queue"] = json!(queue.snapshot());
@@ -849,12 +852,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let reporting_view=reporting.view();
                 let reporting_changed=state["reporting"]!=reporting_view;
                 state["reporting"]=reporting_view;
+                let archive_view=json!(archive.view());
+                let archive_changed=state["archive"]!=archive_view;
+                state["archive"]=archive_view;
                 let mut presentation_changed=false;
-                if audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale || reporting_changed {
+                if archive_changed || audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale || reporting_changed {
                     last_stream_failed=stream_failed;
                     last_clock_stale=clock_stale;
                     presentation_changed=record_clock(&mut queue,&audio,epochs.current,&mut presented_generation,stream_failed);
                     gapless.observed(&audio,presented_generation);
+                    archive.observe(&queue,&audio,epochs.current,presented_generation,stream_failed || clock_stale,observed_at);
                     last_audio = audio.clone();
                     state["audio"] = json!(audio);
                     if let Some(error) = audio.error.filter(|_|audio.generation==epochs.current).or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
@@ -2276,6 +2283,33 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
+                    "archive_page" | "archive_export" | "archive_clear" | "archive_retention" => {
+                        let result = if v["account_epoch"].as_str()
+                            != Some(auth_generation.to_string().as_str())
+                        {
+                            Err("The account changed; review the archive before retrying.")
+                        } else {
+                            match v["op"].as_str().unwrap() {
+                                "archive_page" => match v["offset"]
+                                    .as_u64()
+                                    .and_then(|n| usize::try_from(n).ok())
+                                    .filter(|n| *n <= 10000)
+                                {
+                                    Some(offset) => archive.page(offset).await,
+                                    None => Err("Invalid archive page."),
+                                },
+                                "archive_export" => archive.export(),
+                                "archive_clear" => archive.clear(archive.cleanup_pending()).await,
+                                _ => match v["days"].as_u64().and_then(|n| u16::try_from(n).ok()) {
+                                    Some(days) => archive.retention(days).await,
+                                    None => Err("Invalid archive retention."),
+                                },
+                            }
+                        };
+                        if let Err(error) = result {
+                            state["error"] = json!(error);
+                        }
+                    }
                     "disconnect" | "forget_signin" => {
                         let forget = v["op"] == "forget_signin";
                         for task in [browse_task.take(), prepare_task.take(), auth_task.take()]
@@ -2302,6 +2336,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         player.send(Command::Pause(true));
                         player.send(Command::Stop);
                         tokio::join!(artwork.revoke(true), metadata.clear());
+                        if let Err(error) = archive.clear(true).await {
+                            state["error"] = json!(error);
+                        }
                         queue = queue.empty_session();
                         purge_epoch = purge_epoch
                             .checked_add(1)
@@ -2398,6 +2435,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     artwork.revoke(true).await;
                     let live = p.libraries();
                     let account = p.account_scope().to_owned();
+                    if let Err(error) = archive.bind(account.clone()).await {
+                        state["error"] = json!(error);
+                    }
                     let snapshot = offline::reconcile(
                         cached_discovery.as_ref(),
                         account,
@@ -2459,6 +2499,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         albums.invalidate();
                         search.invalidate()?;
                         metadata.clear().await;
+                        let _ = archive.clear(true).await;
                         provider = None;
                         current_credential = None;
                         state["sign_in"]["connected"] = json!(false);
@@ -2716,6 +2757,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         if state["navigation"]["session"] != json!(queue.durable_stamp().0) {
             navigation_offset = None;
         }
+        state["archive"] = json!(archive.view());
         state["navigation"] = json!(queue.navigation_page(navigation_offset));
         state["queue"] = json!(queue.snapshot());
         state["recovery"] = json!(recovery.view);
@@ -2789,6 +2831,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     metadata.shutdown().await;
     server.abort();
+    let archive_checkpoint = archive.flush().await;
     let checkpoint = shutdown::checkpoint(durable.flush(queue.clone(), purge_epoch).await);
     if let Some(desktop) = desktop {
         desktop.shutdown().await;
@@ -2803,6 +2846,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Qoda: runtime socket cleanup failed: {error}");
     }
     checkpoint?;
+    archive_checkpoint.map_err(shutdown::Error::Archive)?;
     socket_cleanup.map_err(shutdown::Error::Cleanup)?;
     Ok(())
 }

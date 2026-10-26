@@ -82,6 +82,9 @@ The player's current collection of listening entries, their order, playback posi
 **Listening history**:
 The played entries of the current listening session, retained separately from the current and upcoming queue. It supports inspection and Previous navigation, and resets when a new session starts or the session is discarded.
 
+**Listening archive**:
+Retained nominal playback visits across listening sessions, independent of the current queue and Previous navigation. Observation positions do not establish audibility, completion or time spent listening.
+
 **Play now**:
 An explicit action that replaces the active listening queue with the chosen content and starts playback immediately.
 
@@ -116,7 +119,7 @@ Whether the user currently wants playback to proceed or remain paused/stopped. B
 Locally retained metadata from previously accessed provider content. It may be stale or incomplete and does not imply that music is available for offline playback.
 
 **Sign out**:
-An explicit account action that stops affected playback and removes that account's credentials, cached catalog/artwork, and saved listening session. General application preferences remain.
+An explicit account action that stops affected playback and removes that account's credentials, cached catalog/artwork, saved listening session and retained listening archive. General application preferences remain.
 
 **Confirmed access loss**:
 Reliable provider evidence that previously accessible content is no longer permitted. A temporary network failure or expired sign-in alone is not confirmed access loss.

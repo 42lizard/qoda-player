@@ -105,7 +105,7 @@ recorded when resolving #45.
 | Optional converted output | SoXR VHQ, explicit plans and precision/layout policies. | Continuous converted DSP state across boundaries #41; do not call reset/transient behavior transparent. |
 | Recovery | Bounded pinned-version/visit recovery with synthetic native position checks. | Owned-server interruption/permission behavior #16. |
 | Plex listening/reporting | [Typed provider transport and bounded nominal observer](plex-reporting.md), with fake-provider/HTTP tests and scoped live pause/resume/stop/duplicate-handoff qualification; preparation is excluded. | Broader owned-server cases #16. No played-state/history synchronization claim. |
-| History | Bounded Previous path is implemented and separate from a complete archive. | Complete nominal history, retention/export/migration/privacy contract and storage #32. |
+| History | Bounded Previous path and separate [nominal archive](listening-archive.md), durable visit identities, account cleanup, retention and private export. | No audibility, played-duration, completion or provider-history inference. |
 | Lifecycle/install | Ownership/rollback fixtures, installed launcher stubs, native process shutdown, private-bus activation, native widget and UI fixtures; software increment #45 complete. | In-use updates/rollback #46. Actual installed manager/logout/crash behavior remains unqualified and excluded from supported claims. |
 | Physical/hardware claims | Explicitly separated from digital/sample and IPC-driven evidence. | #18/#27, outside the accepted narrower first-release claim. |
 
@@ -117,7 +117,7 @@ commits and CI/measurement records live in the linked issues and topic documents
 
 The [implementation queue](implementation-roadmap.md) maps #21 and #23–#30 to their
 focused follow-ups. #28 groups offline startup (implemented #31), history #32 and
-packaging #33. Remaining software work includes #32/#41/#46; the support
+packaging #33. Remaining software work includes #41/#46; the support
 proposal does not cancel it. #45's remaining real-manager qualification is separate
 from its implemented shutdown and activation changes.
 

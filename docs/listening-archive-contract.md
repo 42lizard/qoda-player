@@ -19,14 +19,17 @@ qualified nominal positions. A seek can lower last position; max position is
 not played duration. Backward wall-clock adjustments never lower persisted
 observation timestamps. Position does not extrapolate across pauses, stale
 samples, recovery or downtime. No end-of-file or 100 percent completion is
-invented from duration. A crash can leave the last committed observation older
-than the final actual position; the UI exposes write failure rather than
-silently claiming completeness.
+invented from duration. Continuing observations checkpoint at most every five
+seconds; a crash or failed write can leave the last committed observation older
+than the final nominal position. The UI exposes known failures in the current
+run rather than silently claiming completeness; a failed final flush exits with
+checkpoint failure. The export identifies known incompleteness in that run,
+without making an absence-of-errors claim about earlier runs or physical output.
 
 Default retention is 90 days with a hard 10000-visit cap; the user can choose
 7/30/90/365 days or disable recording, which explicitly clears retained archive
-rows. Retention runs transactionally with writes and at startup; oldest entries
-are removed first. Retention changes and Clear are explicit archive controls.
+rows. Retention runs transactionally with writes and at startup; entries with the
+oldest last observation are removed first. Retention changes and Clear are explicit archive controls.
 Exports use a versioned JSON document containing a consistent bounded snapshot,
 including policy and field meanings, written atomically to a new private file.
 Export never modifies the archive or music. Exports are user-owned copies and
