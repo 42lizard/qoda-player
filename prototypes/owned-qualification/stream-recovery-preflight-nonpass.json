@@ -1,0 +1,35 @@
+{
+  "scope": "same intact owned item; one <=60-second client-side body interruption/null-output recovery and private disconnect/session-only restart",
+  "completed": false,
+  "observations": [
+    {
+      "name": "Preflight",
+      "owned_server": true,
+      "tls_verified": true,
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "timeline_discovered": true,
+      "metadata_discovered": true,
+      "production_gates_unchanged": true,
+      "output": "libmpv ao=null",
+      "maximum_runs": 1,
+      "per_run_wall_seconds": 60
+    },
+    {
+      "name": "Owned backend stopped",
+      "stopped": true
+    },
+    {
+      "name": "Stopped",
+      "stage": "owned-artwork-cache-refresh",
+      "error_class": "TimeoutError",
+      "safe_reason": "backend-state-deadline",
+      "raw_error_omitted": true
+    }
+  ],
+  "limits": [
+    "No physical network-outage or hardware qualification",
+    "Native backend path; no browser/QML/PAM acceptance",
+    "No universal server or revocation guarantee",
+    "Timeline effects possible; no scrobble/completion claim"
+  ]
+}

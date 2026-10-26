@@ -169,6 +169,9 @@ fn create_handle(output: &str, extra: &[(String, String)]) -> Result<*mut c_void
     let configured = (|| {
         let mut options = vec![
             ("config".to_owned(), "no".to_owned()),
+            ("clipboard-backends".into(), String::new()),
+            ("load-auto-profiles".into(), "no".into()),
+            ("osc".into(), "no".into()),
             ("load-scripts".into(), "no".into()),
             ("ytdl".into(), "no".into()),
             ("access-references".into(), "no".into()),
@@ -806,7 +809,7 @@ impl Player {
         Self::with_options(output, extra)
     }
     pub fn start() -> Result<Self, &'static str> {
-        Self::with_output("pipewire")
+        Self::with_output("null")
     }
     fn with_output(output: &str) -> Result<Self, &'static str> {
         Self::with_options(output, &[])

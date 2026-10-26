@@ -142,7 +142,7 @@ impl Proxy {
         grants.entries.insert(
             id.clone(),
             Grant {
-                source: Arc::from(source),
+                source: Arc::from(crate::validation_fault::wrap(source)),
                 failed: Arc::new(AtomicBool::new(false)),
                 failure: Arc::new(Mutex::new(None)),
                 cancel,

@@ -132,6 +132,10 @@ impl Artwork {
             data.cache.clear();
         }
     }
+    // VALIDATION ONLY: emulate memory eviction with a private expired disk item.
+    pub async fn validation_forget_memory(&self) {
+        self.revoke_memory(true).await;
+    }
     pub async fn revoke(&self, clear_cache: bool) {
         self.revoke_memory(clear_cache).await;
         if clear_cache {

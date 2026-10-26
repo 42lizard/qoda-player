@@ -1,0 +1,117 @@
+{
+  "scope": "same intact owned item; one <=60-second client-side body interruption/null-output recovery and private disconnect/session-only restart",
+  "completed": true,
+  "observations": [
+    {
+      "name": "Preflight",
+      "owned_server": true,
+      "tls_verified": true,
+      "pms_version": "1.43.5.11029-6bf8af3f0",
+      "timeline_discovered": true,
+      "metadata_discovered": true,
+      "production_gates_unchanged": true,
+      "output": "libmpv ao=null",
+      "maximum_runs": 1,
+      "per_run_wall_seconds": 60
+    },
+    {
+      "name": "Owned album-page response",
+      "album_rows": 100,
+      "local_grants": 100
+    },
+    {
+      "name": "Owned artwork expiry refresh",
+      "initial_and_fresh_jpeg": true,
+      "expired_private_disk_restored": true,
+      "same_session_validation_memory_eviction": true,
+      "background_provider_refresh_rotated_local_url": true,
+      "old_grant_http": 404,
+      "cached_and_fresh_bytes_equal": true,
+      "only_private_cache_mtime_changed": true,
+      "remote_artwork_edited": false,
+      "remote_changed_content_invalidation_not_measured": true
+    },
+    {
+      "name": "Subject selected",
+      "owned_library": true,
+      "track_duration_ms": 19737,
+      "library_track_intact": true
+    },
+    {
+      "name": "Confirmed original presentation",
+      "position_ms": 551,
+      "source_and_track_match": true,
+      "fault_not_yet_fired": true
+    },
+    {
+      "name": "Controlled current-stream recovery",
+      "single_body_fault": true,
+      "attempts": 1,
+      "phase": "ready",
+      "pinned_occurrence_session_visit_version_and_reference": true,
+      "new_render_generation": true,
+      "resumed_position_ms": 951,
+      "proxy_body_opens": 4,
+      "nonzero_range_opens": 3,
+      "client_side_transport_boundary": true,
+      "physical_network_outage_simulated": false
+    },
+    {
+      "name": "Explicit pause retained",
+      "same_occurrence": true,
+      "same_visit": true,
+      "position_ms": 992
+    },
+    {
+      "name": "Native disconnect cleanup",
+      "connected": false,
+      "libraries": 0,
+      "queue_entries": 0,
+      "archive_entries": 0,
+      "metadata_tracks": 0,
+      "cleanup_pending": false,
+      "remember_or_forget_not_requested": true,
+      "revoked_artwork_grant_http": 404,
+      "private_artwork_files_remaining": 0
+    },
+    {
+      "name": "Bounded run ended",
+      "wall_seconds": 3.97,
+      "speaker_output_opened": false,
+      "native_exit": 0
+    },
+    {
+      "name": "Fresh process without credential",
+      "connected": false,
+      "libraries": 0,
+      "queue_entries": 0,
+      "archive_entries": 0,
+      "paused": true,
+      "same_private_xdg_profile": true,
+      "desktop_keyring_unavailable": true
+    },
+    {
+      "name": "Original metadata after test",
+      "track_still_present": true,
+      "observed_offset_changed": false,
+      "observed_count_changed": false,
+      "observed_last_viewed_changed": false,
+      "deletion_scrobble_metadata_and_playlist_mutations": 0
+    },
+    {
+      "name": "Owned backend stopped",
+      "stopped": true
+    },
+    {
+      "name": "Private state removed",
+      "temporary_xdg_removed": true,
+      "original_credential_untouched": true
+    }
+  ],
+  "limits": [
+    "No physical network-outage or hardware qualification",
+    "Native backend path; no browser/QML/PAM acceptance",
+    "No universal server or revocation guarantee",
+    "Timeline effects possible; no scrobble/completion claim"
+  ]
+}

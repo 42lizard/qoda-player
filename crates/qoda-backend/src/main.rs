@@ -24,6 +24,7 @@ mod source_format;
 mod storage;
 #[cfg(test)]
 mod update_tests;
+mod validation_fault;
 mod vault;
 use player::{Command, Player};
 use qoda_core::{OccurrenceId, SourceId, TrackRef};
@@ -1459,6 +1460,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 state["error"] = Value::Null;
                 match v["op"].as_str().unwrap_or("") {
+                    "validation_fault" => validation_fault::arm(),
+                    "validation_artwork_forget_memory" => {
+                        artwork.validation_forget_memory().await;
+                        if let Some(provider) = provider.clone() {
+                            albums.view.covers =
+                                artwork.publish(provider, albums.artwork_references()).await;
+                        }
+                    }
                     "quit" => {
                         state["shutdown"] = json!(true);
                         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
@@ -2765,6 +2774,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state["archive"] = json!(archive.view());
         state["navigation"] = json!(queue.navigation_page(navigation_offset));
         state["queue"] = json!(queue.snapshot());
+        state["validation"] = validation_fault::view();
+        state["validation"]["visit"] = json!(queue.visit());
+        state["validation"]["version"] = json!(queue.selected_version());
         state["recovery"] = json!(recovery.view);
         state["search"] = search.view();
         state["playlists"] = json!(playlists.view);

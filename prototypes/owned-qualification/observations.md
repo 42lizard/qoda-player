@@ -28,3 +28,46 @@ actual artwork-change invalidation or an explicit limit on that unmeasured claim
 consolidation into a supported/untested matrix. Fresh Range requests do not prove
 interruption recovery. Shared/restricted/other-account loss, JWT PMS and universal
 server compatibility remain excluded by the accepted support boundary.
+
+## Owned native/cache follow-up
+
+`stream-recovery-evidence.json` completes the named bounded plan against PMS
+1.43.5.11029-6bf8af3f0 over verified HTTPS. The first two retained nonpasses
+(`stream-recovery-preflight-nonpass.json`, `artwork-reconnect-nonpass.json`) stopped
+before any playback: the setup assumed reconnect retained artwork, but successful
+account connection deliberately purges it. Album browsing returned 100 rows and
+100 local grants. No source behavior or cache policy was changed to make those
+attempts pass.
+
+The final case expires one newly created private JPEG file and uses a
+validation-only memory eviction within the same account/session. Production
+cache/refresh code serves the stale disk bytes, fetches a valid owned provider
+JPEG, rotates the local URL, refuses the old URL (404), and writes fresh disk
+mtime. Bytes happened to match. Remote artwork was not edited; changed remote
+pixels/push invalidation remain unmeasured and unclaimed.
+
+The sole playback run uses the same uniquely reidentified intact 19737 ms item.
+After a confirmed 551 ms nominal clock, one validation-only current proxy body
+returns Network while preserving all original metadata/headers/bytes until then.
+The actual recovery coordinator performs one refresh, retains source/reference,
+occurrence, session, visit and pinned version, and opens a new render generation
+with confirmed 951 ms position. Four proxy-body opens, including three nonzero
+Range opens, were observed. This measures controlled client transport recovery
+with real Plex original-media requests, not a physical network outage. Explicit
+Pause retains occurrence/visit at approximately 992 ms.
+
+Disconnect then clears visible library/catalog, queue/archive and metadata rows,
+revokes the artwork URL (404), removes its private JPEG and finishes cleanup.
+The run ends after 3.97 s with native exit 0 and no speaker AO. A fresh process on
+the same private XDG profile receives no credential: it remains disconnected,
+empty and paused, then exits 0. Desktop keyring remains unavailable to both
+processes; no Save/Forget operation is requested. Afterward the original track is
+present and its observed offset/count/last-viewed fields are unchanged. No music,
+playlist, metadata, artwork edit or scrobble is sent. Production nominal timeline
+reports were active, so this is no guarantee of absent history effects.
+
+Both owned native processes stop and their private state/logs/JPEG are removed.
+The validation branch's forced-null player, body wrapper, observation fields and
+memory-eviction command are instrumentation only and must not be merged. Targeted
+warnings-denied Clippy and Python syntax checks pass; the live case is separate
+from automated, synthetic production checks.
