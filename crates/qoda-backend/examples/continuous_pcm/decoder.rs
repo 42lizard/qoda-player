@@ -85,12 +85,20 @@ impl Ipc {
         }
     }
 }
-fn checked_samples(bytes: &mut [u8], gain: f64) -> Result<(), &'static str> {
+fn checked_samples(bytes: &mut [u8], gain: f64, bits: u16) -> Result<(), &'static str> {
     if !bytes.len().is_multiple_of(16) {
         return Err("Truncated stereo frame");
     }
+    let scale = match bits {
+        16 => 32768.0,
+        24 => 8388608.0,
+        _ => return Err("Unqualified source precision"),
+    };
     for sample in bytes.as_chunks_mut::<8>().0 {
         let value = f64::from_ne_bytes(*sample);
+        if !value.is_finite() || !(-1.0..1.0).contains(&value) || (value * scale).fract() != 0.0 {
+            return Err("Decoded PCM does not match the verified integer precision");
+        }
         let value = value * gain;
         if !value.is_finite() {
             return Err("Non-finite PCM sample");
@@ -105,9 +113,23 @@ pub fn decode(source: &Source, ring: &Ring) -> Result<u64, &'static str> {
         || source.frames == 0
         || !matches!(source.rate, 44100 | 48000 | 96000)
         || !source.gain.is_finite()
-        || !(0.0..=64.0).contains(&source.gain)
+        || !(0.0..=1_000_000.0).contains(&source.gain)
     {
         return Err("Unsupported experiment source");
+    }
+    let file = std::fs::File::open(&source.path).map_err(|_| "Source header unavailable")?;
+    let length = file
+        .metadata()
+        .map_err(|_| "Source length unavailable")?
+        .len();
+    let mut prefix = Vec::with_capacity(65536);
+    file.take(65536)
+        .read_to_end(&mut prefix)
+        .map_err(|_| "Source header read failed")?;
+    let description = super::description::parse(&prefix, length)
+        .ok_or("Unqualified continuous source framing")?;
+    if description.frames != source.frames || description.rate != source.rate {
+        return Err("Source frame descriptor mismatch");
     }
     let expected = source.frames.checked_mul(16).ok_or("PCM length overflow")?;
     let (parent, child_socket) = UnixStream::pair().map_err(|_| "Private decoder socket failed")?;
@@ -222,7 +244,7 @@ pub fn decode(source: &Source, ring: &Ring) -> Result<u64, &'static str> {
         }
         tail.extend_from_slice(&buffer[..size]);
         let complete = tail.len() / 16 * 16;
-        checked_samples(&mut tail[..complete], source.gain)?;
+        checked_samples(&mut tail[..complete], source.gain, description.bits)?;
         ring.write(&tail[..complete])?;
         tail.drain(..complete);
     }
@@ -274,12 +296,15 @@ mod tests {
     #[test]
     fn frames_are_finite_and_gain_is_applied_once() {
         let mut bytes = [0.25_f64.to_ne_bytes(), (-0.5_f64).to_ne_bytes()].concat();
-        checked_samples(&mut bytes, 0.5).unwrap();
+        checked_samples(&mut bytes, 0.5, 16).unwrap();
         assert_eq!(f64::from_ne_bytes(bytes[..8].try_into().unwrap()), 0.125);
         assert_eq!(f64::from_ne_bytes(bytes[8..].try_into().unwrap()), -0.25);
-        assert!(checked_samples(&mut bytes[..15], 1.0).is_err());
+        assert!(checked_samples(&mut bytes[..15], 1.0, 16).is_err());
+        bytes[..8].copy_from_slice(&(1.0_f64 / 8388608.0).to_ne_bytes());
+        assert!(checked_samples(&mut bytes, 1.0, 16).is_err());
+        assert!(checked_samples(&mut bytes, 1.0, 24).is_ok());
         bytes[..8].copy_from_slice(&f64::NAN.to_ne_bytes());
-        assert!(checked_samples(&mut bytes, 1.0).is_err());
+        assert!(checked_samples(&mut bytes, 1.0, 16).is_err());
     }
     #[test]
     fn cancel_interrupts_an_ipc_reply_wait() {

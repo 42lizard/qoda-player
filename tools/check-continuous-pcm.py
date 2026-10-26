@@ -96,12 +96,19 @@ def failures(root, example):
         ("changed-rate", [{"path": str(path), "frames": 48000, "rate": 48000, "gain": 1},
                           {"path": str(path), "frames": 48000, "rate": 44100, "gain": 1}]),
     ]
+    encoded = root / "truncated.flac"
+    run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(path), str(encoded)])
+    payload = encoded.read_bytes()
+    encoded.write_bytes(payload[:len(payload)//2])
+    cases.append(("truncated-real-flac-payload", [{"path": str(encoded), "frames":48000,"rate":48000,"gain":1}]))
     for name, sources in cases:
         manifest = root / f"{name}.json"
         manifest.write_text(json.dumps(sources))
         result = subprocess.run([str(example), str(manifest), str(root / f"{name}.pcm"), GRAPH, "16"],
                                 capture_output=True, timeout=8)
         assert result.returncode == 1, (name, result.returncode)
+        if name == "truncated-real-flac-payload":
+            assert b"Decoder frame count mismatch" in result.stderr, result.stderr.decode(errors="replace")
     return [name for name, _ in cases]
 
 

@@ -2,10 +2,15 @@
 //! Manifest contains original synthetic local sources; output is PCM-file only.
 #[path = "continuous_pcm/decoder.rs"]
 mod decoder;
+#[path = "../src/continuous/description.rs"]
+mod description;
 #[path = "continuous_pcm/native.rs"]
 mod native;
 #[path = "continuous_pcm/ring.rs"]
 mod ring;
+#[cfg(test)]
+#[path = "../src/continuous/stream.rs"]
+mod stream;
 use std::{path::PathBuf, sync::atomic::Ordering};
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().skip(1).collect();

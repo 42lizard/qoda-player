@@ -138,3 +138,36 @@ for nominal ownership to sidestep the authorization horizon. The
 record the already delegated recommended default: retain one successor and
 explicitly fall back when the qualified horizon is unavailable. This experiment
 changes no production grant policy or playback route.
+
+### Verified frame spans and admission groundwork
+
+The experiment now reads a bounded source prefix and actual file length through
+`src/continuous/description.rs`; manifest durations/count hints cannot override the
+header. Native FLAC requires a nonzero STREAMINFO total-samples field and the
+qualified rate/precision/stereo profile. The initial WAV profile requires one
+plain integer fmt chunk, valid alignment/byte rate, bounded recognized metadata
+before a final data chunk, exact RIFF/file extent and integral stereo frames.
+Trailing/ambiguous/WAVE-list/extensible layouts are deliberately unqualified for
+this new adapter, without changing the existing independent native fidelity path.
+A future provider probe must carry the same bounded prefix/confirmed extent.
+
+Decoder output additionally must lie on the verified 16/24-bit integer sample grid
+before gain; gain remains one double multiplication. The nine complete-output
+comparisons still match at 0 LSB. Six faults now include a genuinely truncated
+FLAC payload whose valid header remains intact: the decoder frame-count check
+rejects it, independently of manifest/header disagreement.
+
+`src/continuous/stream.rs` is admission/transport/nominal-ledger groundwork, exercised
+by the experiment test target and **not yet wired into production**. One mutex
+coordinates current/future authority with actual byte admission; a single producer,
+64 KiB ring, descriptor counts and immutable final seal bound it. An uncommitted
+future can be retired/replaced atomically. Any admitted future byte makes removal
+require reset; admission does not itself promote nominal ownership. A qualified
+clock must cross the integer frame boundary and remain within the admitted span;
+invalid clocks cannot mutate ownership. A speculative decoder failure before any
+shared admission ends only the current group, while a committed failure requires
+output reset. Temporary lack of next authorization waits; explicit seal supplies
+final EOF after verified current completion. Seventeen example/core tests cover
+these rules plus blocked cancellation, byte reads, stale writes and concurrent
+writer refusal. Worker lifecycle, prewarming, callback wiring, provider descriptors,
+player/coordinator integration and paced/native qualification remain required.
