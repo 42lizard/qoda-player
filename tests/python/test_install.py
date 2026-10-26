@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -56,6 +57,7 @@ class Installation(unittest.TestCase):
         path.mkdir()
         (path / "qoda-backend").write_text(f"fictional release {self.generation}\n")
         (path / "qoda-backend").chmod(0o755)
+        shutil.copyfile(ROOT / "tools/launch.py", path / "launch.py")
         (path / "ui").mkdir()
         (path / "ui/shell.qml").write_text("// fictional UI\n")
         return f"0.1.0-fixture{self.generation}"
@@ -83,6 +85,24 @@ class Installation(unittest.TestCase):
         self.assertEqual(unrelated.read_text(), "retained")
         for call in self.service.manager.call_args_list:
             self.assertEqual(call.args, ("daemon-reload",))
+
+    def test_installed_launcher_status_and_quit_observe_checkpoint_failure(self):
+        self.install()
+        fakebin = self.base / "fakebin"
+        fakebin.mkdir()
+        events = self.base / "service-commands.jsonl"
+        systemctl = fakebin / "systemctl"
+        systemctl.write_text("#!/usr/bin/python3\nimport json,sys\nfrom pathlib import Path\nassert sys.argv[1] == '--user' and sys.argv[2] in ['show','stop']\nwith Path(" + repr(str(events)) + ").open('a') as log: log.write(json.dumps(sys.argv[1:])+'\\n')\nif sys.argv[2] == 'show':\n print('inactive' if '--property=ActiveState' in sys.argv else 'LoadState=loaded\\nResult=exit-code\\nExecMainCode=1\\nExecMainStatus=74')\n")
+        systemctl.chmod(0o755)
+        environment = dict(os.environ, PATH=str(fakebin) + os.pathsep + os.environ["PATH"])
+        command = [str(self.prefix / "bin/qoda")]
+        status = subprocess.run([*command, "status"], env=environment, capture_output=True, text=True, timeout=5, check=True)
+        self.assertEqual(json.loads(status.stdout)["last_backend_exit"]["outcome"], "checkpoint_failed")
+        stopped = subprocess.run([*command, "quit"], env=environment, capture_output=True, text=True, timeout=5)
+        self.assertEqual(stopped.returncode, 1)
+        self.assertIn("checkpoint failed", stopped.stderr)
+        commands = [json.loads(line) for line in events.read_text().splitlines()]
+        self.assertEqual([args for args in commands if args[1] == "stop"], [["--user", "stop", "qoda-ui.service", "qoda-backend.service"]])
 
     def test_unowned_conflict_refuses_before_build(self):
         path = self.prefix / "bin/qoda"
@@ -235,6 +255,7 @@ class Installation(unittest.TestCase):
         unit = (self.config / "systemd/user/qoda-backend.service").read_text()
         self.assertIn("KillSignal=SIGINT", unit)
         self.assertIn("Restart=on-failure", unit)
+        self.assertIn("RestartPreventExitStatus=74 75 76", unit)
         self.assertIn("StartLimitBurst=3", unit)
         self.assertIn("Requisite=graphical-session.target", unit)
         self.assertNotIn("[Install]", unit)
@@ -294,6 +315,28 @@ class ReleaseBuild(unittest.TestCase):
                     installer.stage_release(base / "rejected-release")
 
 
+class DevelopmentShutdown(unittest.TestCase):
+    def test_owned_backend_checkpoint_outcome_reaches_development_exit_status(self):
+        with tempfile.TemporaryDirectory(prefix="qoda-dev-exit-") as runtime:
+            with mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": runtime}):
+                development = load("qoda_dev_exit", "tools/dev.py")
+            for status in [0, 74, 75, 76]:
+                backend = mock.Mock(returncode=None)
+                backend.poll.side_effect = lambda: backend.returncode
+                def wait(**kwargs):
+                    backend.returncode = status
+                    return status
+                backend.wait.side_effect = wait
+                with mock.patch.object(sys, "argv", ["dev.py", "--backend-only"]), mock.patch.object(development, "request", side_effect=[ConnectionRefusedError(), {}]), mock.patch.object(development.subprocess, "run"), mock.patch.object(development.subprocess, "Popen", return_value=backend):
+                    if status:
+                        with self.assertRaises(SystemExit) as error:
+                            development.main()
+                        self.assertEqual(error.exception.code, status)
+                    else:
+                        development.main()
+                backend.terminate.assert_not_called()
+
+
 
 class Launch(unittest.TestCase):
     def setUp(self):
@@ -311,21 +354,24 @@ class Launch(unittest.TestCase):
 
     def test_hide_and_status_never_start_or_probe_a_backend(self):
         for action in ["hide", "status"]:
-            with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot") as snapshot:
+            with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot") as snapshot:
                 launcher.launch(action)
-                manager.assert_not_called()
+                if action == "hide":
+                    manager.assert_not_called()
+                else:
+                    self.assertEqual(manager.call_args.args[0], "show")
                 snapshot.assert_not_called()
 
     def test_first_toggle_shows_and_existing_toggle_toggles(self):
         for ui_running in [False, True]:
-            with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.UNITS[0] or ui_running), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot", return_value={"protocol": 1}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
+            with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.UNITS[0] or ui_running), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", return_value={"protocol": 1}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
                 launcher.launch("toggle")
                 ipc.assert_called_once_with("toggle" if ui_running else "show")
                 self.assertEqual([call.args for call in manager.call_args_list], [("start", launcher.UNITS[0]), ("start", launcher.UNITS[1])])
 
     def test_unmanaged_backend_or_protocol_failure_never_starts_ui(self):
         for error in [None, ValueError("protocol mismatch")]:
-            with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot", side_effect=error, return_value={"protocol": 1}):
+            with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", side_effect=error, return_value={"protocol": 1}):
                 with self.assertRaises(ValueError):
                     launcher.launch("show")
                 manager.assert_not_called()
@@ -336,24 +382,47 @@ class Launch(unittest.TestCase):
         stage = self.runtime / "prefix/lib/.qoda-stage-fixture"
         stage.mkdir()
         (stage / "recovery-needed").touch()
-        with mock.patch.object(launcher, "ROOT", root), mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager") as manager:
+        with mock.patch.object(launcher, "ROOT", root), mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager:
             with self.assertRaisesRegex(ValueError, "interrupted installation"):
                 launcher.launch("show")
             manager.assert_not_called()
             launcher.launch("quit")
-            manager.assert_called_once_with("stop", "qoda-ui.service", "qoda-backend.service")
+            self.assertEqual(manager.call_args_list[0], mock.call("stop", "qoda-ui.service", "qoda-backend.service", check=False))
 
     def test_backend_start_failure_does_not_start_ui(self):
         states = iter([False, False])
-        with mock.patch.object(launcher, "active", side_effect=lambda _: next(states)), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot", side_effect=ConnectionRefusedError):
+        with mock.patch.object(launcher, "active", side_effect=lambda _: next(states)), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", side_effect=ConnectionRefusedError):
             with self.assertRaisesRegex(ValueError, "Backend not ready"):
                 launcher.launch("show")
         manager.assert_called_once_with("start", "qoda-backend.service")
 
     def test_quit_only_stops_owned_units(self):
-        with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager") as manager:
+        with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager:
             launcher.launch("quit")
-        manager.assert_called_once_with("stop", "qoda-ui.service", "qoda-backend.service")
+        self.assertEqual(manager.call_args_list[0], mock.call("stop", "qoda-ui.service", "qoda-backend.service", check=False))
+
+    def test_quit_reports_persistence_failure_even_when_stop_job_succeeds(self):
+        for status, message in [(74, "checkpoint failed"), (75, "session was saved"), (76, "cleanup failed"), (99, "unconfirmed")]:
+            report = f"LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus={status}\n"
+            with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout=report)) as manager:
+                with self.assertRaisesRegex(ValueError, message):
+                    launcher.launch("quit")
+                self.assertEqual(manager.call_args_list[0], mock.call("stop", "qoda-ui.service", "qoda-backend.service", check=False))
+                self.assertFalse(any(call.args[0] == "start" for call in manager.call_args_list))
+
+    def test_signal_missing_and_malformed_shutdown_results_are_not_success(self):
+        for report in ["", "LoadState=not-found\n", "LoadState=loaded\nResult=success\nExecMainCode=2\nExecMainStatus=2\n"]:
+            with mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout=report)):
+                with self.assertRaisesRegex(ValueError, "unconfirmed"):
+                    launcher.verify_shutdown()
+
+    def test_failed_stop_job_still_surfaces_the_checkpoint_error(self):
+        def manager(*args, **kwargs):
+            report = "LoadState=loaded\nResult=exit-code\nExecMainCode=1\nExecMainStatus=74\n"
+            return subprocess.CompletedProcess([], 1 if args[0] == "stop" else 0, stdout=report)
+        with mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", side_effect=manager):
+            with self.assertRaisesRegex(ValueError, "checkpoint failed"):
+                launcher.launch("quit")
 
     def test_protocol_readiness_uses_real_local_socket_and_rejects_mismatch(self):
         directory = self.runtime / "qoda"

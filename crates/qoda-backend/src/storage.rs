@@ -619,6 +619,25 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
+    #[tokio::test]
+    async fn final_backup_warning_keeps_committed_session_and_existing_backup() {
+        let f = Fixture::new();
+        let (events, _rx) = tokio::sync::mpsc::channel(8);
+        let (mut controller, restored) = Controller::start(Ok(f.path.clone()), events).await;
+        restored.unwrap();
+        let queue = queued("final-backup");
+        assert_eq!(controller.flush(queue.clone(), 0).await.unwrap(), None);
+        let backups = f.dir.join("backups");
+        let previous = backup_files(&backups).unwrap();
+        let saved = std::fs::read(&previous[0]).unwrap();
+        std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let result = crate::shutdown::checkpoint(controller.flush(queue, 0).await).unwrap_err();
+        assert_eq!(result.exit_status(), crate::shutdown::BACKUP_WARNING);
+        let (_, restored) = Store::open(&f.path).unwrap();
+        assert_eq!(restored.snapshot().entries[0].track.title, "final-backup");
+        assert_eq!(std::fs::read(&previous[0]).unwrap(), saved);
+    }
+
     fn legacy_payload(queue: &Queue) -> String {
         let mut value = serde_json::to_value(queue).unwrap();
         let fields = value.as_object_mut().unwrap();

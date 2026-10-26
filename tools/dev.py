@@ -97,6 +97,8 @@ def main():
             except (OSError, subprocess.TimeoutExpired): backend.terminate(); backend.wait(timeout=8)
         if ui and ui.poll() is None:
             ui.terminate(); ui.wait(timeout=5)
+        if backend and backend.returncode in (74, 75, 76):
+            raise SystemExit(backend.returncode)
 
 if __name__ == '__main__':
     main()

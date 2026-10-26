@@ -60,6 +60,37 @@ def active(unit):
     return result.stdout.strip() in {"active", "activating", "reloading", "deactivating"}
 
 
+def backend_exit():
+    result = manager("show", "--property=LoadState", "--property=Result", "--property=ExecMainCode", "--property=ExecMainStatus", UNITS[0])
+    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    code, status = fields.get("ExecMainCode"), fields.get("ExecMainStatus")
+    if fields.get("LoadState") == "not-found":
+        outcome = "not_installed"
+    elif code == "1" and status == "74":
+        outcome = "checkpoint_failed"
+    elif code == "1" and status == "75":
+        outcome = "backup_warning"
+    elif code == "1" and status == "76":
+        outcome = "runtime_cleanup_failed"
+    elif fields.get("Result") == "success" and status == "0" and code in {"0", "1"}:
+        outcome = "not_started" if code == "0" else "clean"
+    else:
+        outcome = "unconfirmed"
+    return {"outcome": outcome, "result": fields.get("Result"), "code": code, "status": status}
+
+
+def verify_shutdown():
+    outcome = backend_exit()["outcome"]
+    if outcome == "checkpoint_failed":
+        raise ValueError("Qoda stopped, but the final session checkpoint failed. Recent changes may be unsaved; inspect journalctl --user -u qoda-backend before restarting")
+    if outcome == "backup_warning":
+        raise ValueError("Qoda stopped and the session was saved, but its backup update failed. Inspect journalctl --user -u qoda-backend")
+    if outcome == "runtime_cleanup_failed":
+        raise ValueError("Qoda stopped, but runtime socket cleanup failed; inspect journalctl --user -u qoda-backend before restarting")
+    if outcome not in {"clean", "not_started"}:
+        raise ValueError("Qoda stop/checkpoint outcome is unconfirmed; inspect journalctl --user -u qoda-backend")
+
+
 def snapshot():
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(.5)
@@ -99,13 +130,16 @@ def launch(action):
             raise ValueError("Release changed while waiting; retry the launcher")
         if action == "status":
             states = {unit: active(unit) for unit in UNITS}
-            print(json.dumps({"release": ROOT.name, "services": states}))
+            print(json.dumps({"release": ROOT.name, "services": states, "last_backend_exit": backend_exit()}))
             return
         if action == "quit":
             # No socket activation exists; a deliberate stop cannot resurrect Qoda.
-            manager("stop", *reversed(UNITS))
+            stopped = manager("stop", *reversed(UNITS), check=False)
             if any(active(unit) for unit in UNITS):
                 raise ValueError("Qoda is still stopping; inspect journalctl --user -u qoda-backend")
+            verify_shutdown()
+            if stopped.returncode != 0:
+                raise ValueError("Service stop failed; inspect journalctl --user -u qoda-backend -u qoda-ui")
             if (Path(os.environ["XDG_RUNTIME_DIR"]) / "qoda/backend.sock").exists():
                 raise ValueError("An unmanaged backend remains; stop the development player separately")
             return

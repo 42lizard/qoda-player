@@ -69,7 +69,8 @@ the user service manager and match the invoking desktop. The launcher diagnoses
 mismatches; it does not overwrite the manager's global environment. Units require
 `graphical-session.target`, have no `[Install]` section, and stop with the
 session. The backend uses `Restart=on-failure`, a two-second delay and a maximum
-of three starts per minute. Intentional Quit stops units and cannot trigger
+of three starts per minute. [Shutdown persistence failures](shutdown.md) have
+distinct non-restarting exit statuses, exposed by Quit and Status. Intentional Quit stops units and cannot trigger
 socket activation. The UI has no automatic restart. Commands are serialized by
 an owner-only runtime lock. The existing backend lock adds independent duplicate
 protection. An unmanaged development backend is refused rather than adopted.
@@ -87,10 +88,9 @@ readiness. These do not prove an actual user manager's logout/crash behavior.
 Before #33 closes, [#45](https://github.com/42lizard/qoda-player/issues/45) must qualify actual installed services in a disposable graphical
 session: concurrent launch/Quit races, UI failure and explicit recreation,
 backend crash retry/rate limiting, graphical logout, MPRIS Raise without an
-attached UI, and final-checkpoint failure. The current backend logs final flush
-failure without returning a dedicated failure status; `qoda quit` cannot yet
-certify that checkpoint. Inspect the journal and retain the last successful
-backup. Existing schema incompatibility protection is backend-owned; this
+attached UI, and final-checkpoint outcome propagation through the real user
+manager. Process-level checkpoint/backup/cleanup exit reporting and launcher
+classification are implemented and tested in [shutdown outcomes](shutdown.md). Existing schema incompatibility protection is backend-owned; this
 installer does not offer code/database downgrade or automatic backup restoration.
 Pause/checkpoint upgrades that retain a running session and explicit compatible
 rollback remain [#46](https://github.com/42lizard/qoda-player/issues/46). Installation on the active desktop remains

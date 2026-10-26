@@ -16,6 +16,7 @@ mod proxy;
 mod queue;
 mod recovery;
 mod search;
+mod shutdown;
 mod source_format;
 mod storage;
 mod vault;
@@ -581,7 +582,21 @@ fn keyring_request(
     Ok(())
 }
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::process::ExitCode {
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Qoda: {error}");
+            std::process::ExitCode::from(
+                error
+                    .downcast_ref::<shutdown::Error>()
+                    .map_or(1, shutdown::Error::exit_status),
+            )
+        }
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let credential = if std::env::args().any(|s| s == "--credential-stdin") {
         let mut input = Zeroizing::new(String::new());
         std::io::stdin().take(65537).read_to_string(&mut input)?;
@@ -613,11 +628,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let path = dir.join("backend.sock");
-    if path.exists() {
-        std::fs::remove_file(&path)?
+    if path.symlink_metadata().is_ok() {
+        shutdown::SocketIdentity::capture(&path)?.remove(&path)?;
     }
     let listener = tokio::net::UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    let socket_identity = shutdown::SocketIdentity::capture(&path)?;
     let player = Player::start()?;
     let mut gain_settings = gain::Settings::load(
         identities_path().and_then(|p| p.parent().map(std::path::Path::to_owned)),
@@ -2693,17 +2709,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     metadata.shutdown().await;
     server.abort();
-    match durable.flush(queue.clone(), purge_epoch).await {
-        Err(error) => eprintln!("Qoda: final checkpoint failed: {error}"),
-        Ok(Some(warning)) => eprintln!("Qoda: {warning}"),
-        Ok(None) => {}
-    }
+    let checkpoint = shutdown::checkpoint(durable.flush(queue.clone(), purge_epoch).await);
     if let Some(desktop) = desktop {
         desktop.shutdown().await;
     }
     drop(player);
-    std::fs::remove_file(path)?;
+    let socket_cleanup = socket_identity.remove(&path);
     drop(lock);
+    // Persistence failure must remain visible even if socket cleanup also fails.
+    if checkpoint.is_err()
+        && let Err(error) = &socket_cleanup
+    {
+        eprintln!("Qoda: runtime socket cleanup failed: {error}");
+    }
+    checkpoint?;
+    socket_cleanup.map_err(shutdown::Error::Cleanup)?;
     Ok(())
 }
 

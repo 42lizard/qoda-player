@@ -52,7 +52,7 @@ def check():
                 fakebin = base / "fakebin"
                 fakebin.mkdir()
                 command = fakebin / "systemctl"
-                command.write_text("#!/usr/bin/python3\nimport sys\nassert sys.argv[1:4] == ['--user', 'show', '--property=ActiveState']\nprint('inactive')\n")
+                command.write_text("#!/usr/bin/python3\nimport sys\nassert sys.argv[1:3] == ['--user', 'show']\nprint('inactive' if '--property=ActiveState' in sys.argv else 'LoadState=loaded\\nResult=success\\nExecMainCode=0\\nExecMainStatus=0')\n")
                 command.chmod(0o755)
                 result = subprocess.run([str(prefix / "bin/qoda"), "status"], capture_output=True, text=True, check=True,
                                         env=dict(os.environ, PATH=str(fakebin) + os.pathsep + os.environ["PATH"]))

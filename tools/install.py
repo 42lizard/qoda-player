@@ -134,7 +134,7 @@ def integrations(prefix):
     common = ("[Unit]\nDescription=Qoda {name}\nPartOf=graphical-session.target\nRequisite=graphical-session.target\nAfter=graphical-session.target\n"
               "StartLimitIntervalSec=60\nStartLimitBurst=3\n\n[Service]\nType=exec\n")
     backend = (common.format(name="backend") + f"ExecStart=/usr/bin/env -- {quote_exec(current / 'qoda-backend')}\n"
-               "Restart=on-failure\nRestartSec=2\nKillSignal=SIGINT\nTimeoutStopSec=10\nUMask=0077\n").encode()
+               "Restart=on-failure\nRestartPreventExitStatus=74 75 76\nRestartSec=2\nKillSignal=SIGINT\nTimeoutStopSec=10\nUMask=0077\n").encode()
     ui = (common.format(name="interface") + f"ExecStart=quickshell --path {quote_exec(current / 'ui')} --no-duplicate\n"
           "Restart=no\nTimeoutStopSec=5\nUMask=0077\n").encode()
     return {"prefix": {"bin/qoda": (wrapper, 0o755), "share/applications/qoda-player.desktop": (desktop, 0o644),
