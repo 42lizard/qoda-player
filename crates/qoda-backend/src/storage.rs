@@ -307,6 +307,13 @@ impl Store {
             / 86400;
         let prefix = format!("session-{day:010}-");
         let mut backups = backup_files(&dir)?;
+        // Automatic retention must not erase an unqualified recovery copy.
+        // Preserve foreign/newer/corrupt backups and expose a backup warning.
+        for path in &backups {
+            let conn = connection(path, true).map_err(|_| Error::Backup)?;
+            schema(&conn).map_err(|_| Error::Backup)?;
+            load(&conn).map_err(|_| Error::Backup)?;
+        }
         if migration
             || !backups.iter().any(|p| {
                 p.file_name()
@@ -873,6 +880,29 @@ mod tests {
         assert!(backup_files(&store.backups()).unwrap().is_empty());
         assert!(!f.dir.join(".restore-partial.sqlite3").exists());
         assert!(!store.backups().join(".backup-partial.sqlite3").exists());
+    }
+    #[test]
+    fn automatic_retention_preserves_newer_or_damaged_backup_copies() {
+        for newer in [false, true] {
+            let f = Fixture::new();
+            let (mut store, _) = Store::open(&f.path).unwrap();
+            store.save(&queued("fixture")).unwrap();
+            let copy = store.backups().join("session-0000000001-preserved.sqlite3");
+            private_file(&copy, true).unwrap();
+            if newer {
+                store
+                    .conn
+                    .backup(MAIN_DB, &copy, rusqlite::backup::NO_PROGRESS)
+                    .unwrap();
+                let conn = connection(&copy, false).unwrap();
+                conn.pragma_update(None, "user_version", 99).unwrap();
+            } else {
+                std::fs::write(&copy, b"damaged backup fixture").unwrap();
+            }
+            let before = std::fs::read(&copy).unwrap();
+            assert_eq!(store.backup_daily(), Err(Error::Backup));
+            assert_eq!(std::fs::read(copy).unwrap(), before);
+        }
     }
     #[test]
     fn interrupted_recovery_is_not_silently_initialized_as_an_empty_session() {

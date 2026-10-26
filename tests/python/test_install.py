@@ -1,4 +1,6 @@
 import importlib.util
+import hashlib
+import sqlite3
 import json
 import multiprocessing
 import os
@@ -35,7 +37,7 @@ class Installation(unittest.TestCase):
         self.config = self.base / "config"
         self.runtime = self.base / "runtime"
         self.runtime.mkdir(mode=0o700)
-        self.environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.runtime)})
+        self.environment = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": str(self.runtime), "XDG_STATE_HOME":str(self.base / "state"), "XDG_CACHE_HOME":str(self.base / "cache"), "XDG_CONFIG_HOME":str(self.config)})
         self.environment.start()
         self.service = mock.Mock()
         self.service.active.return_value = False
@@ -60,6 +62,7 @@ class Installation(unittest.TestCase):
         shutil.copyfile(ROOT / "tools/launch.py", path / "launch.py")
         (path / "ui").mkdir()
         (path / "ui/shell.qml").write_text("// fictional UI\n")
+        (path / "release.json").write_text(json.dumps({"version":"0.1.0","protocol":1,"storage_compatibility":installer.storage_evidence()}))
         return f"0.1.0-fixture{self.generation}"
 
     def install(self):
@@ -284,6 +287,227 @@ class Installation(unittest.TestCase):
         result = subprocess.run(["systemd-analyze", "--user", "verify", *[str(self.config / name) for name in installer.EXTERNAL["config"]]], text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def running_manager(self, backend=True, ui=True):
+        states = dict(zip(launcher.UNITS, [backend, ui]))
+        events = []
+        self.service.active.side_effect = lambda unit: states[unit]
+        def manager(*args, **kwargs):
+            events.append(args)
+            if args[0] == "show":
+                unit=args[-1]
+                return subprocess.CompletedProcess(args,0,stdout="FragmentPath="+str(self.config / "systemd/user" / unit)+"\nDropInPaths=\n")
+            if args[0] in {"start","stop"}:
+                for unit in args[1:]: states[unit]=args[0]=="start"
+            return subprocess.CompletedProcess(args,0,stdout="")
+        self.service.manager.side_effect=manager
+        self.service.pause_checkpoint.side_effect=lambda:events.append(("pause-checkpoint",))
+        self.service.snapshot.return_value={"protocol":1,"instance":"synthetic-restarted","intent":"paused","storage":{"state":"saved"},"archive":{"available":True}}
+        self.service.ipc.return_value=True
+        return states,events,manager
+
+    def test_checkpointed_update_stages_before_stopping_and_restarts_paused(self):
+        current=self.install();self.generation=2
+        states,events,_=self.running_manager()
+        stage=self.stage
+        def build(path):
+            self.assertTrue(states[launcher.UNITS[0]])
+            self.assertFalse(any(call[0]=="stop" for call in events))
+            return stage(path)
+        with mock.patch.object(installer,"stage_release",side_effect=build):
+            installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertEqual(current.resolve().name,"0.1.0-fixture2")
+        self.assertLess(events.index(("stop",launcher.UNITS[1])),events.index(("pause-checkpoint",)))
+        self.assertLess(events.index(("pause-checkpoint",)),events.index(("stop",launcher.UNITS[0])))
+        self.assertLess(events.index(("stop",launcher.UNITS[0])),events.index(("daemon-reload",)))
+        self.assertTrue(all(states.values()))
+        self.service.verify_shutdown.assert_called_once()
+        self.service.write_owner.assert_called_once()
+        self.service.ipc.assert_called_with("show")
+
+    def test_checkpointed_stopped_update_and_compatible_rollback_never_start(self):
+        current=self.install();self.generation=2
+        states,events,_=self.running_manager(False,False)
+        installer.install(self.prefix,self.config,checkpointed=True)
+        builds=self.build_mock.call_count
+        installer.install(self.prefix,self.config,rollback_release="0.1.0-fixture1")
+        self.assertEqual(current.resolve().name,"0.1.0-fixture1")
+        self.assertEqual(self.build_mock.call_count,builds)
+        self.assertFalse(any(call[0] in {"start","stop"} for call in events))
+
+    def test_checkpoint_failure_or_loaded_unit_override_keeps_code(self):
+        current=self.install();before=installer.inventory(current.parent);self.generation=2
+        states,events,_=self.running_manager()
+        self.service.pause_checkpoint.side_effect=ValueError("synthetic checkpoint failure")
+        with self.assertRaisesRegex(ValueError,"checkpoint failure"):
+            installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertEqual(installer.inventory(current.parent),before)
+        self.assertTrue(states[launcher.UNITS[0]])
+        self.assertFalse(any(call[0]=="start" for call in events))
+        self.running_manager()
+        self.service.manager.side_effect=lambda *args,**kwargs:subprocess.CompletedProcess(args,0,stdout="FragmentPath=/other/unit\nDropInPaths=/override\n")
+        with self.assertRaisesRegex(ValueError,"overridden or unowned"):
+            installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertEqual(installer.inventory(current.parent),before)
+
+    def test_incompatible_reader_evidence_refuses_rollback_before_stopping(self):
+        current=self.install();self.generation=2
+        original=installer.storage_evidence()
+        changed=json.loads(json.dumps(original));changed["files"]["synthetic-model-change"]="f"*64
+        changed["fingerprint"]=hashlib.sha256(json.dumps(changed["files"],sort_keys=True).encode()).hexdigest()
+        with mock.patch.object(installer,"storage_evidence",return_value=changed): self.install()
+        states,events,_=self.running_manager()
+        with self.assertRaisesRegex(ValueError,"readers/models"):
+            installer.install(self.prefix,self.config,rollback_release="0.1.0-fixture1")
+        self.assertEqual(current.resolve().name,"0.1.0-fixture2")
+        self.assertFalse(any(call[0]=="stop" for call in events))
+
+    def test_newer_database_or_settings_refuse_code_selection_and_preserve_bytes(self):
+        current=self.install();self.generation=2;before=installer.inventory(current.parent)
+        settings=self.config / "qoda/output.json";settings.parent.mkdir(parents=True,exist_ok=True)
+        settings.write_text('{"version":99}');settings.chmod(0o600)
+        self.running_manager(False,False)
+        with self.assertRaisesRegex(ValueError,"Unsupported settings"):
+            installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertEqual(settings.read_text(),'{"version":99}');self.assertEqual(installer.inventory(current.parent),before)
+        settings.unlink()
+        database=self.base / "state/qoda/session.sqlite3";database.parent.mkdir(parents=True)
+        connection=sqlite3.connect(database);connection.execute("PRAGMA application_id=1364141121");connection.execute("PRAGMA user_version=99");connection.close();database.chmod(0o600)
+        data=database.read_bytes()
+        with self.assertRaisesRegex(ValueError,"Unsupported or damaged"):
+            installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertEqual(database.read_bytes(),data);self.assertEqual(installer.inventory(current.parent),before)
+
+    def test_failed_activation_rolls_back_and_restarts_only_identical_readers(self):
+        current=self.install();self.generation=2
+        states,events,manager=self.running_manager()
+        failed=False
+        def fail_ui_once(*args,**kwargs):
+            nonlocal failed
+            if args==("start",launcher.UNITS[1]) and not failed:
+                failed=True;raise subprocess.CalledProcessError(1,args)
+            return manager(*args,**kwargs)
+        self.service.manager.side_effect=fail_ui_once
+        with self.assertRaises(subprocess.CalledProcessError): installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertEqual(current.resolve().name,"0.1.0-fixture1")
+        self.assertTrue(all(states.values()))
+        self.assertEqual(events.count(("start",launcher.UNITS[0])),2)
+        self.assertFalse(list((self.prefix / "lib").glob(".qoda-stage-*")))
+
+    def test_failed_activation_with_changed_models_retains_both_payloads_and_blocks_restart(self):
+        current=self.install();self.generation=2
+        states,events,manager=self.running_manager()
+        original=installer.storage_evidence();changed=json.loads(json.dumps(original));changed["files"]["changed-model"]="e"*64
+        changed["fingerprint"]=hashlib.sha256(json.dumps(changed["files"],sort_keys=True).encode()).hexdigest()
+        def fail_ui(*args,**kwargs):
+            if args==("start",launcher.UNITS[1]): raise subprocess.CalledProcessError(1,args)
+            return manager(*args,**kwargs)
+        self.service.manager.side_effect=fail_ui
+        with mock.patch.object(installer,"storage_evidence",return_value=changed):
+            with self.assertRaisesRegex(ValueError,"data compatibility is unproven"):
+                installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertEqual(current.resolve().name,"0.1.0-fixture1")
+        self.assertFalse(any(states.values()))
+        retained=list((self.prefix / "lib").glob(".qoda-stage-*"));self.assertEqual(len(retained),1)
+        self.assertTrue((retained[0] / "recovery-needed").exists())
+        self.assertTrue((retained[0] / "failed-release/releases/0.1.0-fixture2/qoda-backend").exists())
+        with self.assertRaisesRegex(ValueError,"Unfinished Qoda transaction"): self.install()
+
+    def test_interrupted_update_can_restore_verified_code_without_restoring_data(self):
+        current=self.install();self.generation=2;states,events,_=self.running_manager(False,False)
+        data=self.base / "state/synthetic-retained-data";data.parent.mkdir();data.write_bytes(b"unchanged private fixture")
+        atomic=installer.atomic_file
+        def interrupted(*args): atomic(*args);os._exit(23)
+        def child():
+            with mock.patch.object(installer,"atomic_file",side_effect=interrupted): installer.install(self.prefix,self.config,checkpointed=True)
+        process=multiprocessing.get_context("fork").Process(target=child);process.start();process.join(timeout=10)
+        try:
+            self.assertEqual(process.exitcode,23)
+            retained=list((self.prefix / "lib").glob(".qoda-stage-*"));self.assertEqual(len(retained),1)
+            installer.recover(self.prefix,self.config,retained[0])
+            self.assertEqual(current.resolve().name,"0.1.0-fixture1")
+            self.assertEqual(data.read_bytes(),b"unchanged private fixture")
+            self.assertFalse((retained[0] / "recovery-needed").exists())
+            self.assertTrue((retained[0] / "recovered-candidate/releases/0.1.0-fixture2/qoda-backend").exists())
+            installer.owned(current.parent,{"prefix":self.prefix,"config":self.config})
+            self.assertFalse(any(call[0]=="start" for call in events))
+        finally:
+            if process.is_alive():process.kill();process.join()
+
+    def test_activation_lock_blocks_old_launch_and_quit_then_refuses_stale_release(self):
+        current=self.install();self.generation=2
+        states,events,_=self.running_manager()
+        checkpoint_entered=threading.Event();continue_switch=threading.Event();finished=threading.Event();errors=[]
+        def checkpoint():checkpoint_entered.set();self.assertTrue(continue_switch.wait(3))
+        self.service.pause_checkpoint.side_effect=checkpoint
+        def update():
+            try:installer.install(self.prefix,self.config,checkpointed=True)
+            except BaseException as error:errors.append(error)
+        thread=threading.Thread(target=update);thread.start();self.assertTrue(checkpoint_entered.wait(3))
+        old=current.resolve()
+        def stale_launch():
+            try:launcher.launch("quit")
+            except ValueError as error:errors.append(error)
+            finally:finished.set()
+        with mock.patch.object(launcher,"ROOT",old), mock.patch.object(launcher,"manager",self.service.manager), mock.patch.object(launcher,"active",self.service.active), mock.patch.object(launcher,"verify_shutdown",self.service.verify_shutdown):
+            contender=threading.Thread(target=stale_launch);contender.start()
+            self.assertFalse(finished.wait(.1));continue_switch.set();thread.join(5);contender.join(5)
+        self.assertFalse(thread.is_alive());self.assertFalse(contender.is_alive())
+        self.assertEqual(current.resolve().name,"0.1.0-fixture2")
+        self.assertEqual(len(errors),1);self.assertRegex(str(errors[0]),"Release changed")
+
+    def test_interruption_immediately_after_atomic_exchange_is_recoverable(self):
+        current=self.install();self.generation=2;self.running_manager(False,False)
+        exchange=installer.exchange_paths
+        def interrupted(*args):exchange(*args);os._exit(24)
+        def child():
+            with mock.patch.object(installer,"exchange_paths",side_effect=interrupted):installer.install(self.prefix,self.config,checkpointed=True)
+        process=multiprocessing.get_context("fork").Process(target=child);process.start();process.join(10)
+        try:
+            self.assertEqual(process.exitcode,24);self.assertTrue(current.exists())
+            stage=list((self.prefix / "lib").glob(".qoda-stage-*"))[0]
+            self.assertFalse((stage / "previous").exists())
+            self.assertTrue((stage / "qoda-player/releases/0.1.0-fixture1/qoda-backend").exists())
+            installer.recover(self.prefix,self.config,stage)
+            self.assertEqual(current.resolve().name,"0.1.0-fixture1")
+        finally:
+            if process.is_alive():process.kill();process.join()
+
+    def test_failed_directory_sync_after_exchange_restores_previous_tree(self):
+        current=self.install();before=installer.inventory(current.parent);self.generation=2
+        sync=installer.sync_directory;failed=False
+        def fail_once(path):
+            nonlocal failed
+            if path==self.prefix / "lib" and not failed:
+                failed=True;raise OSError("synthetic directory sync failure")
+            return sync(path)
+        with mock.patch.object(installer,"sync_directory",side_effect=fail_once):
+            with self.assertRaisesRegex(OSError,"directory sync"):
+                self.install()
+        self.assertEqual(installer.inventory(current.parent),before)
+        self.assertTrue(current.exists())
+
+    def test_final_shutdown_failure_aborts_selection_after_stopping_owned_units(self):
+        current=self.install();before=installer.inventory(current.parent);self.generation=2
+        states,events,_=self.running_manager()
+        self.service.verify_shutdown.side_effect=ValueError("synthetic final checkpoint failure")
+        with self.assertRaisesRegex(ValueError,"final checkpoint failure"):
+            installer.install(self.prefix,self.config,checkpointed=True)
+        self.assertFalse(any(states.values()))
+        self.assertFalse(any(call[0]=="start" for call in events))
+        self.assertEqual(installer.inventory(current.parent),before)
+
+    def test_launcher_refuses_different_effective_manager_profile(self):
+        environment={"WAYLAND_DISPLAY":"synthetic-wayland","DBUS_SESSION_BUS_ADDRESS":"unix:path=/synthetic-bus","XDG_DATA_HOME":str(self.base / "data")}
+        with mock.patch.dict(os.environ,environment):
+            fields={name:os.environ[name] for name in ["WAYLAND_DISPLAY","XDG_RUNTIME_DIR","DBUS_SESSION_BUS_ADDRESS","XDG_CONFIG_HOME","XDG_STATE_HOME","XDG_CACHE_HOME","XDG_DATA_HOME"]}
+            fields["XDG_STATE_HOME"]=str(self.base / "other-state")
+            reply=subprocess.CompletedProcess([],0,stdout="\n".join(key+"="+value for key,value in fields.items()))
+            with mock.patch.object(launcher,"manager",return_value=reply):
+                with self.assertRaisesRegex(ValueError,"profile differs.*XDG_STATE_HOME"):launcher.verify_session()
+            fields["XDG_STATE_HOME"]=os.environ["XDG_STATE_HOME"]
+            reply=subprocess.CompletedProcess([],0,stdout="\n".join(key+"="+value for key,value in fields.items()))
+            with mock.patch.object(launcher,"manager",return_value=reply):launcher.verify_session()
+
 
 class ReleaseBuild(unittest.TestCase):
     def test_locked_remapped_build_is_stable_and_refuses_personal_paths(self):
@@ -301,7 +525,8 @@ class ReleaseBuild(unittest.TestCase):
             binary.write_bytes(b"fictional path-free binary")
             def command(args, **kwargs):
                 return subprocess.CompletedProcess(args, 0, stdout="rustc 1.99.1 (fixture)\n")
-            with mock.patch.object(installer, "ROOT", source), mock.patch.object(installer, "preflight"), mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target), "RUSTFLAGS": "-C opt-level=2", "CARGO_ENCODED_RUSTFLAGS": ""}), mock.patch.object(installer.subprocess, "run", side_effect=command) as run:
+            contract = installer.storage_evidence()
+            with mock.patch.object(installer, "ROOT", source), mock.patch.object(installer, "storage_evidence", return_value=contract), mock.patch.object(installer, "preflight"), mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target), "RUSTFLAGS": "-C opt-level=2", "CARGO_ENCODED_RUSTFLAGS": ""}), mock.patch.object(installer.subprocess, "run", side_effect=command) as run:
                 first = installer.stage_release(base / "release-one")
                 second = installer.stage_release(base / "release-two")
                 self.assertEqual(first, second)

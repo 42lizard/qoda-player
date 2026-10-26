@@ -90,8 +90,9 @@ budgets/eviction do not become a general permission to delete foreign files.
 Installation owns code/integrations separately from preferences, state, cache and
 keyring entries. Source builds are locked and versioned, installation/removal are
 conflict-aware, login autostart is absent by default, and uninstall retains user
-data. Current upgrades require stopped processes. In-use checkpointed switching
-and schema-safe code/backup rollback remain #46; installed logout/crash behavior
+data. Checkpointed source updates and conservative compatible code rollback are
+implemented within the [release-switching evidence](release-switching.md); no
+database downgrade or automatic backup restoration is offered. Installed logout/crash behavior
 remains unqualified, outside the experimental installed-service support claim
 recorded when resolving #45.
 
@@ -106,7 +107,7 @@ recorded when resolving #45.
 | Recovery | Bounded pinned-version/visit recovery with synthetic native position checks. | Owned-server interruption/permission behavior #16. |
 | Plex listening/reporting | [Typed provider transport and bounded nominal observer](plex-reporting.md), with fake-provider/HTTP tests and scoped live pause/resume/stop/duplicate-handoff qualification; preparation is excluded. | Broader owned-server cases #16. No played-state/history synchronization claim. |
 | History | Bounded Previous path and separate [nominal archive](listening-archive.md), durable visit identities, account cleanup, retention and private export. | No audibility, played-duration, completion or provider-history inference. |
-| Lifecycle/install | Ownership/rollback fixtures, installed launcher stubs, native process shutdown, private-bus activation, native widget and UI fixtures; software increment #45 complete. | In-use updates/rollback #46. Actual installed manager/logout/crash behavior remains unqualified and excluded from supported claims. |
+| Lifecycle/install | Ownership/rollback fixtures, installed launcher stubs, native process shutdown, private-bus activation, native widget and UI fixtures; software increment #45 complete. | Checkpointed switching and conservative rollback #46 have scoped native/fixture evidence. Actual installed manager/logout/crash behavior remains unqualified and excluded from supported claims. |
 | Physical/hardware claims | Explicitly separated from digital/sample and IPC-driven evidence. | #18/#27, outside the accepted narrower first-release claim. |
 
 Evidence tiers are distinct: implementation, deterministic synthetic fixtures,
@@ -117,7 +118,7 @@ commits and CI/measurement records live in the linked issues and topic documents
 
 The [implementation queue](implementation-roadmap.md) maps #21 and #23–#30 to their
 focused follow-ups. #28 groups offline startup (implemented #31), history #32 and
-packaging #33. Remaining software work includes #41/#46; the support
+packaging #33. Remaining software work includes #41; the support
 proposal does not cancel it. #45's remaining real-manager qualification is separate
 from its implemented shutdown and activation changes.
 

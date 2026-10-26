@@ -22,6 +22,8 @@ mod search;
 mod shutdown;
 mod source_format;
 mod storage;
+#[cfg(test)]
+mod update_tests;
 mod vault;
 use player::{Command, Player};
 use qoda_core::{OccurrenceId, SourceId, TrackRef};
@@ -306,6 +308,15 @@ fn record_clock(
         return queue.confirm_presented().unwrap_or(false);
     }
     false
+}
+fn pause_for_checkpoint(queue: &mut queue::Queue, player: &Player, generation: u64) {
+    let audio = player.status();
+    if audio.generation == generation
+        && let Some(position) = audio.position_seconds
+    {
+        let _ = queue.set_position(position);
+    }
+    player.send(Command::Pause(true));
 }
 fn gain_view(settings: &gain::Settings, audio: &player::Status, generation: u64) -> Value {
     let mut view = settings.view();
@@ -2223,15 +2234,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         force_save = true;
                     }
                     "pause" => {
-                        let audio = player.status();
-                        if audio.generation == epochs.current
-                            && let Some(position) = audio.position_seconds
-                        {
-                            let _ = queue.set_position(position);
-                        }
+                        pause_for_checkpoint(&mut queue, &player, epochs.current);
                         force_save = true;
                         desired_playing = false;
-                        player.send(Command::Pause(true));
                         state["intent"] = json!("paused");
                     }
                     "resume" => {

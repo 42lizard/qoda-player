@@ -85,7 +85,7 @@ def backend_exit():
 def verify_shutdown():
     outcome = backend_exit()["outcome"]
     if outcome == "checkpoint_failed":
-        raise ValueError("Qoda stopped, but the final session checkpoint failed. Recent changes may be unsaved; inspect journalctl --user -u qoda-backend before restarting")
+        raise ValueError("Qoda stopped, but the final session or archive checkpoint failed. Recent changes may be unsaved; inspect journalctl --user -u qoda-backend before restarting")
     if outcome == "backup_warning":
         raise ValueError("Qoda stopped and the session was saved, but its backup update failed. Inspect journalctl --user -u qoda-backend")
     if outcome == "runtime_cleanup_failed":
@@ -114,6 +114,43 @@ def snapshot():
         return value
 
 
+def pause_checkpoint():
+    """Pause one pinned backend instance and wait for its explicit saved serial."""
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(5)
+        connection.connect(str(Path(os.environ["XDG_RUNTIME_DIR"]) / "qoda/backend.sock"))
+        _, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if uid != os.getuid():
+            raise ValueError("Backend peer belongs to another user")
+        connection.sendall(b'{"op":"hello","protocol":1}\n')
+        with connection.makefile("rb") as stream:
+            def receive():
+                line=stream.readline(16*1024*1024+1)
+                if len(line)>16*1024*1024 or not line.endswith(b"\n"):
+                    raise ValueError("Backend checkpoint reply is oversized or incomplete")
+                value=json.loads(line)
+                if not isinstance(value,dict) or value.get("protocol")!=1 or not isinstance(value.get("instance"),str):
+                    raise ValueError("Backend checkpoint protocol mismatch")
+                return value
+            initial=receive()
+            serial=initial.get("storage",{}).get("serial")
+            connection.sendall((json.dumps({"op":"pause","instance":initial["instance"]})+"\n").encode())
+            deadline=time.monotonic()+8
+            while True:
+                value=receive()
+                if value["instance"]!=initial["instance"]:
+                    raise ValueError("Backend instance changed during checkpoint; release unchanged")
+                saved=value.get("storage",{})
+                audio=value.get("audio")
+                paused=audio is None or audio.get("paused") is True or audio.get("idle") is True
+                if value.get("intent")=="paused" and paused and saved.get("serial")!=serial and saved.get("state")=="saved" and not saved.get("cleanup_pending"):
+                    return
+                if saved.get("state") not in {"saved","saving"}:
+                    raise ValueError("Pause checkpoint was not saved; release unchanged")
+                if time.monotonic()>=deadline:
+                    raise ValueError("Pause checkpoint timed out; release unchanged")
+
+
 def ipc(action):
     return subprocess.run(["quickshell", "ipc", "--path", str(ROOT.parent.parent / "current/ui"), "call", "--", "control", ACTIONS[action]],
                           capture_output=True, timeout=1, check=False).returncode == 0
@@ -126,6 +163,12 @@ def verify_session():
     for name in ["WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"]:
         if os.environ.get(name) and values.get(name) != os.environ[name]:
             raise ValueError("User service environment differs from this desktop; run dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS in the desktop session")
+
+    for name, suffix in [("XDG_CONFIG_HOME",".config"),("XDG_STATE_HOME",".local/state"),("XDG_CACHE_HOME",".cache"),("XDG_DATA_HOME",".local/share")]:
+        client=Path(os.environ.get(name,str(Path.home() / suffix)))
+        managed=Path(values.get(name,str(Path(values.get("HOME",str(Path.home()))) / suffix)))
+        if not client.is_absolute() or not managed.is_absolute() or os.path.normpath(client)!=os.path.normpath(managed):
+            raise ValueError("User service profile differs from this desktop ("+name+"); align the explicit XDG profile before launching or updating")
 
 
 def owner_path():

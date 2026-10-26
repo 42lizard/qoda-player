@@ -68,3 +68,5 @@ an interrupt between listeners; repeated native stops cover this race. The UI
 and development client wait for shutdown acknowledgement instead of immediately
 closing their command socket. An unacknowledged UI Quit stays visible with a retry
 message; it does not silently close and leave the backend playing.
+
+Archive observations flush before the final session checkpoint. A failed archive flush uses checkpoint failure status 74 and remains distinguishable in the backend log; installed Quit reports session or archive checkpoint failure. Updates wait for an acknowledged Pause checkpoint and verify final shutdown before changing code; see [release switching](release-switching.md).

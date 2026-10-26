@@ -9,8 +9,10 @@ prefixes and does not install this package on the active desktop.
 Install and remove verify recorded file hashes, executable modes and the exact
 current-release symlink. Modified, unexpected, symlinked or unowned artifacts
 block the operation before changes. Reinstalling retains previous release
-payloads. Switching releases or uninstalling requires both units to be stopped;
-the installer never stops music. A failed filesystem transaction restores the
+payloads. The default `install` and `remove` commands require both units stopped.
+Explicit `update` and compatible `rollback` pause/checkpoint the owned player,
+stop both units, then select code and restart previously running components
+paused; see [release switching and recovery](release-switching.md). A failed filesystem transaction restores the
 previous files. If rollback itself fails, it retains a marked staging directory
 with the previous payload and copies of the integrations for manual recovery,
 and prints that location. After an interrupted process, the next install/remove
@@ -22,9 +24,10 @@ The launcher serializes user actions, starts the backend and waits for protocol
 readiness before starting/showing the UI. Hide/status never start services. Quit
 stops only these units; SIGINT gives the backend its existing final checkpoint
 path. UI failure requires the next explicit launch to recreate it. Backend
-failures have bounded service retries and restore paused. Upgrade activation,
-real graphical logout and persistence-failure qualification remain explicit
-release gates rather than assumptions from filesystem tests.
+failures have bounded service retries and restore paused. Native private-profile activation/checkpoint tests supplement deterministic
+filesystem and manager-adapter fixtures. Actual graphical logout, user-manager
+crash policy and hardware behavior remain outside the experimental installed
+integration claim.
 
 ## Commands and prerequisites
 
@@ -51,8 +54,9 @@ python3 tools/install.py remove
 
 `--prefix` defaults to `~/.local`; `--config-home` defaults to
 `$XDG_CONFIG_HOME`/`~/.config`. Keep both choices for later upgrades/removal.
-Installation runs `systemctl --user daemon-reload` but never starts/enables a
-unit. The prefix's `bin` directory must be on PATH for terminal use. Desktop
+Initial installation runs `systemctl --user daemon-reload` and never starts or
+enables a unit. An explicit update restarts only previously running components,
+paused; no command enables autostart. The prefix's `bin` directory must be on PATH for terminal use. Desktop
 launch uses its absolute path. Custom prefixes outside the desktop's XDG data
 search path also need their `share` directory in `XDG_DATA_DIRS` for menu/icon
 discovery; files are not copied to a second location automatically.
@@ -82,21 +86,21 @@ validators, including spaces, quotes, dollar signs, backticks and percent signs
 in the prefix. A GIO launch regression also checks the actual desktop Exec path
 and arguments, using a private test script and unavailable private D-Bus address. Isolated tests cover ownership, mode changes, future manifests,
 upgrade/reinstall, retained releases, conflicts, injected write/reload failure,
-stopped-only switching, exact-unit Quit, first-toggle behavior and peer/protocol
+stopped-only install/remove, checkpointed update/rollback, exact-unit Quit, first-toggle behavior and peer/protocol
 readiness. These do not prove an actual user manager's logout/crash behavior.
 
-Before #33 closes, [#45](https://github.com/42lizard/qoda-player/issues/45) must qualify actual installed services in a disposable graphical
-session: concurrent launch/Quit races, UI failure and explicit recreation,
-backend crash retry/rate limiting, graphical logout, fenced MPRIS/installed-bar activation under the real manager, and final-checkpoint outcome propagation through the real user
-manager. Process-level checkpoint/backup/cleanup exit reporting and launcher
-classification are implemented and tested in [shutdown outcomes](shutdown.md). Existing schema incompatibility protection is backend-owned; this
-installer does not offer code/database downgrade or automatic backup restoration.
-Pause/checkpoint upgrades that retain a running session and explicit compatible
-rollback remain [#46](https://github.com/42lizard/qoda-player/issues/46). Installation on the active desktop remains
-opt-in after qualification.
+[Installed activation/shutdown #45](https://github.com/42lizard/qoda-player/issues/45)
+and [checkpointed release switching #46](https://github.com/42lizard/qoda-player/issues/46)
+implement the software lifecycle boundary. Native process tests cover pause,
+checkpoint and restart; synthetic manager adapters qualify ownership, ordering,
+failure and interruption. Actual installed user-manager/logout/crash behavior
+remains unverified and excluded by the [accepted first-release boundary](first-release-scope-proposal.md).
+The on-demand service integration remains experimental. Installation on the
+active desktop stays opt-in.
 
 `python3 tools/check-install.py` builds and exercises a real disposable package,
-using a test manager adapter and a private empty backend. It verifies native
+using a test manager adapter and private empty native backends. It verifies
+checkpointed updates, compatible code rollback, paused restart and native
 unit/desktop syntax and never reloads or starts units in the host user manager.
 It requires `desktop-file-validate` and `systemd-analyze` in addition to the build
 dependencies. No real account, credentials, library or audio is used.
