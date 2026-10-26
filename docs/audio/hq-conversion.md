@@ -66,7 +66,7 @@ also reset state. Continuous resampler-state handoff is tracked in [#41](https:/
 this increment does not claim that boundary is transparent. A reproducible
 [upstream-path comparison](../research/continuous-resampler.md) now distinguishes
 native playlist reset from EDL continuous-input behavior and its ownership/trust
-constraints. Run `python3 tools/check-resampler-boundary.py --expect-reset` from
+constraints. A [bounded Rust continuous-PCM experiment](../research/continuous-pcm-input.md#implementation-owner-experiment-isolated-decoder-and-persistent-final-graph) now matches uninterrupted conversion across fractional splits and unequal gains, with cancellation/fault checks. It is not yet connected to production queue ownership, seek or recovery. Run `python3 tools/check-resampler-boundary.py --expect-reset` from
 the repository root to reproduce the current limitation using synthetic files.
 
 ## Validation
