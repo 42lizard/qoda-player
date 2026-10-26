@@ -120,6 +120,14 @@ struct Store {
     bytes: u64,
     entries: usize,
 }
+impl Drop for Store {
+    fn drop(&mut self) {
+        // fork() can temporarily retain the same open file description in a
+        // child before exec closes it. Closing our descriptor alone would
+        // leave its flock held, rejecting an immediate store reopen.
+        let _ = File::unlock(&self._lock);
+    }
+}
 impl Store {
     fn open(paths: &Paths, clear: bool) -> Result<Self> {
         let settings = Directory::open(&paths.settings)?;
@@ -622,6 +630,19 @@ pub(crate) mod tests {
                 .fresh_for
                 .is_zero()
         );
+    }
+    #[test]
+    fn closing_store_releases_lock_even_while_an_inherited_descriptor_survives() {
+        let fixture = Fixture::new();
+        let store = Store::open(&fixture.paths, false).unwrap();
+        let inherited = store._lock.try_clone().unwrap();
+        assert!(Store::open(&fixture.paths, false).is_err());
+        drop(store);
+        let reopened = Store::open(&fixture.paths, false).unwrap();
+        drop(inherited);
+        assert!(Store::open(&fixture.paths, false).is_err());
+        drop(reopened);
+        assert!(Store::open(&fixture.paths, false).is_ok());
     }
     #[test]
     fn eviction_respects_access_order_budget_and_preferences_survive_clear() {
