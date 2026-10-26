@@ -122,6 +122,14 @@ with tempfile.TemporaryDirectory(prefix='qoda-mpris-check-') as temp:
   ipc('toggle');assert json.loads(ipc('status'))['form']=='compact'
   ipc('showFull');full=json.loads(ipc('status'));assert full['form']=='full' and not full['compact']['visible']
   assert full['query']==initial['query'] and full['tab']==initial['tab'] and full['instance']==initial['instance']
+  assert full['settings']['section']=='cache' and full['settings']['visible']
+  ipc('showSearch')
+  for _ in range(60):
+   focused=json.loads(ipc('status'))
+   if focused['searchFocused'] and not focused['settings']['visible']:break
+   time.sleep(.05)
+  else:raise AssertionError('Search did not focus after settings closed')
+  assert focused['tab']==4 and focused['form']=='full'
   ipc('dismiss');assert json.loads(ipc('status'))['form']=='full'
   for _ in range(4):
    ipc('showCompact');ipc('hide');ipc('showFull')

@@ -36,6 +36,9 @@ HOOKS = """
             window.contentItem.Window.window.height = h;
         }
         function capture(path: string): void { fullFrame.grabToImage(result => result.saveToFile(path)); }
+        function captureSettings(path: string): void { settingsSheet.contentItem.grabToImage(result => result.saveToFile(path)); }
+        function settingsGeometry(): string { function walk(item) { return {type: String(item), x:item.x,y:item.y,w:item.width,h:item.height,ih:item.implicitHeight,visible:item.visible,children:(item.children || []).map(walk)}; } return JSON.stringify(walk(settingsSheet.contentItem)); }
+        function closeSettings(): void { root.closeSettings(); }
         function captureQueue(path: string): void { queuePane.grabToImage(result => result.saveToFile(path)); }
         function closeQueue(): void { queueDrawer.close(); }
         function queueDragStart(id: string): bool { queueTabs.currentIndex = 0; return queueReorder.begin(id); }
@@ -70,7 +73,7 @@ HOOKS = """
             root.snapshot = next; root.globalQuery = "fixture"; libraryTabs.currentIndex = 4;
         }
 
-        function recoveryFixture(): void { const next = Object.assign({}, root.snapshot); next.recovery = {phase: "exhausted", attempts: 2, limit: 2, message: "Connection interrupted; recovery stopped. Retry or Skip explicitly."}; root.snapshot = next; root.audioExpanded = false; }
+        function recoveryFixture(): void { const next = Object.assign({}, root.snapshot); next.recovery = {phase: "exhausted", attempts: 2, limit: 2, message: "Connection interrupted; recovery stopped. Retry or Skip explicitly."}; root.snapshot = next; root.closeSettings(); }
 """
 
 
@@ -174,15 +177,16 @@ def check(output=None):
                         time.sleep(0.05)
                     raise AssertionError("UI state did not settle: " + repr(value))
 
-                def capture(label, queue=False):
+                def capture(label, queue=False, settings=False):
                     path = output / (label + ".png")
                     path.unlink(missing_ok=True)
-                    ipc("captureQueue" if queue else "capture", path)
+                    ipc("captureSettings" if settings else "captureQueue" if queue else "capture", path)
                     for _ in range(50):
                         if path.exists() and path.stat().st_size > 0:
                             return
                         time.sleep(0.05)
-                    raise AssertionError("Capture did not complete: " + label)
+                    log.flush(); log.seek(0)
+                    raise AssertionError("Capture did not complete: " + label + "\n" + log.read())
 
                 for _ in range(80):
                     if process.poll() is not None:
@@ -230,16 +234,35 @@ def check(output=None):
                 assert restored["queue"] == info["queue"]
                 ipc("showAudio")
                 time.sleep(0.15)
-                capture("audio-wide")
+                capture("audio-wide", settings=True)
                 ipc("resize", 540, 760)
                 time.sleep(0.15)
-                capture("audio-small")
+                capture("audio-small", settings=True)
+                settings_geometry = json.loads(ipc("settingsGeometry"))
+                def assert_bounds(item):
+                    if not item["visible"]:
+                        return
+                    for child in item["children"]:
+                        if child["visible"] and child["w"] > 0 and child["h"] > 0:
+                            assert child["w"] <= item["w"] + 1, (item, child)
+                            assert_bounds(child)
+                assert_bounds(settings_geometry)
+                ipc("showAccount")
+                time.sleep(0.15)
+                capture("account-small", settings=True)
+                ipc("showCache")
+                time.sleep(0.15)
+                capture("cache-small", settings=True)
                 ipc("scrollRail")
                 time.sleep(0.15)
                 rail = status()["geometry"]
-                assert rail["railContentHeight"] > rail["railHeight"]
+                assert status()["settings"]["visible"]
+                assert rail["browserHeight"] > 250
                 assert rail["accountTop"] >= 0 and rail["accountBottom"] <= rail["railHeight"] + 1, rail
-                capture("audio-rail-scrolled")
+                capture("audio-rail-scrolled", settings=True)
+                ipc("showSearch")
+                focused = wait_for(lambda value: value["searchFocused"] and not value["settings"]["visible"])
+                assert focused["tab"] == 4 and focused["form"] == "full"
                 ipc("recoveryFixture")
                 time.sleep(0.15)
                 capture("recovery-small")
@@ -305,6 +328,7 @@ def check(output=None):
                            "Failed to load", "SyntaxError", "Binding loop"])]
                 assert not errors, "QML runtime errors: " + repr(errors)
                 print("Wide/narrow/small full-window rendering, queue drawer, Previous viewport and retained browser/queue state passed")
+                print("Settings retained browser space; narrow content bounds and delayed Search focus passed")
                 print("Production queue/playlist drag wiring preserved frozen fences and backend-owned order; stale/restricted moves refused")
                 print("Fictional socket only; no backend, credentials, Plex, audio or compositor changes")
                 if output != base / "captures":
