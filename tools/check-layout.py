@@ -176,6 +176,14 @@ def check(output=None):
                         assert drawer["geometry"]["browserWidth"] == geometry["browserWidth"]
                         assert drawer["tab"] == info["tab"] and drawer["query"] == info["query"]
                         capture("drawer", queue=True)
+                        ipc("hide")
+                        wait_for(lambda value: not value["queueDrawerVisible"])
+                        ipc("showFull")
+                        time.sleep(0.25)
+                        assert not status()["queueDrawerVisible"]
+                        assert status()["tab"] == info["tab"]
+                        ipc("showNavigation")
+                        wait_for(lambda value: value["queueDrawerOpen"])
                         ipc("closeQueue")
                         wait_for(lambda value: not value["queueDrawerVisible"])
                 ipc("resize", 1320, 820)

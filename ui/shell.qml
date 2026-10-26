@@ -211,7 +211,12 @@ ShellRoot {
             height: window.height
             visible: root.queueRequested && window.width < 1100 && window.visible
             modal: true
-            onClosed: root.queueRequested = false
+            onClosed: Qt.callLater(() => {
+                // Closing while the window hides must not mutate visible's
+                // dependencies during the same binding evaluation. A reopened
+                // drawer also owns the newer request, so leave it untouched.
+                if (!queueDrawer.visible) root.queueRequested = false;
+            })
             background: Rectangle { color: "#191f1c"; border.color: "#303a33" }
         }
         ColumnLayout {
