@@ -40,6 +40,12 @@ These ownership changes preserve [nominal presentation](adr/0003-nominal-playbac
 and [bounded continuous conversion](adr/0004-continuous-converted-input.md).
 Admission is not listening evidence. Digital/null tests do not qualify physical output.
 
+Decoder failure classification belongs to the continuous input stream. The polling
+coordinator and multiplex worker report failures through one generation-aware
+operation. It classifies and retires an uncommitted future under one state lock;
+duplicate or late reports for retired input are ignored. Current or committed
+input failures still cancel the stream explicitly.
+
 ## Source and pacman launch
 
 `tools/launch.py` owns launch definitions, quoting, process-manager identity,

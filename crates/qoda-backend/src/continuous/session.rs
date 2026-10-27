@@ -151,16 +151,7 @@ fn multiplex(stream: &Stream, workers: &Workers) -> Result<(), &'static str> {
         retire(workers, input.generation);
         drop(source);
         if let Err(error) = result {
-            if !stream.live(input.generation) {
-                continue;
-            }
-            if stream.reject_uncommitted(
-                input.generation,
-                "Next decoder failed before admission; independent loading required",
-            ) {
-                continue;
-            }
-            return Err(error);
+            stream.report_failure(input.generation, error);
         }
     }
 }
@@ -247,19 +238,11 @@ impl Session {
             })
             .collect();
         for (generation, error) in failed {
-            if !self.stream.live(generation) {
-                continue;
-            }
-            if self.stream.reject_uncommitted(
-                generation,
-                "Next decoder failed before admission; independent loading required",
-            ) {
-                retire(&self.workers, generation);
-            } else {
-                self.stream.fail(error);
-            }
+            self.stream.report_failure(generation, error);
+            retire(&self.workers, generation);
         }
     }
+
     pub fn cancel(&self) {
         self.stream.cancel();
         let workers: Vec<_> = self

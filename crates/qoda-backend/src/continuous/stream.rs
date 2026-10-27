@@ -67,6 +67,21 @@ struct State {
     error: Option<&'static str>,
     fallback: Option<&'static str>,
 }
+impl State {
+    fn reject_uncommitted(&mut self, generation: u64, reason: &'static str) -> bool {
+        if !self
+            .future
+            .as_ref()
+            .is_some_and(|future| future.input.generation == generation && future.written == 0)
+        {
+            return false;
+        }
+        self.future = None;
+        self.sealed = true;
+        self.fallback = Some(reason);
+        true
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Removal {
     Untouched,
@@ -157,19 +172,37 @@ impl Stream {
         let Ok(mut s) = self.state.lock() else {
             return false;
         };
-        if self.cancelled()
-            || !s
-                .future
-                .as_ref()
-                .is_some_and(|f| f.input.generation == generation && f.written == 0)
-        {
+        if self.cancelled() || !s.reject_uncommitted(generation, reason) {
             return false;
         }
-        s.future = None;
-        s.sealed = true;
-        s.fallback = Some(reason);
         self.changed.notify_all();
         true
+    }
+    /// Both the polling coordinator and mux can report one decoder's failure.
+    /// Classify and retire under one lock: a stale report must never turn an
+    /// already retired future into a fatal failure of the current input.
+    pub fn report_failure(&self, generation: u64, error: &'static str) {
+        let Ok(mut state) = self.state.lock() else {
+            self.cancel();
+            return;
+        };
+        if self.cancelled() {
+            return;
+        }
+        if state.reject_uncommitted(
+            generation,
+            "Next decoder failed before admission; independent loading required",
+        ) {
+            self.changed.notify_all();
+        } else if state.current.input.generation == generation
+            || state
+                .future
+                .as_ref()
+                .is_some_and(|future| future.input.generation == generation)
+        {
+            state.error.get_or_insert(error);
+            self.cancel();
+        }
     }
     pub fn stage(&self, owner: u64, input: Input) -> Result<(), &'static str> {
         let mut s = self
@@ -473,6 +506,51 @@ mod tests {
     }
     fn claim(stream: &Stream, generation: u64) {
         assert_eq!(stream.next_input().unwrap().unwrap().generation, generation);
+    }
+    #[test]
+    fn retired_failure_is_ignored_but_current_and_committed_failures_remain_fatal() {
+        let stream = Stream::new(input(1, 1), 1).unwrap();
+        stream.stage(1, input(2, 1)).unwrap();
+        assert_eq!(stream.remove(1, 2), Ok(Removal::Untouched));
+        stream.report_failure(2, "Retired failure");
+        assert_eq!(stream.error(), None);
+        assert!(!stream.cancelled());
+        stream.report_failure(1, "Current failure");
+        assert_eq!(stream.error(), Some("Current failure"));
+        assert!(stream.cancelled());
+
+        let stream = Stream::new(input(1, 1), 1).unwrap();
+        claim(&stream, 1);
+        stream.write(1, &[0; 16]).unwrap();
+        stream.complete(1).unwrap();
+        stream.stage(1, input(2, 1)).unwrap();
+        claim(&stream, 2);
+        stream.write(2, &[0; 16]).unwrap();
+        stream.report_failure(2, "Committed failure");
+        assert_eq!(stream.error(), Some("Committed failure"));
+        assert!(stream.cancelled());
+    }
+    #[test]
+    fn concurrent_failed_future_reports_do_not_poison_the_current_input() {
+        for _ in 0..40 {
+            let stream = Stream::new(input(1, 1), 1).unwrap();
+            stream.stage(1, input(2, 1)).unwrap();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(16));
+            std::thread::scope(|scope| {
+                for _ in 0..16 {
+                    let stream = stream.clone();
+                    let start = start.clone();
+                    scope.spawn(move || {
+                        start.wait();
+                        stream.report_failure(2, "Synthetic future failure");
+                    });
+                }
+            });
+            assert_eq!(stream.error(), None);
+            assert!(!stream.cancelled());
+            assert_eq!(stream.owner(), Ok(1));
+            assert!(stream.fallback().is_some());
+        }
     }
     #[test]
     fn one_successor_ledger_preserves_frame_spans_and_does_not_credit_admission() {
