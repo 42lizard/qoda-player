@@ -9,10 +9,9 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shutil
 import signal
-import socket
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -30,15 +29,25 @@ def observe_backend(command, env, base, identity=None):
         child=subprocess.Popen(command,env=env,stdout=log,stderr=log,**options)
         try:
             deadline=time.monotonic()+15
+            # Backend IPC accepts only the same UID. Probe from the same
+            # identity as the child, including the ordinary-user CI case.
+            probe_code = '\n'.join([
+                'import socket,sys',
+                'with socket.socket(socket.AF_UNIX) as connection:',
+                ' connection.settimeout(1)',
+                ' connection.connect(sys.argv[1])',
+                " connection.sendall(b'{\"op\":\"hello\",\"protocol\":1}\\n')",
+                ' with connection.makefile("rb") as stream: sys.stdout.buffer.write(stream.readline(16*1024*1024))',
+            ])
             while True:
                 assert child.poll() is None,'Packaged backend exited: '+(base/'backend.log').read_text()
-                try:
-                    connection=socket.socket(socket.AF_UNIX);connection.settimeout(1);connection.connect(str(Path(env['XDG_RUNTIME_DIR'])/'qoda/backend.sock'));break
-                except (FileNotFoundError,ConnectionRefusedError):
-                    connection.close();assert time.monotonic()<deadline;time.sleep(.05)
-            with connection,connection.makefile('rwb') as stream:
-                stream.write(b'{"op":"hello","protocol":1}\n');stream.flush();state=json.loads(stream.readline(16*1024*1024))
-                assert state['intent']=='paused' and not state['sign_in']['connected'] and not state['queue']['entries']
+                assert time.monotonic()<deadline, 'Packaged backend IPC did not become ready'
+                probe=subprocess.run([sys.executable,'-c',probe_code,str(Path(env['XDG_RUNTIME_DIR'])/'qoda/backend.sock')],env=env,capture_output=True,timeout=2,**options)
+                if probe.returncode==0 and probe.stdout:
+                    state=json.loads(probe.stdout)
+                    assert state['intent']=='paused' and not state['sign_in']['connected'] and not state['queue']['entries']
+                    break
+                time.sleep(.05)
             child.send_signal(signal.SIGINT);assert child.wait(timeout=12)==0
         finally:
             if child.poll() is None:child.kill();child.wait(timeout=3)
