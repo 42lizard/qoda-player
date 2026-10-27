@@ -5,6 +5,7 @@ mod alsa_guard;
 mod archive;
 mod artwork;
 mod artwork_store;
+mod buffered_reset;
 mod cache_files;
 mod catalog;
 mod continuous;
@@ -226,7 +227,6 @@ async fn connection_io(
         }
     }
 }
-pub(crate) use observation::record_clock;
 fn gain_view(settings: &gain::Settings, audio: &player::Status, generation: u64) -> Value {
     let mut view = settings.view();
     if audio.generation == generation && audio.entry_ready && !audio.idle && audio.error.is_none() {
@@ -671,35 +671,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 automatic_next = next.automatic;
             }
             Event::Gapless(reply) => {
-                let unavailable = gapless.unavailable_reply(&reply, &queue, &epochs);
-                if let Err(error) = gapless.ready(reply, &queue, &epochs, &player, &proxy).await {
-                    desired_playing = false;
-                    match player.barrier().await {
-                        Ok(before) => {
-                            let _ = session_commands::finish_gapless_reset(
-                                &mut gapless,
-                                &mut queue,
-                                &mut epochs,
-                                &before,
-                                &mut presented_generation,
-                                &proxy,
-                            )
-                            .await;
-                        }
-                        Err(_) => {
-                            gapless.invalidate();
-                            proxy.revoke().await;
-                            epochs.reset()?;
-                            gapless.review();
-                        }
-                    }
-                    state["error"] = json!(error);
+                let completed = buffered_reset::Runtime {
+                    queue: &mut queue,
+                    player: &player,
+                    gapless: &mut gapless,
+                    epochs: &mut epochs,
+                    proxy: &proxy,
+                    confirmed: &mut presented_generation,
+                    playing: &mut desired_playing,
+                }
+                .prepared(reply)
+                .await?;
+                if completed.reset {
                     state["intent"] = json!("paused");
                     state["audio"] = Value::Null;
-                } else if let Some((id, reason)) = unavailable
-                    && let Err(error) = queue.mark_unavailable(id, reason)
-                {
-                    state["error"] = json!(error.to_string());
+                }
+                if let Some(error) = completed.problem {
+                    state["error"] = json!(error);
                 }
             }
             Event::UiLaunchDone(id, result) => {

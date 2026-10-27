@@ -231,3 +231,42 @@ corresponding save commits; a committed save with a backup warning stays saved.
 Tests use temporary SQLite for save/reopen/purge and a controlled bounded storage
 transport for delayed completion and Busy/retry ordering, through the production
 checkpoint interface.
+
+## Buffered-output reset characterization
+
+The three buffered-output reset triggers have distinct outcomes. This table records
+the existing policy before concentrating their shared implementation.
+
+| Trigger | Successful captured snapshot | Failed native barrier | Caller outcome |
+| --- | --- | --- | --- |
+| Admitted command cancellation | Reconcile any bound handoff, retain matching native clock evidence, invalidate the successor, revoke grants, advance output epoch, enter review. | Invalidate successor, revoke grants, advance epoch, invalidate native load ownership, send Pause, enter review. | Pause intent; reject on reset/handoff error; otherwise revalidate the original socket revision or the desktop owner/deadline before mutation. |
+| Speculative preparation completion failure | Same captured-snapshot reset. | Invalidate successor, revoke grants, advance epoch, enter review. | Pause intent; retain the original preparation/staging error even if snapshot reconciliation also fails. |
+| Unbound/failed observed handoff | Same captured-snapshot reset, only while the current stream grant has not failed. | Invalidate successor, revoke grants, advance epoch, enter review. | Pause intent; retain the observed-handoff error and checkpoint the reset. Failed current grants remain on the stream-interruption/recovery path. |
+
+A successful snapshot retains position only for matching output ownership and
+confirms only native positive-clock evidence according to the existing
+`observation::record_clock` rules, with current proxy failure included. It is not
+an ordinary fresh polling sample, an archive observation, or a provider report.
+The observation owner continues to qualify ordinary presentation and output-change
+barriers. This ownership change does not relax those rules.
+
+An exhausted epoch during failed-barrier cleanup propagates as a fatal runtime
+error. An epoch or handoff error while consuming a successful snapshot is a reset
+error: commands reject it; automatic triggers preserve their original error.
+This distinction is retained rather than silently normalized during the refactor.
+
+`buffered_reset::Runtime` now owns the shared reset protocol. Command admission
+asks it to cancel speculative input and classifies the resulting reset outcome;
+preparation completion crosses `prepared`; observed handoff failure uses
+`after_failure`. The coordinator projects completion results without assembling
+native cleanup. Observation no longer imports the command module for resets.
+Trigger-specific native load invalidation and error handling remain explicit
+inside this owner, while command revalidation and failed-stream recovery decisions
+stay with their existing owners.
+
+Native null-output regressions cover preparation staging failure, stale completion,
+unavailable-successor fallback, paused snapshot position retention, unbound or
+queue-mismatched observed handoffs, successful and failed barriers, and failed
+current grants staying on the interruption path. Existing command tests retain
+untouched versus committed input, handoff reconciliation, late preparation and
+desktop expiry coverage through production command admission.

@@ -516,3 +516,138 @@ async fn output_barrier_retains_position_without_confirming_a_stalled_positive_c
     assert_eq!(env.archive.view().total, 0);
     assert!(env.provider.0.lock().unwrap().is_empty());
 }
+
+impl Environment {
+    async fn unbound_output(&mut self) -> String {
+        let generation = self.epochs.allocate().unwrap();
+        let url = self
+            .proxy
+            .grant(Box::new(crate::gapless::tests::Audio(
+                crate::gapless::tests::wav(),
+            )))
+            .await;
+        self.player
+            .send(player::Command::Load(generation, url.clone(), 0.0));
+        crate::gapless::tests::wait(&self.player, |s| {
+            s.generation == generation && s.entry_ready
+        })
+        .await;
+        url
+    }
+}
+#[tokio::test]
+async fn unbound_native_handoff_resets_through_tick_with_successful_or_failed_barrier() {
+    for failed_barrier in [false, true] {
+        let mut env = Environment::new().await;
+        let url = env.unbound_output().await;
+        let unbound_generation = env.player.status().generation;
+        let selected = env.queue.selected();
+        let visit = env.queue.visit();
+        let before = serde_json::to_value(&env.queue).unwrap();
+        if failed_barrier {
+            env.player.send(player::Command::Quit);
+        }
+        let mut owner = Controller::default();
+        let tick = owner.tick(&mut env.runtime()).await.unwrap();
+        assert!(matches!(tick.problem, Some(Problem::Handoff(_))));
+        assert!(tick.checkpoint && !tick.handoff);
+        assert!(!env.playing);
+        assert!(env.epochs.current > unbound_generation);
+        assert_eq!(env.gapless.view.phase, "review");
+        assert_eq!(env.queue.selected(), selected);
+        assert_eq!(env.queue.visit(), visit);
+        assert_eq!(serde_json::to_value(&env.queue).unwrap(), before);
+        assert!(env.confirmed.is_none());
+        assert_eq!(tick.presentation.presentation()["known"], false);
+        assert_eq!(reqwest::get(url).await.unwrap().status(), 404);
+        env.settle().await;
+        assert_eq!(env.archive.view().total, 0);
+        assert!(env.provider.0.lock().unwrap().is_empty());
+    }
+}
+struct Interrupted;
+impl qoda_provider::MediaSource for Interrupted {
+    fn open(
+        &self,
+        _: Option<qoda_provider::ByteRange>,
+        _: bool,
+    ) -> ProviderFuture<'_, qoda_provider::MediaResponse> {
+        Box::pin(async { Err(ProviderError::Network) })
+    }
+}
+#[tokio::test]
+async fn failed_current_grant_keeps_observed_handoff_on_the_interruption_path() {
+    let mut env = Environment::new().await;
+    env.unbound_output().await;
+    let generation = env.epochs.current;
+    let url = env.proxy.grant(Box::new(Interrupted)).await;
+    let _ = reqwest::get(url).await.unwrap();
+    assert!(env.proxy.failed().await);
+    let mut owner = Controller::default();
+    let tick = owner.tick(&mut env.runtime()).await.unwrap();
+    assert!(matches!(
+        tick.event,
+        Some(Event::StreamFailed(ProviderError::Network, true))
+    ));
+    assert_eq!(env.epochs.current, generation);
+    assert_ne!(env.gapless.view.phase, "review");
+    assert!(env.confirmed.is_none());
+    env.proxy.revoke().await;
+}
+
+#[tokio::test]
+async fn bound_native_handoff_with_a_changed_queue_resets_through_tick_without_promotion() {
+    use crate::gapless::tests::{Provider, wait};
+    let mut env = Environment::new().await;
+    let provider = Provider::new();
+    env.queue = provider.queue();
+    let selected = env.queue.selected();
+    let visit = env.queue.visit();
+    let successor = env.queue.pending()[0];
+    let media = provider
+        .prepare(provider.source, "a".to_owned().try_into().unwrap())
+        .await
+        .unwrap();
+    let url = env.proxy.grant(media.stream).await;
+    env.player
+        .send(player::Command::Load(env.epochs.current, url.clone(), 0.0));
+    wait(&env.player, |s| s.entry_ready).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    env.gapless
+        .schedule(
+            &env.queue,
+            &mut env.epochs,
+            provider,
+            tx,
+            crate::gain::Mode::Off,
+            false,
+        )
+        .unwrap();
+    let Some(Event::Gapless(reply)) = rx.recv().await else {
+        panic!("No successor")
+    };
+    env.gapless
+        .ready(reply, &env.queue, &env.epochs, &env.player, &env.proxy)
+        .await
+        .unwrap();
+    env.player.send(player::Command::Pause(false));
+    let generation = env.epochs.current;
+    wait(&env.player, |s| s.generation > generation).await;
+    let native_generation = env.player.status().generation;
+    env.queue.remove(successor).unwrap();
+    let before = serde_json::to_value(&env.queue).unwrap();
+    let mut owner = Controller::default();
+    let tick = owner.tick(&mut env.runtime()).await.unwrap();
+    assert!(
+        matches!(tick.problem, Some(Problem::Handoff(ref error)) if error.contains("no longer matches"))
+    );
+    assert!(tick.checkpoint && !tick.handoff);
+    assert!(!env.playing);
+    assert!(env.epochs.current > native_generation);
+    assert_eq!(env.gapless.view.phase, "review");
+    assert_eq!(env.queue.selected(), selected);
+    assert_eq!(env.queue.visit(), visit);
+    assert_eq!(serde_json::to_value(&env.queue).unwrap(), before);
+    assert!(env.confirmed.is_none());
+    assert_eq!(reqwest::get(url).await.unwrap().status(), 404);
+}

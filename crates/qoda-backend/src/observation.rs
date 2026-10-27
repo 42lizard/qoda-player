@@ -1,7 +1,7 @@
 //! Sampling and qualification of nominal output evidence. Sink-specific policy
 //! stays with reporting, archive and desktop presentation.
 use crate::{
-    Event, alsa_guard, archive, gapless, mpris, player, proxy, queue, reporting, session_commands,
+    Event, alsa_guard, archive, buffered_reset, gapless, mpris, player, proxy, queue, reporting,
 };
 use qoda_provider::MusicProvider;
 use serde_json::Value;
@@ -249,23 +249,17 @@ impl Controller {
             Ok(false) if sample.audio.generation <= cx.epochs.current => {}
             result => {
                 if !cx.proxy.failed().await {
-                    *cx.playing = false;
-                    if let Ok(before) = cx.player.barrier().await {
-                        let _ = session_commands::finish_gapless_reset(
-                            cx.gapless,
-                            cx.queue,
-                            cx.epochs,
-                            &before,
-                            cx.confirmed,
-                            cx.proxy,
-                        )
-                        .await;
-                    } else {
-                        cx.gapless.invalidate();
-                        cx.proxy.revoke().await;
-                        cx.epochs.reset()?;
-                        cx.gapless.review();
+                    buffered_reset::Runtime {
+                        queue: cx.queue,
+                        player: cx.player,
+                        gapless: cx.gapless,
+                        epochs: cx.epochs,
+                        proxy: cx.proxy,
+                        confirmed: cx.confirmed,
+                        playing: cx.playing,
                     }
+                    .after_failure()
+                    .await?;
                     problem=Some(Problem::Handoff(result.err().unwrap_or_else(||"An unbound native transition was reset; review the selected occurrence.".into())));
                     handoff_changed = true;
                 }

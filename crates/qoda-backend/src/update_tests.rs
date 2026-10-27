@@ -82,7 +82,7 @@ async fn installed_pause_handshake_waits_for_native_pause_and_a_new_durable_seri
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     let mut confirmed = None;
     loop {
-        record_clock(&mut queue, &player.status(), 7, &mut confirmed, false);
+        observation::record_clock(&mut queue, &player.status(), 7, &mut confirmed, false);
         if confirmed == Some(7) {
             break;
         }

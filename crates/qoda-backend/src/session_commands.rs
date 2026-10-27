@@ -1,10 +1,10 @@
 //! Listening-session command admission owns validation before cancellation,
-//! native reset ordering and desktop acknowledgement. Queue owns membership,
+//! buffered-reset decisions and desktop acknowledgement. Queue owns membership,
 //! visits and navigation; Player/gapless retain native output implementation.
 use crate::{
-    albums, catalog, gain, gapless, mpris, output,
+    albums, buffered_reset, catalog, gain, gapless, mpris, output,
     player::{self, Command, Player},
-    playlists, prepared_playback, proxy, queue, record_clock, search,
+    playlists, prepared_playback, proxy, queue, search,
 };
 use qoda_core::OccurrenceId;
 use serde_json::{Value, json};
@@ -64,24 +64,6 @@ pub(crate) fn check_queue(queue: &queue::Queue, request: &Value) -> Result<(), q
         .map_err(|_| queue::Error::Conflict)?;
     queue.check(session, revision)
 }
-pub(crate) async fn finish_gapless_reset(
-    gapless: &mut gapless::Controller,
-    queue: &mut queue::Queue,
-    epochs: &mut gapless::Epochs,
-    before: &player::Status,
-    presented: &mut Option<u64>,
-    proxy: &proxy::Proxy,
-) -> Result<(), String> {
-    let stream_failed = proxy.failed().await;
-    let promoted = gapless.handoff(queue, epochs, before, proxy).await;
-    record_clock(queue, before, epochs.current, presented, stream_failed);
-    gapless.invalidate();
-    proxy.revoke().await;
-    epochs.reset().map_err(str::to_owned)?;
-    gapless.review();
-    promoted.map(|_| ())
-}
-
 #[derive(Default)]
 pub struct Effects {
     pub prepare: Option<qoda_provider::Track>,
@@ -304,48 +286,24 @@ impl Playback<'_> {
             context.state["status"] = json!("Recovery cancelled; resume explicitly.");
         }
         if effect != Effect::None {
-            let cancelled = self.gapless.cancel(self.player, self.proxy).await;
-            let reset = match cancelled {
-                Ok(Some(before)) => Some(Ok(before)),
-                Ok(None)
-                    if self.gapless.chained
-                        && effect.changes_current(request, self.queue)
-                        && *self.presented != Some(self.epochs.current) =>
-                {
-                    Some(self.player.barrier().await)
-                }
-                Ok(None) => None,
-                Err(_) => Some(self.player.barrier().await),
-            };
-            if let Some(reset) = reset {
-                *self.desired_playing = false;
-                let result = match reset {
-                    Ok(before) => {
-                        finish_gapless_reset(
-                            self.gapless,
-                            self.queue,
-                            self.epochs,
-                            &before,
-                            self.presented,
-                            self.proxy,
-                        )
-                        .await
-                    }
-                    Err(error) => {
-                        self.gapless.invalidate();
-                        self.proxy.revoke().await;
-                        self.epochs.reset()?;
-                        self.player.invalidate_load(self.epochs.current);
-                        self.player.send(Command::Pause(true));
-                        self.gapless.review();
-                        Err(error.to_owned())
-                    }
-                };
+            let changes_current = effect.changes_current(request, self.queue);
+            let reset = buffered_reset::Runtime {
+                queue: self.queue,
+                player: self.player,
+                gapless: self.gapless,
+                epochs: self.epochs,
+                proxy: self.proxy,
+                confirmed: self.presented,
+                playing: self.desired_playing,
+            }
+            .cancel_for_command(changes_current)
+            .await?;
+            if let buffered_reset::Cancellation::Reset { problem } = reset {
                 context.state["audio"] = Value::Null;
                 context.state["intent"] = json!("paused");
                 context.state["status"] =
                     json!("Buffered transition reset; playback paused for review.");
-                if let Err(error) = result {
+                if let Some(error) = problem {
                     context.state["error"] = json!(error);
                     return Ok(Admission::Rejected);
                 }
