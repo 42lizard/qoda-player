@@ -400,7 +400,13 @@ impl Playback<'_> {
             return Ok(Admission::Rejected);
         }
         if request["op"] == "set_output" {
-            self.change_output(context.output, context.state).await?;
+            self.change_output(
+                context.output,
+                context.state,
+                context.observations,
+                context.account,
+            )
+            .await?;
             return Ok(Admission::Applied(Effects::default()));
         }
         if let Some(edit) = edit {
@@ -708,17 +714,22 @@ impl Playback<'_> {
         &mut self,
         settings: &output::Settings,
         state: &mut Value,
+        observations: &mut crate::observation::Controller,
+        account: u64,
     ) -> Result<(), &'static str> {
         *self.desired_playing = false;
         self.preparation.cancel();
-        match self.player.barrier().await {
-            Ok(before) => {
-                record_clock(
-                    self.queue,
-                    &before,
-                    self.epochs.current,
-                    self.presented,
-                    self.proxy.failed().await,
+        match crate::observation::Sample::barrier(self.player, self.proxy).await {
+            Ok(sample) => {
+                observations.record_barrier(
+                    sample,
+                    std::time::Instant::now(),
+                    crate::observation::Confirmation {
+                        queue: self.queue,
+                        account,
+                        generation: self.epochs.current,
+                        confirmed: self.presented,
+                    },
                 );
             }
             Err(error) => state["error"] = json!(error),

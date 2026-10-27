@@ -189,6 +189,8 @@ This prevents late old-account evidence gaining new reporting/archive authority.
 Queue remains authoritative for occurrences and visits, gapless for successor
 bindings, and command admission/preparation for their reset and invalidation work.
 Their native reset path uses the observation module's clock-recording operation.
+Output-change barriers capture and qualify fresh status/failure evidence before
+confirmation: retaining position does not let a stalled clock establish presentation.
 Synthetic tests exercise the production fan-out with real reporting and archive
 adapters. Native null-output tests enter both timer and pre-command paths and
 verify one promotion, old-grant revocation and no replacement load. These preserve

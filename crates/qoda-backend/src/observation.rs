@@ -34,6 +34,23 @@ pub struct Sample {
     pub failed: bool,
     pub at: Instant,
 }
+impl Sample {
+    pub async fn barrier(
+        player: &player::Player,
+        proxy: &proxy::Proxy,
+    ) -> Result<Self, &'static str> {
+        let audio = player.barrier().await?;
+        let at = Instant::now();
+        let failed = proxy.failed().await;
+        Ok(Self { audio, at, failed })
+    }
+}
+pub struct Confirmation<'a> {
+    pub queue: &'a mut queue::Queue,
+    pub account: u64,
+    pub generation: u64,
+    pub confirmed: &'a mut Option<u64>,
+}
 /// Borrowed output facts for a fresh desktop/UI projection. Callers supply
 /// identity and intent; only this owner supplies clock/failure qualification.
 pub struct Presentation<'a> {
@@ -68,12 +85,22 @@ pub struct Tick {
     pub event: Option<Event>,
     pub problem: Option<Problem>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Owner {
+    account: u64,
+    generation: u64,
+}
+struct Previous {
+    audio: player::Status,
+    stream_failed: bool,
+    unqualified: bool,
+}
 #[derive(Default)]
 pub struct Controller {
     clock: Clock,
-    owner: Option<(u64, u64)>,
+    owner: Option<Owner>,
     blocked_account_epoch: Option<u64>,
-    last: Option<(player::Status, bool, bool)>,
+    last: Option<Previous>,
     last_reporting: Value,
     last_archive: Value,
     handled_end: Option<u64>,
@@ -83,21 +110,20 @@ impl Controller {
         &mut self,
         sample: &Sample,
         now: Instant,
-        owner: (u64, u64),
+        owner: Owner,
         confirmed: &mut Option<u64>,
     ) -> bool {
         if self.owner != Some(owner) {
-            if self
-                .owner
-                .is_some_and(|old| old.0 != owner.0 && old.1 == owner.1)
-            {
-                self.blocked_account_epoch = Some(owner.1);
+            if self.owner.is_some_and(|old| {
+                old.account != owner.account && old.generation == owner.generation
+            }) {
+                self.blocked_account_epoch = Some(owner.generation);
                 *confirmed = None;
             }
-            if self.blocked_account_epoch != Some(owner.1) {
+            if self.blocked_account_epoch != Some(owner.generation) {
                 self.blocked_account_epoch = None;
             }
-            if self.owner.is_some_and(|old| old.0 != owner.0) {
+            if self.owner.is_some_and(|old| old.account != owner.account) {
                 self.clock = Clock::default();
             }
             self.last = None;
@@ -106,7 +132,21 @@ impl Controller {
         self.clock.observe(&sample.audio, sample.at);
         sample.failed
             || self.clock.stale(&sample.audio, now)
-            || self.blocked_account_epoch == Some(owner.1)
+            || self.blocked_account_epoch == Some(owner.generation)
+    }
+    /// Output-reset barriers require current qualified evidence. Position can be
+    /// retained without allowing a stalled clock to establish presentation.
+    pub fn record_barrier(&mut self, sample: Sample, now: Instant, cx: Confirmation<'_>) -> bool {
+        let failed = self.qualify(
+            &sample,
+            now,
+            Owner {
+                account: cx.account,
+                generation: cx.generation,
+            },
+            cx.confirmed,
+        );
+        record_clock(cx.queue, &sample.audio, cx.generation, cx.confirmed, failed)
     }
     fn projection(sample: &Sample, failed: bool, cx: &Runtime<'_>) -> mpris::View {
         mpris::View::capture(
@@ -134,7 +174,10 @@ impl Controller {
         let failed = self.qualify(
             &sample,
             Instant::now(),
-            (cx.account, cx.generation),
+            Owner {
+                account: cx.account,
+                generation: cx.generation,
+            },
             cx.confirmed,
         );
         mpris::View::capture(
@@ -166,7 +209,10 @@ impl Controller {
         let failed = self.qualify(
             &sample,
             Instant::now(),
-            (cx.scope.account, cx.epochs.current),
+            Owner {
+                account: cx.scope.account,
+                generation: cx.epochs.current,
+            },
             cx.confirmed,
         );
         if handoff {
@@ -250,10 +296,16 @@ impl Controller {
         let failed = self.qualify(
             &sample,
             now,
-            (cx.scope.account, cx.epochs.current),
+            Owner {
+                account: cx.scope.account,
+                generation: cx.epochs.current,
+            },
             cx.confirmed,
         );
-        let previous_failed = self.last.as_ref().is_some_and(|(_, failed, _)| *failed);
+        let previous_failed = self
+            .last
+            .as_ref()
+            .is_some_and(|previous| previous.stream_failed);
         let interrupted = sample.failed
             && !previous_failed
             && alsa_guard::error().is_none()
@@ -278,8 +330,10 @@ impl Controller {
         );
         let reporting = cx.reporting.view();
         let archive = serde_json::json!(cx.archive.view());
-        let changed = self.last.as_ref().is_none_or(|(audio, stream, stale)| {
-            audio != &sample.audio || *stream != sample.failed || *stale != failed
+        let changed = self.last.as_ref().is_none_or(|previous| {
+            previous.audio != sample.audio
+                || previous.stream_failed != sample.failed
+                || previous.unqualified != failed
         }) || reporting != self.last_reporting
             || archive != self.last_archive;
         let mut checkpoint = false;
@@ -334,7 +388,11 @@ impl Controller {
         } else {
             None
         };
-        self.last = Some((sample.audio.clone(), sample.failed, failed));
+        self.last = Some(Previous {
+            audio: sample.audio.clone(),
+            stream_failed: sample.failed,
+            unqualified: failed,
+        });
         self.last_reporting = reporting.clone();
         self.last_archive = archive.clone();
         Tick {

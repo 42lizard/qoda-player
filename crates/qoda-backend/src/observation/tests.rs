@@ -461,3 +461,58 @@ async fn account_replacement_rejects_old_output_until_a_new_epoch_and_clock() {
     env.settle().await;
     assert_eq!(env.archive.view().total, 1);
 }
+
+#[tokio::test]
+async fn output_barrier_retains_position_without_confirming_a_stalled_positive_clock() {
+    let mut env = Environment::new().await;
+    let mut owner = Controller::default();
+    let now = Instant::now();
+    owner.observe(
+        Sample {
+            audio: env.audio(Some(1.25)),
+            failed: true,
+            at: now,
+        },
+        now,
+        &mut env.runtime(),
+    );
+    assert!(env.confirmed.is_none());
+    let later = now + Duration::from_millis(300);
+    let sample = Sample {
+        audio: env.audio(Some(1.25)),
+        failed: false,
+        at: later,
+    };
+    let changed = owner.record_barrier(
+        sample,
+        later,
+        Confirmation {
+            queue: &mut env.queue,
+            account: env.account,
+            generation: env.epochs.current,
+            confirmed: &mut env.confirmed,
+        },
+    );
+    assert!(!changed);
+    assert!(env.confirmed.is_none());
+    assert_eq!(env.queue.snapshot().position_seconds, 1.25);
+    let sample = Sample {
+        audio: env.audio(Some(1.3)),
+        failed: false,
+        at: later,
+    };
+    assert!(owner.record_barrier(
+        sample,
+        later,
+        Confirmation {
+            queue: &mut env.queue,
+            account: env.account,
+            generation: env.epochs.current,
+            confirmed: &mut env.confirmed,
+        }
+    ));
+    assert_eq!(env.confirmed, Some(env.epochs.current));
+    env.settle().await;
+    assert_eq!(env.archive.view().total, 0);
+    assert!(env.provider.0.lock().unwrap().is_empty());
+}
