@@ -1,3 +1,17 @@
+# Installation options
+
+For a prebuilt pacman-installable Arch package, follow the [user guide](user-guide.md#install-update-and-remove).
+The workflow builds and validates `.pkg.tar.zst` artifacts on main pushes, pull
+requests and manual runs after its required checks succeed. Packages use
+`/usr/lib/qoda-player` and separate `qoda-packaged-*` user units. No login startup
+is enabled. The transaction guard requires packaged processes stopped before
+upgrade/removal; startup checks existing profile format compatibility without
+migrating it during package installation. User data remains outside package ownership.
+
+The source-installation contract below remains available independently; do not
+run source and packaged backends together. A user-local launcher/desktop entry can
+shadow the system package, so use `/usr/bin/qoda` explicitly during a transition.
+
 # User-scoped source installation
 
 The installation contract for #33 uses a locked release build, versioned private

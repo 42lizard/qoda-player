@@ -31,6 +31,15 @@ Item {
 }
 """
 HOOKS = """
+        function guideQueue(): void { queueTabs.currentIndex = 0; }
+        function guidePrevious(): void { queueTabs.currentIndex = 1; }
+        property var guideSnapshot: null
+        function signedOutFixture(): void {
+            guideSnapshot = root.snapshot;
+            root.snapshot = Object.assign({}, root.snapshot, {sign_in: {connected: false, saved: "absent", can_save: false, message: "Connect your Plex account", keyring_action: null}});
+        }
+        function restoreGuideFixture(): void { root.snapshot = guideSnapshot; }
+
         property string captureDone: ""
         function captureStatus(): string { return captureDone; }
         function resize(w: int, h: int): void {
@@ -145,7 +154,7 @@ def fixture():
     }
 
 
-def check(output=None, theme_check=False):
+def check(output=None, theme_check=False, guide=False):
     with tempfile.TemporaryDirectory(prefix="qoda-layout-") as temporary:
         base = Path(temporary)
         output = Path(output).resolve() if output else base / "captures"
@@ -168,6 +177,10 @@ def check(output=None, theme_check=False):
         runtime = base / "runtime"
         (runtime / "qoda").mkdir(parents=True, mode=0o700)
         state = fixture()
+        if guide:
+            state["artwork_cache"] = {"budget_mib": 1024, "message": "Ready", "usage_known": True, "bytes": 1048576, "entries": 9, "stale": False, "cleanup_pending": False}
+            state["metadata_cache"] = {"budget_mib": 256, "message": "Ready", "usage_known": True, "bytes": 524288, "pages": 3, "tracks": 12, "cleanup_pending": False}
+
         requests = []
         server = socket.socket(socket.AF_UNIX)
         server.bind(str(runtime / "qoda/backend.sock"))
@@ -253,6 +266,12 @@ def check(output=None, theme_check=False):
                         assert drawer["geometry"]["browserWidth"] == geometry["browserWidth"]
                         assert drawer["tab"] == info["tab"] and drawer["query"] == info["query"]
                         capture("drawer", queue=True)
+                        if guide:
+                            ipc("guideQueue")
+                            time.sleep(0.15)
+                            capture("queue-guide", queue=True)
+                            ipc("guidePrevious")
+
                         ipc("hide")
                         wait_for(lambda value: not value["queueDrawerVisible"])
                         ipc("showFull")
@@ -291,6 +310,16 @@ def check(output=None, theme_check=False):
                 ipc("showAccount")
                 time.sleep(0.15)
                 capture("account-small", settings=True)
+                if guide:
+                    ipc("resize", 540, 440)
+                    time.sleep(0.15)
+                    capture("account-guide", settings=True)
+                    ipc("signedOutFixture")
+                    time.sleep(0.15)
+                    capture("sign-in-small", settings=True)
+                    ipc("restoreGuideFixture")
+                    ipc("resize", 540, 760)
+
                 ipc("showCache")
                 time.sleep(0.15)
                 capture("cache-small", settings=True)

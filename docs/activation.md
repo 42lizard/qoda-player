@@ -4,7 +4,11 @@ The installed backend unit explicitly supplies `--ui-launcher <prefix>/bin/qoda`
 The backend advertises MPRIS CanRaise when a browser is attached or this configured
 launcher is available. Development backends keep the existing attached-browser
 behavior unless this argument is deliberately supplied. No launcher is discovered
-from PATH or an upstream response.
+from PATH or an upstream response. Pacman installs supply `/usr/bin/qoda`; a
+root-owned launcher is accepted for an ordinary user only when the executable
+and every parent directory are protected from group/other writes, with root-owned
+directory parents and no symlinked parent. User-owned source launchers retain
+their existing executable/mode checks.
 
 Without an attached browser, MPRIS Raise starts a bounded helper request carrying
 `show --expected-instance <backend-instance> --deadline <monotonic-ms>`. It never

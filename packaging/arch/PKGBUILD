@@ -1,0 +1,34 @@
+# Build from a checked-out source tree: tools/build-arch-package.sh.
+pkgname=qoda-player
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Plex music player with a Quickshell interface and Rust/libmpv backend'
+arch=('x86_64')
+url='https://github.com/42lizard/qoda-player'
+license=('MIT')
+depends=('python' 'mpv' 'alsa-lib' 'sqlite' 'quickshell' 'qt6-declarative' 'qt6-svg' 'systemd' 'ttf-jetbrains-mono-nerd')
+makedepends=('rust' 'cargo' 'pkgconf' 'git')
+optdepends=('libsecret: save and restore Plex sign-in using Secret Service'
+            'brave: open the Plex sign-in link directly from the player')
+# GCC LTO objects from ring cannot be linked by Rust's LLD.
+options=('!debug' '!lto')
+_source="${QODA_SOURCE:?Use tools/build-arch-package.sh}"
+
+pkgver() {
+  local version revision commit
+  version=$(python3 -c 'import tomllib,sys; print(tomllib.load(open(sys.argv[1],"rb"))["workspace"]["package"]["version"])' "$_source/Cargo.toml")
+  revision=$(git -C "$_source" rev-list --count HEAD)
+  commit=$(git -C "$_source" rev-parse --short=12 HEAD)
+  printf '%s.r%s.g%s' "$version" "$revision" "$commit"
+}
+
+build() {
+  cd "$_source"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$srcdir/target}"
+  export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$_source=/build/qoda-player"$'\x1f'"--remap-path-prefix=$CARGO_TARGET_DIR=/build/target"$'\x1f'"--remap-path-prefix=$HOME=/build/user"
+  cargo build --release --locked -p qoda-backend
+}
+
+package() {
+  python3 "$_source/packaging/arch/stage.py" "$_source" "$pkgdir" "$pkgver"
+}

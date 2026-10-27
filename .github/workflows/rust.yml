@@ -18,15 +18,34 @@ jobs:
     runs-on: ubuntu-24.04
     # Match Omarchy's Arch native libraries, especially current libmpv.
     container: archlinux:base-devel
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
     steps:
       - name: Install Rust, Qt and native dependencies
-        run: pacman -Syu --noconfirm --needed rust mpv alsa-lib sqlite pkgconf git python dbus ffmpeg qt6-declarative
+        run: pacman -Syu --noconfirm --needed rust mpv alsa-lib sqlite pkgconf git python dbus ffmpeg qt6-declarative quickshell qt6-svg ttf-jetbrains-mono-nerd
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Check formatting, lints and tests
         run: ./tools/check.sh
+      - name: Build Arch package as an unprivileged user
+        run: |
+          useradd --create-home qoda-build
+          chown -R qoda-build:qoda-build "$GITHUB_WORKSPACE"
+          runuser -u qoda-build -- tools/build-arch-package.sh
+      - name: Verify isolated pacman transactions and packaged runtime
+        run: |
+          QODA_CI_REQUIRE_NONROOT=1 python3 tools/check-arch-package.py dist/qoda-player-*.pkg.tar.zst
+      - name: Upload pacman package and provenance
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: qoda-player-arch-x86_64-${{ github.sha }}
+          path: |
+            dist/*.pkg.tar.zst
+            dist/SHA256SUMS
+            dist/COMMIT
+          if-no-files-found: error
+          retention-days: 30

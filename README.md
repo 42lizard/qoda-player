@@ -1,5 +1,7 @@
 # Qoda Player
 
+**[User guide: installation, Plex setup and everyday use](docs/user-guide.md)**
+
 A standalone music player in development for Omarchy, built with Quickshell/QML and mpv/libmpv. Plex is the first music provider; additional providers may follow.
 
 ## Status

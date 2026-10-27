@@ -22,14 +22,21 @@ fn validate(path: &Path) -> Result<(), ConfigError> {
         .map_err(|_| ConfigError("Configured UI launcher is unavailable"))?;
     // SAFETY: getuid has no preconditions.
     let owner = unsafe { libc::getuid() };
+    let protected_system = metadata.uid() == 0
+        && metadata.mode() & 0o001 != 0
+        && path.ancestors().skip(1).all(|parent| {
+            std::fs::symlink_metadata(parent).is_ok_and(|directory| {
+                directory.is_dir() && directory.uid() == 0 && directory.mode() & 0o022 == 0
+            })
+        });
     if !path.is_absolute()
         || !metadata.is_file()
-        || metadata.uid() != owner
+        || metadata.uid() != owner && !protected_system
         || metadata.mode() & 0o100 == 0
         || metadata.mode() & 0o022 != 0
     {
         return Err(ConfigError(
-            "UI launcher must be an absolute, user-owned executable file",
+            "UI launcher must be an absolute user-owned or protected system executable",
         ));
     }
     Ok(())
@@ -253,6 +260,17 @@ mod tests {
             .is_err()
         );
     }
+    #[test]
+    fn protected_system_launcher_is_accepted_for_user_activation() {
+        // Configure only: this test never executes the system program.
+        let controller = configured([
+            OsString::from("--ui-launcher"),
+            OsString::from("/usr/bin/true"),
+        ])
+        .unwrap();
+        assert!(controller.available());
+    }
+
     #[tokio::test]
     async fn activation_is_coalesced_instance_fenced_and_ui_only() {
         let fixture = Fixture::new(
