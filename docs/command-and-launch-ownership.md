@@ -62,7 +62,9 @@ and epoch before granting access or loading output; a consumed result cannot be
 applied twice. Pausing ordinary preparation permits a valid paused load. Cancelling
 recovery, replacing the selection or changing account/output invalidates old work.
 Tests use the existing synthetic provider adapter and native null output through
-the same initiation and completion interface as the coordinator.
+the same initiation and completion interface as the coordinator. Full cancellation
+owns both selected work and recovery; callers do not assemble two cancellation
+steps. Stream interruption alone retains the same-visit recovery budget.
 
 ## Displayed track catalog
 

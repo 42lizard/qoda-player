@@ -59,17 +59,22 @@ pub struct Next {
     pub automatic: bool,
 }
 impl Controller {
-    pub fn cancel(&mut self) {
+    fn cancel_selected(&mut self) {
         if let Some(task) = self.pending.take() {
             task.abort();
         }
         self.active = None;
         self.automatic = None;
     }
+    /// Account, output and explicit selection invalidation own both lifetimes.
+    pub fn cancel(&mut self) {
+        self.cancel_selected();
+        self.recovery.cancel();
+    }
     pub fn cancel_recovery(&mut self) -> bool {
         let cancelled = self.recovery.cancel();
         if cancelled {
-            self.cancel();
+            self.cancel_selected();
         }
         cancelled
     }
@@ -87,7 +92,6 @@ impl Controller {
         tx: mpsc::Sender<Event>,
         cx: &mut Runtime<'_>,
     ) -> Result<(), &'static str> {
-        self.cancel_recovery();
         self.cancel();
         let Some(provider) = provider else {
             cx.state["selection"] = json!(track);
@@ -248,7 +252,7 @@ impl Controller {
         cx: &mut Runtime<'_>,
     ) -> Result<(), &'static str> {
         *cx.playing = false;
-        self.cancel();
+        self.cancel_selected();
         let _ = cx.player.barrier().await;
         cx.gapless.invalidate();
         cx.proxy.revoke().await;
@@ -577,31 +581,37 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn explicit_failure_stops_but_automatic_failure_advances_only_unavailable_entries() {
+    async fn explicit_or_paused_failure_stops_but_automatic_playing_failure_advances() {
         for automatic in [false, true] {
-            let (mut env, provider) =
-                Environment::new(vec![Answer::Error(ProviderError::MissingTrack)]).await;
-            env.queue.enqueue(env.selected(), false).unwrap();
-            let selected = env.queue.selected();
-            let mut owner = Controller::default();
-            let (tx, mut rx) = mpsc::channel(8);
-            owner
-                .start(
-                    env.selected(),
-                    automatic,
-                    Some(provider),
-                    tx,
-                    &mut env.runtime(),
-                )
-                .await
-                .unwrap();
-            let (g, result) = media(&mut rx).await;
-            let next = owner.complete(g, result, &mut env.runtime()).await;
-            assert_eq!(next.track.is_some(), automatic);
-            assert_eq!(next.automatic, automatic);
-            assert_eq!(env.playing, automatic);
-            assert_eq!(env.queue.selected() == selected, !automatic);
-            env.proxy.revoke().await;
+            for paused in [false, true] {
+                let (mut env, provider) =
+                    Environment::new(vec![Answer::Error(ProviderError::MissingTrack)]).await;
+                env.queue.enqueue(env.selected(), false).unwrap();
+                let selected = env.queue.selected();
+                let mut owner = Controller::default();
+                let (tx, mut rx) = mpsc::channel(8);
+                owner
+                    .start(
+                        env.selected(),
+                        automatic,
+                        Some(provider),
+                        tx,
+                        &mut env.runtime(),
+                    )
+                    .await
+                    .unwrap();
+                let (g, result) = media(&mut rx).await;
+                if paused {
+                    env.command(&mut owner, "pause").await;
+                }
+                let next = owner.complete(g, result, &mut env.runtime()).await;
+                let advance = automatic && !paused;
+                assert_eq!(next.track.is_some(), advance);
+                assert_eq!(next.automatic, advance);
+                assert_eq!(env.playing, advance);
+                assert_eq!(env.queue.selected() == selected, !advance);
+                env.proxy.revoke().await;
+            }
         }
     }
     #[tokio::test]

@@ -1181,7 +1181,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 .checked_add(1)
                                 .ok_or("Account generation exhausted")?;
                             preparation.cancel();
-                            preparation.cancel_recovery();
                             reporting.bind(auth_generation, None);
                             catalog.invalidate()?;
                             epochs.reset()?;
@@ -1230,7 +1229,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 .checked_add(1)
                                 .ok_or("Generation exhausted")?;
                             preparation.cancel();
-                            preparation.cancel_recovery();
                             reporting.bind(auth_generation, None);
                             state["signin_url"] = Value::Null;
                             state["status"] = json!("Restoring saved Plex sign-in");
@@ -1282,7 +1280,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
                         preparation.cancel();
-                        preparation.cancel_recovery();
                         reporting.bind(auth_generation, None);
                         let g = auth_generation;
                         let tx = tx.clone();
@@ -1481,7 +1478,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
                         preparation.cancel();
-                        preparation.cancel_recovery();
                         reporting.bind(auth_generation, None);
                         catalog.invalidate()?;
                         epochs.reset()?;
@@ -1638,7 +1634,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     ) {
                         preparation.cancel();
-                        preparation.cancel_recovery();
                         reporting.bind(auth_generation, None);
                         catalog.invalidate()?;
                         albums.invalidate();
