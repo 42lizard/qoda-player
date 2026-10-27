@@ -622,6 +622,13 @@ pub(crate) mod tests {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_http_handoff_commits_the_bound_occurrence_once_without_a_replacement_load() {
+        native_observation_handoff(false).await;
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_precommand_handoff_uses_the_same_observation_owner() {
+        native_observation_handoff(true).await;
+    }
+    async fn native_observation_handoff(before_command: bool) {
         let provider = Provider::new();
         let mut q = provider.queue();
         let first = q.selected().unwrap();
@@ -639,9 +646,32 @@ pub(crate) mod tests {
         let first_url = proxy.grant(media.stream).await;
         player.send(Command::Load(epochs.current, first_url.clone(), 0.0));
         player.send(Command::Pause(false));
-        let audio = wait(&player, |s| s.position_seconds.is_some_and(|p| p > 0.0)).await;
+        wait(&player, |s| s.position_seconds.is_some_and(|p| p > 0.0)).await;
         let mut presented = None;
-        crate::record_clock(&mut q, &audio, epochs.current, &mut presented, false);
+        let mut observations = crate::observation::Controller::default();
+        let mut reporting = crate::reporting::Controller::new();
+        let mut archive =
+            crate::archive::Controller::start(Err("Archive disabled in native handoff fixture."));
+        let mut playing = true;
+        observations
+            .tick(&mut crate::observation::Runtime {
+                queue: &mut q,
+                player: &player,
+                epochs: &mut epochs,
+                gapless: &mut controller,
+                proxy: &proxy,
+                confirmed: &mut presented,
+                playing: &mut playing,
+                reporting: &mut reporting,
+                archive: &mut archive,
+                scope: crate::observation::Scope {
+                    account: 1,
+                    provider: Some(provider.clone()),
+                    can_raise: false,
+                },
+            })
+            .await
+            .unwrap();
         let (tx, mut rx) = mpsc::channel(4);
         controller
             .schedule(
@@ -661,13 +691,31 @@ pub(crate) mod tests {
             .await
             .unwrap();
         assert_eq!(controller.view.phase, "staged");
-        let audio = wait(&player, |s| s.handoff_from == Some(1)).await;
-        assert!(
-            controller
-                .handoff(&mut q, &mut epochs, &audio, &proxy)
-                .await
-                .unwrap()
-        );
+        wait(&player, |s| s.handoff_from == Some(1)).await;
+        let mut runtime = crate::observation::Runtime {
+            queue: &mut q,
+            player: &player,
+            epochs: &mut epochs,
+            gapless: &mut controller,
+            proxy: &proxy,
+            confirmed: &mut presented,
+            playing: &mut playing,
+            reporting: &mut reporting,
+            archive: &mut archive,
+            scope: crate::observation::Scope {
+                account: 1,
+                provider: Some(provider.clone()),
+                can_raise: false,
+            },
+        };
+        if before_command {
+            let before = observations.before_command(&mut runtime).await;
+            assert!(before.handoff);
+            assert!(before.error.is_none());
+        }
+        let tick = observations.tick(&mut runtime).await.unwrap();
+        assert_eq!(tick.handoff, !before_command);
+        let audio = tick.audio;
         assert_eq!(q.selected(), Some(next));
         assert_ne!(q.selected(), Some(first));
         assert_eq!(epochs.current, 2);

@@ -441,7 +441,7 @@ mod tests {
                     account: self.account,
                     connected: true,
                     credential: true,
-                    failed_or_stale: false,
+                    observations: &mut crate::observation::Controller::default(),
                     can_raise: false,
                     state: &mut self.state,
                     catalog: &crate::catalog::Controller::default(),

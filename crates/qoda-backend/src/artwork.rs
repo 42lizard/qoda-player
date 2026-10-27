@@ -98,7 +98,7 @@ impl Artwork {
         )
         .await
     }
-    async fn with_disk(
+    pub(crate) async fn with_disk(
         disk: Disk,
         events: Option<mpsc::Sender<crate::Event>>,
     ) -> std::io::Result<Self> {

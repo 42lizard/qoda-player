@@ -100,35 +100,8 @@ fn micros(seconds: f64) -> i64 {
     }
     (seconds.clamp(0.0, 1.0e9) * 1.0e6).round() as i64
 }
-/// A stalled positive timestamp must not indefinitely identify current presentation.
-#[derive(Default)]
-pub struct Clock {
-    generation: Option<u64>,
-    position: Option<f64>,
-    progress: Option<std::time::Instant>,
-}
-impl Clock {
-    pub fn observe(&mut self, audio: &player::Status, now: std::time::Instant) {
-        if self.generation != Some(audio.generation) {
-            self.generation = Some(audio.generation);
-            self.position = None;
-            self.progress = None;
-        }
-        if let Some(position) = audio.position_seconds.filter(|p| p.is_finite() && *p > 0.0)
-            && self.position != Some(position)
-        {
-            self.position = Some(position);
-            self.progress = Some(now);
-        }
-    }
-    pub fn stale(&self, audio: &player::Status, now: std::time::Instant) -> bool {
-        !audio.paused
-            && (self.generation != Some(audio.generation)
-                || self.progress.is_none_or(|progress| {
-                    now.saturating_duration_since(progress) > Duration::from_millis(250)
-                }))
-    }
-}
+#[cfg(test)]
+use crate::observation::Clock;
 impl View {
     /// Shared nominal presentation for UI surfaces, including when D-Bus is unavailable.
     pub fn presentation(&self) -> Json {

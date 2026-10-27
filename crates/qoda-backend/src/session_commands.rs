@@ -200,7 +200,7 @@ pub struct Context<'a> {
     pub account: u64,
     pub connected: bool,
     pub credential: bool,
-    pub failed_or_stale: bool,
+    pub observations: &'a mut crate::observation::Controller,
     pub can_raise: bool,
     pub state: &'a mut Value,
     pub catalog: &'a catalog::Controller,
@@ -357,16 +357,20 @@ impl Playback<'_> {
                 );
                 return Ok(Admission::Rejected);
             }
-            let view = mpris::View::capture(
-                self.queue,
-                &self.player.status(),
-                self.epochs.current,
-                *self.presented,
-                context.connected,
-                *self.desired_playing,
-                context.failed_or_stale || self.proxy.failed().await,
-            )
-            .with_ui(context.can_raise);
+            let view = context
+                .observations
+                .project(crate::observation::Presentation {
+                    queue: self.queue,
+                    player: self.player,
+                    proxy: self.proxy,
+                    account: context.account,
+                    generation: self.epochs.current,
+                    confirmed: self.presented,
+                    connected: context.connected,
+                    playing: *self.desired_playing,
+                    can_raise: context.can_raise,
+                })
+                .await;
             let Some(mut translated) =
                 mpris::translate(&command.0.action, &view, self.queue, context.instance)
             else {
@@ -396,8 +400,7 @@ impl Playback<'_> {
             return Ok(Admission::Rejected);
         }
         if request["op"] == "set_output" {
-            self.change_output(context.output, context.state, context.failed_or_stale)
-                .await?;
+            self.change_output(context.output, context.state).await?;
             return Ok(Admission::Applied(Effects::default()));
         }
         if let Some(edit) = edit {
@@ -705,7 +708,6 @@ impl Playback<'_> {
         &mut self,
         settings: &output::Settings,
         state: &mut Value,
-        failed_or_stale: bool,
     ) -> Result<(), &'static str> {
         *self.desired_playing = false;
         self.preparation.cancel();
@@ -716,7 +718,7 @@ impl Playback<'_> {
                     &before,
                     self.epochs.current,
                     self.presented,
-                    failed_or_stale || self.proxy.failed().await,
+                    self.proxy.failed().await,
                 );
             }
             Err(error) => state["error"] = json!(error),
@@ -752,6 +754,7 @@ mod tests {
         presented: Option<u64>,
         state: Value,
         catalog: catalog::Controller,
+        observations: crate::observation::Controller,
     }
     impl Fixture {
         async fn staged() -> Self {
@@ -811,6 +814,7 @@ mod tests {
                     presented: Some(1),
                     state: json!({"intent":"playing"}),
                     catalog: catalog::Controller::default(),
+                    observations: crate::observation::Controller::default(),
                 },
                 reply,
             )
@@ -848,7 +852,7 @@ mod tests {
                     account: 1,
                     connected: true,
                     credential: true,
-                    failed_or_stale: false,
+                    observations: &mut self.observations,
                     can_raise: false,
                     state: &mut self.state,
                     catalog: &self.catalog,

@@ -10,8 +10,10 @@ mod catalog;
 mod continuous;
 mod gain;
 mod gapless;
+mod maintenance;
 mod metadata_cache;
 mod mpris;
+mod observation;
 mod offline;
 mod output;
 mod player;
@@ -81,8 +83,7 @@ enum Event {
     Gapless(gapless::Reply),
     Artwork,
     OutputDevices(Vec<output::Device>),
-    CacheDone(u64, bool, Result<(), String>),
-    MetadataCacheDone(u64, Result<(), String>),
+    Maintenance(maintenance::Reply),
     Connected(u64, Result<account::Connected, ConnectError>, Credential),
     Vault(vault::Reply),
     Page(catalog::Reply),
@@ -225,32 +226,7 @@ async fn connection_io(
         }
     }
 }
-fn record_clock(
-    queue: &mut queue::Queue,
-    audio: &player::Status,
-    generation: u64,
-    presented: &mut Option<u64>,
-    failed: bool,
-) -> bool {
-    if audio.generation != generation {
-        return false;
-    }
-    if let Some(position) = audio.position_seconds {
-        let _ = queue.set_position(position);
-    }
-    if audio
-        .position_seconds
-        .is_some_and(|position| position > 0.0)
-        && !audio.paused
-        && !audio.idle
-        && audio.error.is_none()
-        && !failed
-    {
-        *presented = Some(generation);
-        return queue.confirm_presented().unwrap_or(false);
-    }
-    false
-}
+pub(crate) use observation::record_clock;
 fn pause_for_checkpoint(queue: &mut queue::Queue, player: &Player, generation: u64) {
     let audio = player.status();
     if audio.generation == generation
@@ -456,7 +432,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let instance = uuid::Uuid::new_v4().to_string();
     let mut revision = 0_u64;
 
-    let mut handled_end = None;
     let mut playlists = playlists::Controller::default();
     let metadata = metadata_cache::Cache::start(metadata_cache::Paths::discover()).await;
     let cached_discovery = metadata
@@ -521,8 +496,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         identities_path(),
         Arc::new(account::Plex),
     );
-    let mut cache_task: Option<tokio::task::JoinHandle<()>> = None;
-    let mut metadata_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut maintenance = maintenance::Controller::default();
     let permits = Arc::new(tokio::sync::Semaphore::new(16));
     let server_tx = tx.clone();
     let server = tokio::spawn(async move {
@@ -553,12 +527,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut output_refresh = tokio::time::interval(std::time::Duration::from_secs(5));
     let mut output_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
-    let mut last_audio = player.status();
-    let mut last_stream_failed = false;
-    let mut desktop_clock = mpris::Clock::default();
+    let mut observations = observation::Controller::default();
     let mut reporting = reporting::Controller::new();
     state["reporting"] = reporting.view();
-    let mut last_clock_stale = false;
     let mut checkpoint_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     checkpoint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut desktop = match mpris::Service::start(tx.clone()).await {
@@ -588,105 +559,74 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             },
             _ = audio_tick.tick() => {
-                let audio = player.status();
-                let mut gapless_changed=false;
-                match gapless.handoff(&mut queue,&mut epochs,&audio,&proxy).await {
-                    Ok(true) => { gapless_changed=true; state["selection"]=queue.selected().and_then(|id|queue.visible_track(id).ok()).map(|track|json!(track)).unwrap_or(Value::Null); handled_end=None; },
-                    Ok(false) if audio.generation<=epochs.current => {},
-                    result => {
-                        if !proxy.failed().await {
-                        desired_playing=false;
-                        if let Ok(before)=player.barrier().await {let _=session_commands::finish_gapless_reset(&mut gapless,&mut queue,&mut epochs,&before,&mut presented_generation,&proxy).await;}
-                        else {gapless.invalidate();proxy.revoke().await;epochs.reset()?;gapless.review();}
-                        state["error"]=json!(result.err().unwrap_or_else(||"An unbound native transition was reset; review the selected occurrence.".into()));
-                        state["intent"]=json!("paused");gapless_changed=true;
-                        }
+                let tick = observations.tick(&mut observation::Runtime {
+                    queue: &mut queue, player: &player, epochs: &mut epochs,
+                    gapless: &mut gapless, proxy: &proxy, confirmed: &mut presented_generation,
+                    playing: &mut desired_playing, reporting: &mut reporting, archive: &mut archive,
+                    scope: observation::Scope {
+                        account: access.generation(), provider: access.provider(),
+                        can_raise: !ui_peers.is_empty() || ui_launcher.available(),
                     },
+                }).await?;
+                if tick.handoff {state["selection"]=queue.selected().and_then(|id|queue.visible_track(id).ok()).map(|track|json!(track)).unwrap_or(Value::Null);}
+                if let Some(problem)=tick.problem {
+                    state["error"]=json!(match problem {
+                        observation::Problem::Handoff(error)=>error,
+                        observation::Problem::Audio(error)=>output::explain_preflight(error,tick.audio.source,output_settings.selection.as_ref().is_some_and(output::Selection::conversion_allowed)),
+                    });
+                    state["intent"]=json!("paused");
                 }
-                let stream_failed=proxy.failed().await;
-                let interrupted = stream_failed && !last_stream_failed && alsa_guard::error().is_none();
-                let interrupted_playing = desired_playing;
-                let observed_at=std::time::Instant::now();
-                desktop_clock.observe(&audio,observed_at);
-                let clock_stale=desktop_clock.stale(&audio,observed_at);
-                reporting.bind(access.generation(),access.provider().map(|p|p as Arc<dyn MusicProvider>));
-                reporting.fence_generation(epochs.current);
-                reporting.observe_stop(&audio);
-                reporting.observe(reporting::Observation::capture(&queue,&audio,reporting::Context {
-                    account:access.generation(),generation:epochs.current,confirmed:presented_generation,
-                    failed_or_stale:stream_failed || clock_stale,
-                }),observed_at);
-                let reporting_view=reporting.view();
-                let reporting_changed=state["reporting"]!=reporting_view;
-                state["reporting"]=reporting_view;
-                let archive_view=json!(archive.view());
-                let archive_changed=state["archive"]!=archive_view;
-                state["archive"]=archive_view;
-                let mut presentation_changed=false;
-                if archive_changed || audio != last_audio || stream_failed!=last_stream_failed || clock_stale!=last_clock_stale || reporting_changed {
-                    last_stream_failed=stream_failed;
-                    last_clock_stale=clock_stale;
-                    presentation_changed=record_clock(&mut queue,&audio,epochs.current,&mut presented_generation,stream_failed);
-                    gapless.observed(&audio,presented_generation);
-                    archive.observe(&queue,&audio,epochs.current,presented_generation,stream_failed || clock_stale,observed_at);
-                    last_audio = audio.clone();
-                    state["audio"] = json!(audio);
-                    if let Some(error) = audio.error.filter(|_|audio.generation==epochs.current).or(stream_failed.then_some("The media stream was interrupted. Retry the selected track.")) {
-                        state["error"] = json!(output::explain_preflight(error, audio.source, output_settings.selection.as_ref().is_some_and(output::Selection::conversion_allowed)));
-                        desired_playing = false;
-                        state["intent"] = json!("paused");
-                        player.send(Command::Pause(true));
-                    }
-                    revision = revision.checked_add(1).ok_or("Revision exhausted")?;
-                    state["revision"] = json!(revision.to_string());
-                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,access.provider().is_some(),desired_playing,stream_failed || clock_stale).with_ui(!ui_peers.is_empty() || ui_launcher.available());
-                    state["presentation"]=view.presentation();
+                state["reporting"]=tick.reporting;
+                state["archive"]=tick.archive;
+                if tick.changed {
+                    state["audio"]=json!(tick.audio);
+                    state["presentation"]=tick.presentation.presentation();
                     state["gapless"]=json!(gapless.view);
                     state["artwork_cache"]=artwork.view().await;
                     state["metadata_cache"]=json!(metadata.view());
-                    updates.send_replace(state.clone());
-                    if let Some(desktop) = &mut desktop { desktop.publish(view); }
+                    revision=revision.checked_add(1).ok_or("Revision exhausted")?;
+                    state["revision"]=json!(revision.to_string());updates.send_replace(state.clone());
+                    if let Some(desktop)=&mut desktop {desktop.publish(tick.presentation);}
                 }
-                if interrupted {
-                    Event::StreamFailed(proxy.failure().await.unwrap_or(qoda_provider::ProviderError::Network), interrupted_playing)
-                } else if audio.generation==epochs.current && audio.idle && audio.natural_eof && handled_end!=Some(epochs.current) && audio.error.is_none() && !stream_failed {
-                    handled_end=Some(epochs.current);
-                    Event::Advance(epochs.current)
-                } else if presentation_changed || gapless_changed || state["queue"]["selected"]!=json!(queue.selected()) {Event::Checkpoint} else {continue}
+                if let Some(event)=tick.event {event} else if tick.checkpoint {Event::Checkpoint} else {continue}
             },
             _ = checkpoint_tick.tick()=>Event::Checkpoint,
             _ = interrupts.recv() => break,
         };
-        if matches!(&event, Event::Request(_) | Event::Desktop(_)) {
-            let audio = player.status();
-            match gapless
-                .handoff(&mut queue, &mut epochs, &audio, &proxy)
-                .await
-            {
-                Ok(true) => {
-                    record_clock(
-                        &mut queue,
-                        &audio,
-                        epochs.current,
-                        &mut presented_generation,
-                        false,
-                    );
-                    state["selection"] = queue
-                        .selected()
-                        .and_then(|id| queue.visible_track(id).ok())
-                        .map(|track| json!(track))
-                        .unwrap_or(Value::Null);
-                    handled_end = None;
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    desired_playing = false;
-                    player.send(Command::Pause(true));
-                    state["error"] = json!(error);
-                    gapless.review();
-                }
+        maintenance.observe_activity(&event, &mut state);
+        let command_projection = if matches!(&event, Event::Request(_) | Event::Desktop(_)) {
+            let before = observations
+                .before_command(&mut observation::Runtime {
+                    queue: &mut queue,
+                    player: &player,
+                    epochs: &mut epochs,
+                    gapless: &mut gapless,
+                    proxy: &proxy,
+                    confirmed: &mut presented_generation,
+                    playing: &mut desired_playing,
+                    reporting: &mut reporting,
+                    archive: &mut archive,
+                    scope: observation::Scope {
+                        account: access.generation(),
+                        provider: access.provider(),
+                        can_raise: !ui_peers.is_empty() || ui_launcher.available(),
+                    },
+                })
+                .await;
+            if before.handoff {
+                state["selection"] = queue
+                    .selected()
+                    .and_then(|id| queue.visible_track(id).ok())
+                    .map(|track| json!(track))
+                    .unwrap_or(Value::Null);
             }
-        }
+            if let Some(error) = before.error {
+                state["error"] = json!(error);
+            }
+            Some(before.view)
+        } else {
+            None
+        };
         let mut desktop_command = None;
         let mut event = if let Event::Desktop(request) = event {
             if !desktop
@@ -705,16 +645,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ui_launcher.start(&instance, Some(request), tx.clone());
                 continue;
             }
-            let view = mpris::View::capture(
-                &queue,
-                &player.status(),
-                epochs.current,
-                presented_generation,
-                access.provider().is_some(),
-                desired_playing,
-                last_stream_failed || last_clock_stale,
-            )
-            .with_ui(!ui_peers.is_empty() || ui_launcher.available());
+            let view = command_projection.as_ref().unwrap().clone();
             if let Some(command) = mpris::translate(&request.action, &view, &queue, &instance) {
                 desktop_command = Some(session_commands::Desktop::new(request));
                 Event::Request(command)
@@ -742,7 +673,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 account: access.generation(),
                 connected: access.provider().is_some(),
                 credential: access.has_credential(),
-                failed_or_stale: last_stream_failed || last_clock_stale,
+                observations: &mut observations,
                 can_raise: !ui_peers.is_empty() || ui_launcher.available(),
                 state: &mut state,
                 catalog: &catalog,
@@ -915,40 +846,22 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             }
             Event::Checkpoint | Event::Artwork => {}
-            Event::MetadataCacheDone(g, result) => {
-                metadata_task = None;
-                state["metadata_cache_action"] = Value::Null;
-                if g == access.generation() {
-                    let clearing = state["status"]
-                        == "Metadata cache clearing. Browse again to load catalog pages.";
-                    match result {
-                        Ok(()) if clearing => {
-                            state["status"] =
-                                json!("Metadata cache cleared. Browse again to load catalog pages.")
-                        }
-                        Err(error) => {
-                            state["error"] = json!(error);
-                            if clearing {
-                                state["status"] = json!("Metadata cache cleanup is incomplete.");
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Event::CacheDone(g, clear, result) => {
-                cache_task = None;
-                state["cache_action"] = Value::Null;
-                if let Err(error) = result {
-                    state["error"] = json!(error);
-                }
-                if clear
-                    && g == access.generation()
-                    && let Some(provider) = access.provider()
-                {
-                    let refs = albums.artwork_references();
-                    artwork.publish(provider, refs).await;
-                }
+            Event::Maintenance(reply) => {
+                maintenance
+                    .complete(
+                        reply,
+                        &mut maintenance::Runtime {
+                            state: &mut state,
+                            account: &mut access,
+                            catalog: &mut catalog,
+                            albums: &mut albums,
+                            search: &mut search,
+                            artwork: &artwork,
+                            metadata: &metadata,
+                            events: &tx,
+                        },
+                    )
+                    .await;
             }
             Event::Albums(reply) => {
                 if albums.apply(reply, access.generation())
@@ -1002,102 +915,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "retry_save" => force_save = true,
-                    "clear_artwork_cache" | "set_artwork_budget" => {
-                        if cache_task.is_some() {
-                            state["error"] = json!("Wait for the current artwork cache operation.");
-                        } else {
-                            let clear = v["op"] == "clear_artwork_cache";
-                            let mib = v["mib"].as_u64().filter(|mib| *mib <= 4096);
-                            if !clear && mib.is_none() {
-                                state["error"] =
-                                    json!("Choose an artwork cache target between 0 and 4096 MiB.");
-                            } else {
-                                let epoch = if clear {
-                                    artwork.begin_clear().await
-                                } else {
-                                    None
-                                };
-                                let disk = artwork.disk.clone();
-                                let tx = tx.clone();
-                                let g = access.generation();
-                                state["cache_action"] =
-                                    json!(if clear { "clear" } else { "budget" });
-                                cache_task = Some(tokio::spawn(async move {
-                                    let result = if clear {
-                                        match epoch {
-                                            Some(epoch) => disk.finish_clear(epoch).await,
-                                            None => Err("Artwork cleanup could not start."),
-                                        }
-                                    } else {
-                                        disk.budget(mib.unwrap() as u16).await
-                                    };
-                                    let _ = tx
-                                        .send(Event::CacheDone(
-                                            g,
-                                            clear,
-                                            result.map_err(str::to_owned),
-                                        ))
-                                        .await;
-                                }));
-                            }
-                        }
-                    }
-                    "clear_metadata_cache" | "set_metadata_budget" => {
-                        if metadata_task.is_some() {
-                            state["error"] =
-                                json!("Wait for the current metadata cache operation.");
-                        } else {
-                            let clear = v["op"] == "clear_metadata_cache";
-                            let mib = v["mib"].as_u64().filter(|mib| *mib <= 1024);
-                            if !clear && mib.is_none() {
-                                state["error"] =
-                                    json!("Choose a metadata target from 0 to 1024 MiB.");
-                            } else {
-                                if clear || mib == Some(0) {
-                                    access.forget_cached_discovery();
-                                    let live = access
-                                        .provider()
-                                        .as_ref()
-                                        .map(|p| p.libraries())
-                                        .unwrap_or_default();
-                                    state["libraries"] = offline::library_views(&live, &live);
-                                    state["discovery"] = json!({"origin":if access.provider().is_some() {"live"} else {"none"},"stale":access.provider().is_none(),"incomplete":true,"message":"Offline library cache cleared or disabled. Reconnect Plex to save library discovery again."});
-                                }
-                                let epoch = if clear || mib == Some(0) {
-                                    catalog.invalidate()?;
-                                    albums.invalidate();
-                                    search.invalidate()?;
-                                    artwork.revoke(false).await;
-                                    state["status"] = json!(
-                                        "Metadata cache clearing. Browse again to load catalog pages."
-                                    );
-                                    if clear { metadata.begin_clear() } else { None }
-                                } else {
-                                    None
-                                };
-                                let cache = metadata.clone();
-                                let tx = tx.clone();
-                                let g = access.generation();
-                                state["metadata_cache_action"] =
-                                    json!(if clear { "clear" } else { "budget" });
-                                metadata_task = Some(tokio::spawn(async move {
-                                    let result = if clear {
-                                        match epoch {
-                                            Some(epoch) => cache.finish_clear(epoch).await,
-                                            None => Err("Metadata cleanup could not start."),
-                                        }
-                                    } else {
-                                        cache.budget(mib.unwrap() as u16).await
-                                    };
-                                    let _ = tx
-                                        .send(Event::MetadataCacheDone(
-                                            g,
-                                            result.map_err(str::to_owned),
-                                        ))
-                                        .await;
-                                }));
-                            }
-                        }
+                    "clear_artwork_cache"
+                    | "set_artwork_budget"
+                    | "clear_metadata_cache"
+                    | "set_metadata_budget" => {
+                        maintenance
+                            .command(
+                                &v,
+                                &mut maintenance::Runtime {
+                                    state: &mut state,
+                                    account: &mut access,
+                                    catalog: &mut catalog,
+                                    albums: &mut albums,
+                                    search: &mut search,
+                                    artwork: &artwork,
+                                    metadata: &metadata,
+                                    events: &tx,
+                                },
+                            )
+                            .await?;
                     }
                     "set_output" => {} // Applied atomically by command admission.
                     "refresh_outputs" => {
@@ -1418,6 +1254,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await?;
         }
+        let view = observations
+            .project(observation::Presentation {
+                queue: &queue,
+                player: &player,
+                proxy: &proxy,
+                account: access.generation(),
+                generation: epochs.current,
+                confirmed: &mut presented_generation,
+                connected: access.provider().is_some(),
+                playing: desired_playing,
+                can_raise: !ui_peers.is_empty() || ui_launcher.available(),
+            })
+            .await;
         let audio = player.status();
         if desired_playing
             && presented_generation == Some(epochs.current)
@@ -1445,16 +1294,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state["gapless"] = json!(gapless.view);
         state["replaygain"] = gain_view(&gain_settings, &audio, epochs.current);
         state["output"] = output_view(&output_settings, &output_devices, &audio, epochs.current);
-        let view = mpris::View::capture(
-            &queue,
-            &player.status(),
-            epochs.current,
-            presented_generation,
-            access.provider().is_some(),
-            desired_playing,
-            last_stream_failed || last_clock_stale,
-        )
-        .with_ui(!ui_peers.is_empty() || ui_launcher.available());
         state["presentation"] = view.presentation();
         if let Some(desktop) = &mut desktop {
             if seeked {
@@ -1519,14 +1358,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     proxy.revoke().await;
     artwork.revoke(false).await;
-    if let Some(task) = cache_task {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), task).await;
-    }
-    artwork.disk.shutdown().await;
-    if let Some(task) = metadata_task {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), task).await;
-    }
-    metadata.shutdown().await;
+    maintenance.shutdown(&artwork, &metadata).await;
     server.abort();
     let archive_checkpoint = archive.flush().await;
     let checkpoint = shutdown::checkpoint(durable.flush(queue.clone(), purge_epoch).await);

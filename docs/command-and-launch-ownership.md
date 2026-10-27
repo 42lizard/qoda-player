@@ -146,3 +146,51 @@ confirmed access loss. This refactor preserves the policy rather than expanding
 its meaning. Null-output transition tests and the existing disposable keyring
 helper cover stale restore/connection results, a superseding browser sign-in,
 Save→Forget, paused reconnect, partial discovery and failed discovery.
+
+## Cache maintenance
+
+`maintenance::Controller` owns user-requested artwork/metadata Clear and budget
+operations. It validates input, admits one operation per target, invalidates
+browse/grant authority before spawning work, retains typed operation/account
+identity, accepts completion once, and drains the work before store shutdown.
+The existing cache modules retain storage, cleanup epochs, budgets and security.
+Account sign-out retains its separate destructive account transition.
+
+Metadata maintenance temporarily owns the foreground status. Intervening activity
+relinquishes that ownership and restores the prior status before the new activity
+publishes its own result. Completion can update that status only while its typed
+operation still owns it; displayed sentences never determine operation kind.
+Application-wide cache failures remain diagnostic after an account replacement,
+while account-bound artwork republication requires the current account generation.
+
+Production-interface tests use actual disposable stores, hold completed replies
+across browsing/account changes, verify admission/retry and clear/disable behavior,
+and drain both targets before shutting down their stores. Native offline checks
+retain the real backend's queue/discovery/restart coverage.
+
+## Nominal observation
+
+`observation::Controller` owns native sampling, clock freshness, handoff
+reconciliation and ordered fan-out to reporting, archive and desktop/UI presentation.
+A sample pairs native status, stream failure and capture time. Presentation and
+command qualification sample fresh evidence instead of combining a new status
+with freshness flags retained from a prior timer tick. Freshness lives with nominal
+observation; the desktop module owns its projection and control protocol.
+
+The first-positive-clock ordering is preserved: reporting observes prior
+confirmation, then Queue confirmation is updated, then archive and desktop/UI use
+that confirmation. Sink-specific rules remain explicit: reporting requires duration
+and can retain a paused report; archive excludes paused observations; desktop/UI
+can display a confirmed pause. Output epoch, account and confirmation still have
+different meanings. Account replacement cannot reinterpret the same old output
+epoch as evidence for the new account; it needs a new output epoch and clock.
+This prevents late old-account evidence gaining new reporting/archive authority.
+
+Queue remains authoritative for occurrences and visits, gapless for successor
+bindings, and command admission/preparation for their reset and invalidation work.
+Their native reset path uses the observation module's clock-recording operation.
+Synthetic tests exercise the production fan-out with real reporting and archive
+adapters. Native null-output tests enter both timer and pre-command paths and
+verify one promotion, old-grant revocation and no replacement load. These preserve
+[ADR-0003](adr/0003-nominal-playback-presentation.md) and
+[ADR-0004](adr/0004-continuous-converted-input.md); no physical output claim follows.
