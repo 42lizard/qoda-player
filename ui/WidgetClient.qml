@@ -1,8 +1,7 @@
 import QtQuick
 
 BackendConnection {
-    allowedOperations: ["previous", "next", "pause", "resume", "quit"]
-    queueFenced: true
-    readonly property var selectedTrack: (snapshot.queue && snapshot.queue.entries || []).find(row => row.selected)?.track || snapshot.selection || null
-    readonly property bool playing: !!snapshot.presentation && !!snapshot.presentation.known && snapshot.presentation.status === "Playing"
+    session: WidgetState { id: widget }
+    readonly property var selectedTrack: widget.selectedTrack
+    readonly property bool playing: widget.playing
 }
