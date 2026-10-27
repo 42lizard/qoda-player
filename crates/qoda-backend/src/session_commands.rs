@@ -4,7 +4,7 @@
 use crate::{
     albums, catalog, gain, gapless, mpris, output,
     player::{self, Command, Player},
-    playlists, proxy, queue, record_clock, recovery, search,
+    playlists, prepared_playback, proxy, queue, record_clock, search,
 };
 use qoda_core::OccurrenceId;
 use serde_json::{Value, json};
@@ -191,11 +191,9 @@ pub struct Playback<'a> {
     pub proxy: &'a proxy::Proxy,
     pub epochs: &'a mut gapless::Epochs,
     pub gapless: &'a mut gapless::Controller,
-    pub recovery: &'a mut recovery::Controller,
+    pub preparation: &'a mut prepared_playback::Controller,
     pub desired_playing: &'a mut bool,
     pub presented: &'a mut Option<u64>,
-    pub pending: &'a mut Option<tokio::task::JoinHandle<()>>,
-    pub automatic: &'a mut Option<u64>,
 }
 pub struct Context<'a> {
     pub instance: &'a str,
@@ -205,6 +203,7 @@ pub struct Context<'a> {
     pub failed_or_stale: bool,
     pub can_raise: bool,
     pub state: &'a mut Value,
+    pub catalog: &'a catalog::Controller,
     pub albums: &'a albums::Controller,
     pub playlists: &'a playlists::Controller,
     pub search: &'a search::Controller,
@@ -288,7 +287,9 @@ impl Playback<'_> {
             _ => {}
         }
         let effect = Effect::of(request["op"].as_str().unwrap_or(""));
-        if (effect != Effect::None || request["op"] == "pause") && self.recovery.cancel() {
+        if (effect != Effect::None || request["op"] == "pause")
+            && self.preparation.cancel_recovery()
+        {
             *self.desired_playing = false;
             self.player.send(Command::Pause(true));
             self.player.send(Command::Stop);
@@ -415,7 +416,7 @@ impl Playback<'_> {
             check_queue(self.queue, request).map_err(|e| e.to_string())?;
         }
         if matches!(op.as_str(), "retry_stream" | "skip_stream") {
-            if self.recovery.view.phase != "exhausted"
+            if self.preparation.recovering().phase != "exhausted"
                 || check_queue(self.queue, request).is_err()
                 || serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
                     != self.queue.selected()
@@ -499,7 +500,9 @@ impl Playback<'_> {
                 if !context.connected {
                     return Err("Connect Plex before adding or playing tracks.".into());
                 }
-                let track = crate::catalog_track(context.state, context.albums, request)
+                let track = context
+                    .catalog
+                    .track(context.albums, request)
                     .map_err(str::to_owned)?;
                 Some(if op == "play" {
                     Edit::Replace {
@@ -538,7 +541,9 @@ impl Playback<'_> {
                 })
             }
             "play_selected" | "enqueue_selected" | "play_next_selected" => {
-                let tracks = catalog::selected_tracks(context.state, request, context.account)
+                let tracks = context
+                    .catalog
+                    .selected_tracks(request, context.account, context.connected)
                     .map_err(str::to_owned)?;
                 Some(if op == "play_selected" {
                     Edit::Replace {
@@ -680,9 +685,7 @@ impl Playback<'_> {
             || matches!(edit, Edit::Remove(_)) && self.queue.selected().is_none()
             || matches!(edit, Edit::Next { .. }) && effects.prepare.is_none()
         {
-            if let Some(task) = self.pending.take() {
-                task.abort();
-            }
+            self.preparation.cancel();
             self.epochs.reset()?;
             self.gapless.invalidate();
             self.player.send(Command::Pause(true));
@@ -705,10 +708,7 @@ impl Playback<'_> {
         failed_or_stale: bool,
     ) -> Result<(), &'static str> {
         *self.desired_playing = false;
-        *self.automatic = None;
-        if let Some(task) = self.pending.take() {
-            task.abort();
-        }
+        self.preparation.cancel();
         match self.player.barrier().await {
             Ok(before) => {
                 record_clock(
@@ -747,12 +747,11 @@ mod tests {
         proxy: proxy::Proxy,
         epochs: gapless::Epochs,
         gapless: gapless::Controller,
-        recovery: recovery::Controller,
+        preparation: prepared_playback::Controller,
         playing: bool,
         presented: Option<u64>,
-        pending: Option<tokio::task::JoinHandle<()>>,
-        automatic: Option<u64>,
         state: Value,
+        catalog: catalog::Controller,
     }
     impl Fixture {
         async fn staged() -> Self {
@@ -807,12 +806,11 @@ mod tests {
                     proxy,
                     epochs,
                     gapless,
-                    recovery: recovery::Controller::default(),
+                    preparation: prepared_playback::Controller::default(),
                     playing: true,
                     presented: Some(1),
-                    pending: None,
-                    automatic: None,
                     state: json!({"intent":"playing"}),
+                    catalog: catalog::Controller::default(),
                 },
                 reply,
             )
@@ -839,11 +837,9 @@ mod tests {
                 proxy: &self.proxy,
                 epochs: &mut self.epochs,
                 gapless: &mut self.gapless,
-                recovery: &mut self.recovery,
+                preparation: &mut self.preparation,
                 desired_playing: &mut self.playing,
                 presented: &mut self.presented,
-                pending: &mut self.pending,
-                automatic: &mut self.automatic,
             }
             .admit(
                 request,
@@ -855,6 +851,7 @@ mod tests {
                     failed_or_stale: false,
                     can_raise: false,
                     state: &mut self.state,
+                    catalog: &self.catalog,
                     albums: &albums::Controller::default(),
                     playlists: &playlists::Controller::default(),
                     search: &search::Controller::default(),
@@ -931,6 +928,36 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn stale_catalog_selection_is_rejected_before_staged_audio_is_cancelled() {
+        let mut fixture = Fixture::staged().await;
+        let page = catalog::tests::page();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        fixture
+            .catalog
+            .begin(
+                &json!({"source":page.source,"offset":"0","query":"fixture"}),
+                std::sync::Arc::new(catalog::tests::Provider(page.clone())).into(),
+                tx,
+            )
+            .unwrap();
+        let Some(crate::Event::Page(reply)) = rx.recv().await else {
+            panic!("No catalog page");
+        };
+        fixture.catalog.accept(reply, &mut fixture.state).unwrap();
+        fixture.catalog.publish(&mut fixture.state);
+        let mut request = fixture.request("play_selected");
+        request["account_epoch"] = json!("1");
+        request["catalog_revision"] = fixture.state["catalog"]["revision"].clone();
+        request["tracks"] = json!([page.tracks[0].reference]);
+        fixture.catalog.invalidate().unwrap();
+        let before = fixture.queue.snapshot();
+        assert!(!fixture.admit(&mut request).await);
+        assert_eq!(fixture.gapless.view.phase, "staged");
+        assert_eq!(fixture.epochs.current, 1);
+        assert_eq!(fixture.queue.snapshot().revision, before.revision);
+        assert!(fixture.playing);
+    }
+    #[tokio::test]
     async fn untouched_successor_edit_preserves_the_current_epoch_and_intent() {
         let mut f = Fixture::staged().await;
         let selected = f.queue.selected();
@@ -958,48 +985,6 @@ mod tests {
         assert_eq!(f.queue.snapshot().revision, before.revision);
     }
     #[tokio::test]
-    async fn pause_cancels_recovery_and_rejects_its_late_reply_without_resuming() {
-        let mut f = Fixture::staged().await;
-        let key = recovery::Key::capture(&f.queue, 1, f.epochs.current).unwrap();
-        let (tx, _rx) = tokio::sync::mpsc::channel(4);
-        f.recovery.begin(
-            recovery::Work {
-                key,
-                request: gain::Request {
-                    reference: f
-                        .queue
-                        .visible_track(f.queue.selected().unwrap())
-                        .unwrap()
-                        .reference,
-                    mode: gain::Mode::Off,
-                    album_session: false,
-                    fidelity: false,
-                },
-                version: "fixture:a".into(),
-                playing: true,
-                failure: qoda_provider::ProviderError::Network,
-            },
-            Provider::new(),
-            tx,
-        );
-        let mut request = f.request("pause");
-        assert!(f.admit(&mut request).await);
-        assert!(!f.playing);
-        assert_eq!(f.state["intent"], "paused");
-        assert!(!f.recovery.owns(key));
-        assert!(
-            f.recovery
-                .accept(recovery::Reply {
-                    key,
-                    attempts: 1,
-                    result: Some(Err(recovery::Failure::Version))
-                })
-                .is_none()
-        );
-        assert!(f.epochs.current > 1);
-        assert!(f.player.barrier().await.unwrap().paused);
-    }
-    #[tokio::test]
     async fn cancelled_preparation_reply_cannot_restage_a_successor() {
         let (mut f, reply) = Fixture::preparing().await;
         let selected = f.queue.selected();
@@ -1022,12 +1007,10 @@ mod tests {
         output.selection = None;
         f.queue.set_position(0.25).unwrap();
         let selected = f.queue.selected();
-        f.pending = Some(tokio::spawn(std::future::pending()));
-        f.automatic = Some(1);
         let mut request = f.request("set_output");
         request["mode"] = json!("desktop");
         assert!(f.configured(&mut request, &mut output, None, None).await);
-        assert!(f.pending.is_none() && f.automatic.is_none());
+        assert!(!f.preparation.preparing());
         assert!(f.epochs.current > 1);
         assert!(f.presented.is_none());
         assert!(!f.playing);

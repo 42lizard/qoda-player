@@ -1,167 +1,234 @@
-//! Resolve bulk actions from one current catalog page; never trust client metadata.
-use qoda_core::TrackRef;
-use qoda_provider::{CatalogPage, Track};
-use serde_json::Value;
+//! Displayed track catalog owns request lifetime, revision and authoritative selection.
+use crate::{
+    albums,
+    metadata_cache::{Cache, Info, Page, Query},
+    offline::Access,
+};
+use qoda_core::{Counter, SourceId, TrackRef};
+use qoda_provider::{CatalogPage, ProviderError, Track};
+use serde_json::{Value, json};
 use std::collections::HashSet;
+use tokio::{sync::mpsc, task::JoinHandle};
 
-pub fn selected_tracks(
-    state: &Value,
-    request: &Value,
-    account: u64,
-) -> Result<Vec<Track>, &'static str> {
-    if request["account_epoch"].as_str() != Some(account.to_string().as_str())
-        || state["sign_in"]["connected"] != true
-    {
-        return Err("The account changed. Connect and select tracks again.");
-    }
-    if state["catalog"]["cache"]["origin"] == "offline" {
-        return Err("This cached source is offline. Reconnect and select tracks again.");
-    }
-    if state["catalog"]["busy"] != false
-        || request["catalog_revision"].as_str().is_none()
-        || request["catalog_revision"] != state["catalog"]["revision"]
-    {
-        return Err("The catalog page changed. Select tracks from the current page.");
-    }
-    let references = request["tracks"]
-        .as_array()
-        .filter(|tracks| !tracks.is_empty() && tracks.len() <= 100)
-        .ok_or("Select between 1 and 100 tracks on the current page.")?;
-    let page: CatalogPage = serde_json::from_value(state["page"].clone())
-        .map_err(|_| "Load a catalog page before selecting tracks.")?;
-    let mut selected = HashSet::new();
-    for reference in references {
-        let reference: TrackRef = serde_json::from_value(reference.clone())
-            .map_err(|_| "Invalid selected track reference.")?;
-        if reference.source != page.source || !selected.insert(String::from(reference.key)) {
-            return Err("The selection contains a different source or duplicate reference.");
-        }
-    }
-    let tracks: Vec<_> = page
-        .tracks
-        .into_iter()
-        .filter(|track| {
-            track.reference.source == page.source
-                && selected.contains(&String::from(track.reference.key.clone()))
-        })
-        .collect();
-    let found: HashSet<_> = tracks
-        .iter()
-        .map(|track| String::from(track.reference.key.clone()))
-        .collect();
-    if tracks.len() != selected.len() || found != selected {
-        return Err("Some selected tracks left this page. Nothing was partially queued.");
-    }
-    Ok(tracks)
+pub struct Reply {
+    generation: u64,
+    result: Result<CatalogPage, ProviderError>,
+    info: Info,
 }
-
-/// A background refresh invalidates selections only when the displayed contents change.
-pub fn publish_page(
-    state: &mut Value,
-    revision: &mut u64,
+#[derive(Default)]
+pub struct Controller {
     page: Option<CatalogPage>,
-) -> Result<(), &'static str> {
-    let page = serde_json::to_value(page).map_err(|_| "Catalog page could not be encoded")?;
-    if state["page"] != page {
-        *revision = revision
+    revision: u64,
+    generation: u64,
+    busy: bool,
+    cache: Cache,
+    info: Info,
+    task: Option<JoinHandle<()>>,
+}
+impl Controller {
+    pub fn new(cache: Cache) -> Self {
+        let mut this = Self::default();
+        this.cache = cache;
+        this
+    }
+    pub fn publish(&self, state: &mut Value) {
+        state["page"] = json!(self.page);
+        state["catalog"] = json!({"revision":self.revision.to_string(),"busy":self.busy,
+            "refreshing":self.info.refreshing,"cache":self.info});
+    }
+    pub fn invalidate(&mut self) -> Result<(), &'static str> {
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or("Browse generation exhausted")?;
+        let revision = self
+            .revision
             .checked_add(1)
             .ok_or("Catalog revision exhausted")?;
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+        self.generation = generation;
+        self.revision = revision;
+        self.page = None;
+        self.busy = false;
+        self.info = Info::default();
+        Ok(())
     }
-    state["page"] = page;
-    state["catalog"]["revision"] = serde_json::json!(revision.to_string());
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn cached_only_source_cannot_queue_even_when_other_libraries_are_connected() {
-        let (mut state, request) = fixture();
-        assert!(selected_tracks(&state, &request, 4).is_ok());
-        state["catalog"]["cache"] = json!({"origin":"offline","stale":true,"incomplete":true});
-        assert!(selected_tracks(&state, &request, 4).is_err());
-    }
-    use super::*;
-    use qoda_core::SourceId;
-    use serde_json::json;
-    fn fixture() -> (Value, Value) {
-        let source = SourceId::new();
-        let tracks: Vec<_> = ["A", "B", "C"]
-            .into_iter()
-            .map(|key| Track {
-                reference: TrackRef {
-                    source,
-                    key: key.to_owned().try_into().unwrap(),
-                },
-                title: key.into(),
-                artist: "Fixture".into(),
-                album: "Synthetic".into(),
-                duration_ms: None,
-            })
+    pub fn begin(
+        &mut self,
+        request: &Value,
+        access: Access,
+        tx: mpsc::Sender<crate::Event>,
+    ) -> Result<(), &'static str> {
+        let source: SourceId = serde_json::from_value(request["source"].clone())
+            .map_err(|_| "Choose a music library.")?;
+        let offset: Counter = serde_json::from_value(request["offset"].clone())
+            .map_err(|_| "Choose a valid catalog page.")?;
+        let query = request["query"]
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .take(512)
             .collect();
-        let state = json!({"sign_in":{"connected":true},"catalog":{"revision":"9007199254740993","busy":false},"page":CatalogPage{source,offset:qoda_core::Counter::ZERO,total:None,query:"fixture".into(),tracks:tracks.clone(),has_more:false}});
-        let request = json!({"account_epoch":"4","catalog_revision":"9007199254740993","tracks":[tracks[2].reference,tracks[0].reference]});
-        (state, request)
+        self.invalidate()?;
+        self.busy = true;
+        let generation = self.generation;
+        let cache = self.cache.clone();
+        self.task = Some(tokio::spawn(async move {
+            access
+                .read(
+                    &cache,
+                    Query::Tracks {
+                        source,
+                        offset: offset.get(),
+                        query,
+                    },
+                    move |result, info| {
+                        let tx = tx.clone();
+                        async move {
+                            let result = result.and_then(|page| match page {
+                                Page::Tracks(page) => Ok(page),
+                                _ => Err(ProviderError::InvalidReply),
+                            });
+                            let _ = tx
+                                .send(crate::Event::Page(Reply {
+                                    generation,
+                                    result,
+                                    info,
+                                }))
+                                .await;
+                        }
+                    },
+                )
+                .await;
+        }));
+        Ok(())
     }
-    #[test]
-    fn identical_refresh_retains_selection_but_changed_cached_contents_reject_old_actions() {
-        let (mut state, request) = fixture();
-        let mut revision = 9_007_199_254_740_993;
-        let page: CatalogPage = serde_json::from_value(state["page"].clone()).unwrap();
-        publish_page(&mut state, &mut revision, Some(page.clone())).unwrap();
-        assert!(selected_tracks(&state, &request, 4).is_ok());
-        let mut changed = page;
-        changed.tracks.swap(0, 1);
-        publish_page(&mut state, &mut revision, Some(changed)).unwrap();
-        assert_eq!(state["catalog"]["revision"], "9007199254740994");
-        assert!(selected_tracks(&state, &request, 4).is_err());
-        publish_page(&mut state, &mut revision, None).unwrap();
-        assert!(state["page"].is_null());
+    pub fn accept(&mut self, reply: Reply, state: &mut Value) -> Result<bool, &'static str> {
+        if reply.generation != self.generation {
+            return Ok(false);
+        }
+        self.busy = false;
+        self.info = reply.info;
+        match reply.result {
+            Ok(page) => {
+                // Identical background refreshes retain the exact selection revision.
+                if serde_json::to_value(&self.page)
+                    .map_err(|_| "Catalog page could not be encoded")?
+                    != json!(page)
+                {
+                    self.revision = self
+                        .revision
+                        .checked_add(1)
+                        .ok_or("Catalog revision exhausted")?;
+                }
+                self.page = Some(page);
+                state["status"] = json!(if self.info.origin == "live" {
+                    "Ready"
+                } else {
+                    self.info.message
+                });
+            }
+            Err(error) => {
+                if self.info.origin == "offline" && error == ProviderError::MissingTrack {
+                    state["status"] = json!(self.info.message);
+                    state["error"] = Value::Null;
+                } else {
+                    state["status"] = json!("Browse failed");
+                    state["error"] = json!(error.to_string());
+                }
+                if matches!(
+                    error,
+                    ProviderError::AccessDenied | ProviderError::UnknownSource
+                ) && self.page.take().is_some()
+                {
+                    self.revision = self
+                        .revision
+                        .checked_add(1)
+                        .ok_or("Catalog revision exhausted")?;
+                }
+            }
+        }
+        Ok(true)
     }
-    #[test]
-    fn batch_uses_current_server_metadata_and_display_order_with_lossless_page_fences() {
-        let (state, mut request) = fixture();
-        request["tracks"][0]["title"] = json!("Untrusted title");
-        let tracks = selected_tracks(&state, &request, 4).unwrap();
-        assert_eq!(
-            tracks.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
-            ["A", "C"]
-        );
-        request["catalog_revision"] = json!(9007199254740993_u64);
-        assert!(selected_tracks(&state, &request, 4).is_err());
+    pub fn track(
+        &self,
+        albums: &albums::Controller,
+        request: &Value,
+    ) -> Result<Track, &'static str> {
+        let reference = serde_json::from_value::<TrackRef>(
+            json!({"source":request["source"],"key":request["key"]}),
+        )
+        .map_err(|_| "Choose a track from the current catalog page.")?;
+        self.page
+            .as_ref()
+            .into_iter()
+            .flat_map(|p| &p.tracks)
+            .find(|t| t.reference == reference)
+            .cloned()
+            .or_else(|| albums.track(&reference))
+            .ok_or("That track is no longer on the displayed page. Browse again.")
     }
-    #[test]
-    fn stale_account_page_and_in_flight_browse_cannot_reuse_a_selection() {
-        let (mut state, request) = fixture();
-        assert!(selected_tracks(&state, &request, 5).is_err());
-        state["catalog"]["busy"] = json!(true);
-        assert!(selected_tracks(&state, &request, 4).is_err());
-        state["catalog"]["busy"] = json!(false);
-        state["catalog"]["revision"] = json!("9007199254740994");
-        assert!(selected_tracks(&state, &request, 4).is_err());
-        state["catalog"]["revision"] = request["catalog_revision"].clone();
-        state["sign_in"]["connected"] = json!(false);
-        assert!(selected_tracks(&state, &request, 4).is_err());
+    pub fn selected_tracks(
+        &self,
+        request: &Value,
+        account: u64,
+        connected: bool,
+    ) -> Result<Vec<Track>, &'static str> {
+        if request["account_epoch"].as_str() != Some(account.to_string().as_str()) || !connected {
+            return Err("The account changed. Connect and select tracks again.");
+        }
+        if self.info.origin == "offline" {
+            return Err("This cached source is offline. Reconnect and select tracks again.");
+        }
+        if self.busy
+            || request["catalog_revision"].as_str() != Some(self.revision.to_string().as_str())
+        {
+            return Err("The catalog page changed. Select tracks from the current page.");
+        }
+        let references = request["tracks"]
+            .as_array()
+            .filter(|tracks| !tracks.is_empty() && tracks.len() <= 100)
+            .ok_or("Select between 1 and 100 tracks on the current page.")?;
+        let page = self
+            .page
+            .as_ref()
+            .ok_or("Load a catalog page before selecting tracks.")?;
+        let mut selected = HashSet::new();
+        for reference in references {
+            let reference: TrackRef = serde_json::from_value(reference.clone())
+                .map_err(|_| "Invalid selected track reference.")?;
+            if reference.source != page.source || !selected.insert(String::from(reference.key)) {
+                return Err("The selection contains a different source or duplicate reference.");
+            }
+        }
+        let tracks: Vec<_> = page
+            .tracks
+            .iter()
+            .filter(|track| {
+                track.reference.source == page.source
+                    && selected.contains(&String::from(track.reference.key.clone()))
+            })
+            .cloned()
+            .collect();
+        let found: HashSet<_> = tracks
+            .iter()
+            .map(|track| String::from(track.reference.key.clone()))
+            .collect();
+        if tracks.len() != selected.len() || found != selected {
+            return Err("Some selected tracks left this page. Nothing was partially queued.");
+        }
+        Ok(tracks)
     }
-    #[test]
-    fn malformed_missing_cross_source_duplicate_and_oversized_batches_are_rejected_whole() {
-        let (state, request) = fixture();
-        let mut cases = vec![
-            json!([]),
-            json!([null]),
-            json!([request["tracks"][0], request["tracks"][0]]),
-            json!(vec![request["tracks"][0].clone(); 101]),
-        ];
-        let mut missing = request["tracks"].clone();
-        missing[0]["key"] = json!("missing");
-        cases.push(missing);
-        let mut other = request["tracks"].clone();
-        other[0]["source"] = json!(SourceId::new());
-        cases.push(other);
-        for tracks in cases {
-            let mut bad = request.clone();
-            bad["tracks"] = tracks;
-            assert!(selected_tracks(&state, &bad, 4).is_err());
+}
+impl Drop for Controller {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
         }
     }
 }
+#[cfg(test)]
+#[path = "catalog/tests.rs"]
+pub(crate) mod tests;

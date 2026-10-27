@@ -15,6 +15,7 @@ mod offline;
 mod output;
 mod player;
 mod playlists;
+mod prepared_playback;
 mod proxy;
 mod queue;
 mod recovery;
@@ -28,7 +29,9 @@ mod storage;
 mod update_tests;
 mod vault;
 use player::{Command, Player};
-use qoda_core::{SourceId, TrackRef};
+use qoda_core::SourceId;
+#[cfg(test)]
+use qoda_core::TrackRef;
 use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider};
 use serde_json::{Value, json};
 use session_commands::check_queue;
@@ -85,11 +88,7 @@ enum Event {
         Credential,
     ),
     Vault(vault::Reply),
-    Page(
-        u64,
-        Result<qoda_provider::CatalogPage, qoda_provider::ProviderError>,
-        metadata_cache::Info,
-    ),
+    Page(catalog::Reply),
     Media(u64, Result<gain::Prepared, gain::PrepareError>),
     Pin(u64, Result<BrowserPin, qoda_provider::ProviderError>),
     Credential(u64, Result<Credential, qoda_provider::ProviderError>),
@@ -239,55 +238,6 @@ fn connect(
         let _ = tx.send(Event::Connected(generation, r, credential)).await;
     })
 }
-async fn prepare_track(
-    player: &Player,
-    proxy: &proxy::Proxy,
-    pending: &mut Option<tokio::task::JoinHandle<()>>,
-    generation: &mut gapless::Epochs,
-    provider: Arc<dyn MusicProvider>,
-    request: gain::Request,
-    tx: mpsc::Sender<Event>,
-) -> Result<(), &'static str> {
-    let next = generation.allocate()?;
-    if let Some(task) = pending.take() {
-        task.abort();
-    }
-    generation.current = next;
-    player.invalidate_load(next);
-    player.send(Command::Pause(true));
-    player.send(Command::Stop);
-    proxy.revoke().await;
-    *pending = Some(tokio::spawn(async move {
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(20),
-            gain::prepare(provider.as_ref(), request),
-        )
-        .await
-        .unwrap_or(Err(gain::PrepareError::Provider(
-            qoda_provider::ProviderError::Network,
-        )));
-        let _ = tx.send(Event::Media(next, result)).await;
-    }));
-    Ok(())
-}
-fn catalog_track(
-    state: &Value,
-    albums: &albums::Controller,
-    request: &Value,
-) -> Result<qoda_provider::Track, &'static str> {
-    let reference = serde_json::from_value::<TrackRef>(
-        json!({"source":request["source"],"key":request["key"]}),
-    )
-    .map_err(|_| "Choose a track from the current catalog page.")?;
-    state["page"]["tracks"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|v| serde_json::from_value::<qoda_provider::Track>(v.clone()).ok())
-        .find(|t| t.reference == reference)
-        .or_else(|| albums.track(&reference))
-        .ok_or("That track is no longer on the displayed page. Browse again.")
-}
 fn record_clock(
     queue: &mut queue::Queue,
     audio: &player::Status,
@@ -351,27 +301,6 @@ fn output_view(
         }
     }
     view
-}
-fn version_failure(error: &queue::Error, version: &str) -> Option<queue::Unavailable> {
-    (*error == queue::Error::Version && !version.is_empty() && version.len() <= 512)
-        .then_some(queue::Unavailable::VersionChanged)
-}
-fn preparation_failure(
-    queue: &mut queue::Queue,
-    reason: Option<queue::Unavailable>,
-    automatic: bool,
-    playing: bool,
-) -> Result<Option<qoda_provider::Track>, queue::Error> {
-    let Some(id) = queue.selected() else {
-        return Ok(None);
-    };
-    if let Some(reason) = reason {
-        queue.mark_unavailable(id, reason)?;
-        if automatic && playing {
-            return queue.advance();
-        }
-    }
-    Ok(None)
 }
 enum ResumePlan {
     Waiting,
@@ -572,7 +501,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|discovery| !discovery.libraries.is_empty());
     let mut albums = albums::Controller::with_cache(metadata.clone());
     let mut presented_generation = None;
-    let mut catalog_revision = 0_u64;
+    let mut catalog = catalog::Controller::new(metadata.clone());
     let mut state = json!({"protocol":1,"instance":instance,"revision":"0","status":"Connect Plex to browse music","libraries":[],"page":null,"selection":null,"intent":"paused","audio_profile":"Desktop / PipeWire","error":null,"signin_url":null,"sign_in":{"connected":false,"can_save":false,"keyring_action":null,"saved":"unknown","message":"Choose Restore to check for a saved sign-in."}});
     if let Some(discovery) = &cached_discovery {
         state["libraries"] = offline::library_views(&discovery.libraries, &[]);
@@ -609,7 +538,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     state["playlists"] = json!(playlists.view);
     state["albums"] = json!(albums.view);
     state["account_epoch"] = json!("0");
-    state["catalog"] = json!({"revision":"0","busy":false});
+    catalog.publish(&mut state);
     if queue.snapshot().membership_count > 0 {
         state["status"] = json!("Session restored paused. Restore Plex sign-in to resume.");
     }
@@ -646,17 +575,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let mut provider: Option<Arc<dyn MusicProvider>> = None;
-    let mut browse_task: Option<tokio::task::JoinHandle<()>> = None;
-    let mut prepare_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut preparation = prepared_playback::Controller::default();
     let mut auth_task: Option<tokio::task::JoinHandle<()>> = None;
-    let (mut auth_generation, mut browse_generation) = (0_u64, 0_u64);
+    let mut auth_generation = 0_u64;
     let mut epochs = gapless::Epochs::default();
     let mut gapless = gapless::Controller::default();
-    let mut recovery = recovery::Controller::default();
-    state["recovery"] = json!(recovery.view);
+    state["recovery"] = json!(preparation.recovering());
     state["gapless"] = json!(gapless.view);
     let mut desired_playing = false;
-    let mut automatic_preparation = None;
     let mut ui_peers = HashSet::new();
     state["ui"] =
         json!({"can_raise":ui_launcher.available(),"raise_token":null,"launch_error":null});
@@ -846,11 +772,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 proxy: &proxy,
                 epochs: &mut epochs,
                 gapless: &mut gapless,
-                recovery: &mut recovery,
+                preparation: &mut preparation,
                 desired_playing: &mut desired_playing,
                 presented: &mut presented_generation,
-                pending: &mut prepare_task,
-                automatic: &mut automatic_preparation,
             };
             let mut context = session_commands::Context {
                 instance: &instance,
@@ -860,6 +784,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 failed_or_stale: last_stream_failed || last_clock_stale,
                 can_raise: !ui_peers.is_empty() || ui_launcher.available(),
                 state: &mut state,
+                catalog: &catalog,
                 albums: &albums,
                 playlists: &playlists,
                 search: &search,
@@ -884,36 +809,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 session_commands::Admission::Rejected => event = Event::Checkpoint,
             }
         }
-        if let Event::Recovery(reply) = event {
-            let generation = reply.key.generation;
-            if !recovery.owns(reply.key) {
-                event = Event::Checkpoint;
-            } else if !reply.key.matches(&queue, auth_generation, epochs.current) {
-                recovery.cancel();
-                event = Event::Checkpoint;
-            } else {
-                event = match recovery.accept(reply) {
-                    Some((playing, Ok(prepared))) => {
-                        desired_playing = playing;
-                        state["error"] = Value::Null;
-                        Event::Media(generation, Ok(prepared))
-                    }
-                    Some((_, Err(error))) => {
-                        desired_playing = false;
-                        state["intent"] = json!("paused");
-                        state["error"] = json!(error.message());
-                        state["status"] = json!("Recovery exhausted; Retry or Skip explicitly.");
-                        if let Some(reason) = error.reason()
-                            && let Some(id) = queue.selected()
-                        {
-                            let _ = queue.mark_unavailable(id, reason);
-                        }
-                        Event::Checkpoint
-                    }
-                    None => Event::Checkpoint,
-                };
-            }
-        }
         let mut to_prepare = command_effects.prepare;
         let mut automatic_next = command_effects.automatic;
         let mut force_save = command_effects.force_save;
@@ -923,58 +818,49 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 search.accept(reply, auth_generation)?;
             }
             Event::StreamFailed(error, playing) => {
-                desired_playing = false;
-                if let Some(task) = prepare_task.take() {
-                    task.abort();
-                }
-                automatic_preparation = None;
-                let _ = player.barrier().await;
-                gapless.invalidate();
-                proxy.revoke().await;
-                epochs.reset()?;
-                player.invalidate_load(epochs.current);
-                presented_generation = None;
-                state["audio"] = Value::Null;
-                state["intent"] = json!("paused");
-                if let (Some(provider), Some(key), Some(version), Some(track)) = (
-                    provider.clone(),
-                    recovery::Key::capture(&queue, auth_generation, epochs.current),
-                    queue.selected_version().map(str::to_owned),
-                    queue.selected().and_then(|id| queue.visible_track(id).ok()),
-                ) {
-                    if let Some(reason) = queue::Unavailable::from_provider(error) {
-                        let _ = queue.mark_unavailable(queue.selected().unwrap(), reason);
-                    }
-                    recovery.begin(
-                        recovery::Work {
-                            key,
-                            version,
-                            playing,
-                            failure: error,
-                            request: gain::Request {
-                                reference: track.reference,
-                                mode: gain_settings.mode,
-                                album_session: queue.album_gain_eligible(),
-                                fidelity: output_settings
-                                    .selection
-                                    .as_ref()
-                                    .is_some_and(output::Selection::fidelity),
-                            },
-                        },
-                        provider,
+                preparation
+                    .interrupted(
+                        error,
+                        playing,
+                        provider.clone().map(|p| p as Arc<dyn MusicProvider>),
                         tx.clone(),
-                    );
-                    state["error"] = if recovery.view.phase == "recovering" {
-                        Value::Null
-                    } else {
-                        json!(error.to_string())
-                    };
-                    state["status"] = json!(recovery.view.message);
-                } else {
-                    state["error"] = json!(
-                        "Stream interrupted without a pinned recovery target; retry explicitly."
-                    );
-                }
+                        &mut prepared_playback::Runtime {
+                            queue: &mut queue,
+                            player: &player,
+                            proxy: &proxy,
+                            epochs: &mut epochs,
+                            gapless: &mut gapless,
+                            playing: &mut desired_playing,
+                            presented: &mut presented_generation,
+                            state: &mut state,
+                            output: &output_settings,
+                            gain: &gain_settings,
+                            account: auth_generation,
+                        },
+                    )
+                    .await?;
+            }
+            Event::Recovery(reply) => {
+                let next = preparation
+                    .recovered(
+                        reply,
+                        &mut prepared_playback::Runtime {
+                            queue: &mut queue,
+                            player: &player,
+                            proxy: &proxy,
+                            epochs: &mut epochs,
+                            gapless: &mut gapless,
+                            playing: &mut desired_playing,
+                            presented: &mut presented_generation,
+                            state: &mut state,
+                            output: &output_settings,
+                            gain: &gain_settings,
+                            account: auth_generation,
+                        },
+                    )
+                    .await;
+                to_prepare = next.track;
+                automatic_next = next.automatic;
             }
             Event::Gapless(reply) => {
                 let unavailable = gapless.unavailable_reply(&reply, &queue, &epochs);
@@ -1216,17 +1102,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     state["discovery"] = json!({"origin":if provider.is_some() {"live"} else {"none"},"stale":provider.is_none(),"incomplete":true,"message":"Offline library cache cleared or disabled. Reconnect Plex to save library discovery again."});
                                 }
                                 let epoch = if clear || mib == Some(0) {
-                                    if let Some(task) = browse_task.take() {
-                                        task.abort();
-                                    }
-                                    browse_generation = browse_generation
-                                        .checked_add(1)
-                                        .ok_or("Browse generation exhausted")?;
-                                    catalog_revision = catalog_revision
-                                        .checked_add(1)
-                                        .ok_or("Catalog revision exhausted")?;
-                                    state["page"] = Value::Null;
-                                    state["catalog"] = json!({"revision":catalog_revision.to_string(),"busy":false});
+                                    catalog.invalidate()?;
                                     albums.invalidate();
                                     search.invalidate()?;
                                     artwork.revoke(false).await;
@@ -1298,19 +1174,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 "The account changed. Review the connection before retrying."
                             );
                         } else if let Some(credential) = current_credential.clone() {
-                            for task in [auth_task.take(), browse_task.take(), prepare_task.take()]
-                                .into_iter()
-                                .flatten()
-                            {
+                            if let Some(task) = auth_task.take() {
                                 task.abort();
                             }
                             auth_generation = auth_generation
                                 .checked_add(1)
                                 .ok_or("Account generation exhausted")?;
+                            preparation.cancel();
+                            preparation.cancel_recovery();
                             reporting.bind(auth_generation, None);
-                            browse_generation = browse_generation
-                                .checked_add(1)
-                                .ok_or("Browse generation exhausted")?;
+                            catalog.invalidate()?;
                             epochs.reset()?;
                             gapless.invalidate();
                             player.invalidate_load(epochs.current);
@@ -1321,9 +1194,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             search.invalidate()?;
                             albums.invalidate();
                             playlists.invalidate();
-                            catalog::publish_page(&mut state, &mut catalog_revision, None)?;
-                            state["catalog"] =
-                                json!({"revision":catalog_revision.to_string(),"busy":false});
                             provider = None;
                             cached_discovery = metadata.discovery().await;
                             state["libraries"] = offline::library_views(
@@ -1359,6 +1229,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             auth_generation = auth_generation
                                 .checked_add(1)
                                 .ok_or("Generation exhausted")?;
+                            preparation.cancel();
+                            preparation.cancel_recovery();
                             reporting.bind(auth_generation, None);
                             state["signin_url"] = Value::Null;
                             state["status"] = json!("Restoring saved Plex sign-in");
@@ -1409,6 +1281,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         auth_generation = auth_generation
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
+                        preparation.cancel();
+                        preparation.cancel_recovery();
                         reporting.bind(auth_generation, None);
                         let g = auth_generation;
                         let tx = tx.clone();
@@ -1469,63 +1343,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "browse" => {
-                        if let Some(p) = catalog_access.clone()
-                            && let Ok(source) =
+                        if let Some(access) = catalog_access.clone() {
+                            if let Ok(source) =
                                 serde_json::from_value::<SourceId>(v["source"].clone())
-                        {
-                            if albums.source_changed(source) {
+                                && albums.source_changed(source)
+                            {
                                 artwork.revoke(false).await;
                             }
-                            let Ok(offset) =
-                                serde_json::from_value::<qoda_core::Counter>(v["offset"].clone())
-                            else {
-                                continue;
-                            };
-                            let offset = offset.get();
-                            let query: String = v["query"]
-                                .as_str()
-                                .unwrap_or("")
-                                .chars()
-                                .take(512)
-                                .collect();
-                            if let Some(task) = browse_task.take() {
-                                task.abort();
+                            match catalog.begin(&v, access, tx.clone()) {
+                                Ok(()) => state["status"] = json!("Loading tracks"),
+                                Err(error) => state["error"] = json!(error),
                             }
-                            browse_generation = browse_generation
-                                .checked_add(1)
-                                .ok_or("Generation exhausted")?;
-                            let g = browse_generation;
-                            let tx = tx.clone();
-                            state["status"] = json!("Loading tracks");
-                            state["page"] = Value::Null;
-                            catalog_revision = catalog_revision
-                                .checked_add(1)
-                                .ok_or("Catalog revision exhausted")?;
-                            state["catalog"] = json!({"revision":catalog_revision.to_string(),"busy":true,"refreshing":false});
-                            let cache = metadata.clone();
-                            browse_task = Some(tokio::spawn(async move {
-                                p.read(
-                                    &cache,
-                                    metadata_cache::Query::Tracks {
-                                        source,
-                                        offset,
-                                        query,
-                                    },
-                                    move |result, info| {
-                                        let tx = tx.clone();
-                                        async move {
-                                            let result = result.and_then(|page| match page {
-                                                metadata_cache::Page::Tracks(page) => Ok(page),
-                                                _ => {
-                                                    Err(qoda_provider::ProviderError::InvalidReply)
-                                                }
-                                            });
-                                            let _ = tx.send(Event::Page(g, result, info)).await;
-                                        }
-                                    },
-                                )
-                                .await;
-                            }));
                         }
                     }
                     "retry_desktop" => {
@@ -1562,9 +1390,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "stop" => {
                         reporting.request_stop();
-                        if let Some(task) = prepare_task.take() {
-                            task.abort();
-                        }
+                        preparation.cancel();
                         if queue.selected().is_some() {
                             let _ = queue.seek_to(0.0);
                         }
@@ -1596,9 +1422,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 gapless.view.message =
                                     "Resuming the selected occurrence after review.".into();
                             }
-                            let preparing = prepare_task
-                                .as_ref()
-                                .is_some_and(|task| !task.is_finished());
+                            let preparing = preparation.preparing();
                             match resume_selection(
                                 &mut queue,
                                 &player.status(),
@@ -1650,19 +1474,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "disconnect" | "forget_signin" => {
                         let forget = v["op"] == "forget_signin";
-                        for task in [browse_task.take(), prepare_task.take(), auth_task.take()]
-                            .into_iter()
-                            .flatten()
-                        {
+                        if let Some(task) = auth_task.take() {
                             task.abort();
                         }
                         auth_generation = auth_generation
                             .checked_add(1)
                             .ok_or("Generation exhausted")?;
+                        preparation.cancel();
+                        preparation.cancel_recovery();
                         reporting.bind(auth_generation, None);
-                        browse_generation = browse_generation
-                            .checked_add(1)
-                            .ok_or("Generation exhausted")?;
+                        catalog.invalidate()?;
                         epochs.reset()?;
                         gapless.invalidate();
                         provider = None;
@@ -1690,9 +1511,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         player.send(Command::Stop);
                         proxy.revoke().await;
                         state["libraries"] = json!([]);
-                        state["page"] = Value::Null;
-                        state["catalog"] =
-                            json!({"revision":browse_generation.to_string(),"busy":false});
                         state["selection"] = Value::Null;
                         state["audio"] = Value::Null;
                         state["signin_url"] = Value::Null;
@@ -1759,17 +1577,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok((p, ids)) => {
                     // A verified account replaces all cached browse authority. Fence
                     // in-flight cached results before publishing its source allowlist.
-                    if let Some(task) = browse_task.take() {
-                        task.abort();
-                    }
-                    browse_generation = browse_generation
-                        .checked_add(1)
-                        .ok_or("Browse generation exhausted")?;
+                    catalog.invalidate()?;
                     albums.invalidate();
                     playlists.invalidate();
-                    catalog::publish_page(&mut state, &mut catalog_revision, None)?;
-                    state["catalog"] =
-                        json!({"revision":catalog_revision.to_string(),"busy":false});
                     artwork.revoke(true).await;
                     let live = p.libraries();
                     let account = p.account_scope().to_owned();
@@ -1827,13 +1637,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 | qoda_provider::ProviderError::SignInRequired
                         )
                     ) {
+                        preparation.cancel();
+                        preparation.cancel_recovery();
                         reporting.bind(auth_generation, None);
-                        if let Some(task) = browse_task.take() {
-                            task.abort();
-                        }
-                        browse_generation = browse_generation
-                            .checked_add(1)
-                            .ok_or("Browse generation exhausted")?;
+                        catalog.invalidate()?;
                         albums.invalidate();
                         search.invalidate()?;
                         metadata.clear().await;
@@ -1844,9 +1651,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         state["sign_in"]["can_save"] = json!(false);
                         cached_discovery = None;
                         state["libraries"] = json!([]);
-                        catalog::publish_page(&mut state, &mut catalog_revision, None)?;
-                        state["catalog"] =
-                            json!({"revision":catalog_revision.to_string(),"busy":false});
                         state["discovery"] = json!({"origin":"none","stale":true,"incomplete":true,"message":"Plex denied account access; cached library discovery was removed."});
                     }
                     state["status"] = json!("Plex connection failed");
@@ -1896,162 +1700,59 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            Event::Page(g, r, info) if g == browse_generation => {
-                state["catalog"]["busy"] = json!(false);
-                state["catalog"]["refreshing"] = json!(info.refreshing);
-                state["catalog"]["cache"] = json!(info);
-                match r {
-                    Ok(page) => {
-                        catalog::publish_page(&mut state, &mut catalog_revision, Some(page))?;
-                        state["status"] = json!(if info.origin == "live" {
-                            "Ready"
-                        } else {
-                            info.message
-                        });
-                    }
-                    Err(error) => {
-                        if info.origin == "offline"
-                            && error == qoda_provider::ProviderError::MissingTrack
-                        {
-                            state["status"] = json!(info.message);
-                            state["error"] = Value::Null;
-                        } else {
-                            state["status"] = json!("Browse failed");
-                            state["error"] = json!(error.to_string());
-                        }
-                        if matches!(
-                            error,
-                            qoda_provider::ProviderError::AccessDenied
-                                | qoda_provider::ProviderError::UnknownSource
-                        ) {
-                            catalog::publish_page(&mut state, &mut catalog_revision, None)?;
-                        }
-                    }
-                }
+            Event::Page(reply) => {
+                catalog.accept(reply, &mut state)?;
             }
             Event::OutputDevices(devices) => {
                 output_devices = devices;
             }
-            Event::Media(g, r) if g == epochs.current => match r {
-                Ok(prepared) => {
-                    let gain::Prepared {
-                        media,
-                        gain,
-                        source,
-                        continuous,
-                    } = prepared;
-                    if let Err(error) = queue.update_selected(media.track.clone(), &media.version) {
-                        let reason = version_failure(&error, &media.version);
-                        match preparation_failure(
-                            &mut queue,
-                            reason,
-                            automatic_preparation == Some(g),
-                            desired_playing,
-                        ) {
-                            Ok(next) => {
-                                state["error"] = if next.is_some() {
-                                    Value::Null
-                                } else {
-                                    json!(error.to_string())
-                                };
-                                to_prepare = next;
-                            }
-                            Err(failure) => state["error"] = json!(failure.to_string()),
-                        }
-                        automatic_next = to_prepare.is_some();
-                        desired_playing = automatic_next;
-                        state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
-                    } else {
-                        state["selection"] = json!(media.track);
-                        let url = proxy.grant(media.stream).await;
-                        if let Err(error) = player.load_prepared(player::Load {
-                            generation: g,
-                            url,
-                            position: queue.position(),
-                            gain,
-                            source,
-                            description: continuous,
-                            chain: gapless.view.enabled,
-                            output: output_settings.selection.clone(),
-                            playing: desired_playing,
-                        }) {
-                            desired_playing = false;
-                            state["intent"] = json!("paused");
-                            state["error"] = json!(error);
-                        }
-                        state["status"] = json!("Track selected; playback requested");
-                    }
-                }
-                Err(e) => {
-                    match preparation_failure(
-                        &mut queue,
-                        e.provider().and_then(queue::Unavailable::from_provider),
-                        automatic_preparation == Some(g),
-                        desired_playing,
-                    ) {
-                        Ok(next) => {
-                            state["error"] = if next.is_some() {
-                                Value::Null
-                            } else {
-                                json!(e.to_string())
-                            };
-                            to_prepare = next;
-                        }
-                        Err(error) => state["error"] = json!(error.to_string()),
-                    }
-                    automatic_next = to_prepare.is_some();
-                    desired_playing = automatic_next;
-                    state["status"] = json!(if automatic_next {
-                        "Skipping unavailable entry"
-                    } else if e.provider().is_none() {
-                        "Fidelity verification failed; review audio settings and explicitly retry"
-                    } else {
-                        "Playback preparation failed; review unavailable entries or retry"
-                    });
-                    state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
-                }
-            },
+            Event::Media(g, r) => {
+                let next = preparation
+                    .complete(
+                        g,
+                        r,
+                        &mut prepared_playback::Runtime {
+                            queue: &mut queue,
+                            player: &player,
+                            proxy: &proxy,
+                            epochs: &mut epochs,
+                            gapless: &mut gapless,
+                            playing: &mut desired_playing,
+                            presented: &mut presented_generation,
+                            state: &mut state,
+                            output: &output_settings,
+                            gain: &gain_settings,
+                            account: auth_generation,
+                        },
+                    )
+                    .await;
+                to_prepare = next.track;
+                automatic_next = next.automatic;
+            }
             _ => continue,
         }
-        // A normal queue visit gets a fresh recovery budget; recovery reloads
-        // enter Event::Media directly and retain the existing budget.
-        if to_prepare.is_some() {
-            recovery.cancel();
-        }
-        if let Some(track) = to_prepare.as_ref()
-            && provider.is_none()
-        {
-            state["selection"] = json!(track);
-            state["audio"] = Value::Null;
-            state["status"] = json!("Selection updated locally. Restore Plex sign-in to play.");
-        }
-        if let Some(track) = to_prepare
-            && let Some(provider) = provider.clone()
-        {
-            gapless.invalidate();
-            prepare_track(
-                &player,
-                &proxy,
-                &mut prepare_task,
-                &mut epochs,
-                provider,
-                gain::Request {
-                    reference: track.reference,
-                    mode: gain_settings.mode,
-                    album_session: queue.album_gain_eligible(),
-                    fidelity: output_settings
-                        .selection
-                        .as_ref()
-                        .is_some_and(output::Selection::fidelity),
-                },
-                tx.clone(),
-            )
-            .await?;
-            automatic_preparation = (automatic_next && desired_playing).then_some(epochs.current);
-            state["selection"] = Value::Null;
-            state["audio"] = Value::Null;
-            state["intent"] = json!(if desired_playing { "playing" } else { "paused" });
-            state["status"] = json!("Preparing selected queue entry");
+        if let Some(track) = to_prepare {
+            preparation
+                .start(
+                    track,
+                    automatic_next,
+                    provider.clone().map(|p| p as Arc<dyn MusicProvider>),
+                    tx.clone(),
+                    &mut prepared_playback::Runtime {
+                        queue: &mut queue,
+                        player: &player,
+                        proxy: &proxy,
+                        epochs: &mut epochs,
+                        gapless: &mut gapless,
+                        playing: &mut desired_playing,
+                        presented: &mut presented_generation,
+                        state: &mut state,
+                        output: &output_settings,
+                        gain: &gain_settings,
+                        account: auth_generation,
+                    },
+                )
+                .await?;
         }
         let audio = player.status();
         if desired_playing
@@ -2076,6 +1777,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             state["error"] = json!(error);
         }
         gapless.finish_chain_if_needed(&queue, &epochs, &player);
+        catalog.publish(&mut state);
         state["gapless"] = json!(gapless.view);
         state["replaygain"] = gain_view(&gain_settings, &audio, epochs.current);
         state["output"] = output_view(&output_settings, &output_devices, &audio, epochs.current);
@@ -2102,7 +1804,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state["archive"] = json!(archive.view());
         state["navigation"] = json!(queue.navigation_page(navigation_offset));
         state["queue"] = json!(queue.snapshot());
-        state["recovery"] = json!(recovery.view);
+        state["recovery"] = json!(preparation.recovering());
         state["search"] = search.view();
         state["playlists"] = json!(playlists.view);
         albums.view.covers = artwork.urls().await;
@@ -2310,9 +2012,14 @@ mod tests {
             q.set_position(7.0).unwrap();
             let before = serde_json::to_value(&q).unwrap();
             assert!(
-                preparation_failure(&mut q, queue::Unavailable::from_provider(error), true, true)
-                    .unwrap()
-                    .is_none()
+                prepared_playback::preparation_failure(
+                    &mut q,
+                    queue::Unavailable::from_provider(error),
+                    true,
+                    true
+                )
+                .unwrap()
+                .is_none()
             );
             assert_eq!(serde_json::to_value(q).unwrap(), before);
         }
@@ -2321,7 +2028,7 @@ mod tests {
             let selected = q.selected();
             q.set_position(7.0).unwrap();
             assert!(
-                preparation_failure(
+                prepared_playback::preparation_failure(
                     &mut q,
                     Some(queue::Unavailable::Missing),
                     automatic,
@@ -2334,10 +2041,12 @@ mod tests {
             assert_eq!(q.position(), 7.0);
             assert!(q.selected_unavailable());
         }
-        assert!(version_failure(&queue::Error::Version, "").is_none());
-        assert!(version_failure(&queue::Error::Version, &"x".repeat(513)).is_none());
+        assert!(prepared_playback::version_failure(&queue::Error::Version, "").is_none());
+        assert!(
+            prepared_playback::version_failure(&queue::Error::Version, &"x".repeat(513)).is_none()
+        );
         assert_eq!(
-            version_failure(&queue::Error::Version, "valid-other-version"),
+            prepared_playback::version_failure(&queue::Error::Version, "valid-other-version"),
             Some(queue::Unavailable::VersionChanged)
         );
         assert_eq!(
@@ -2353,9 +2062,13 @@ mod tests {
             q.replace_many(vec![track; 500]).unwrap();
             q.set_repeat(repeat).unwrap();
             for index in 0..500 {
-                let next =
-                    preparation_failure(&mut q, Some(queue::Unavailable::Missing), true, true)
-                        .unwrap();
+                let next = prepared_playback::preparation_failure(
+                    &mut q,
+                    Some(queue::Unavailable::Missing),
+                    true,
+                    true,
+                )
+                .unwrap();
                 assert_eq!(next.is_some(), index < 499);
             }
             assert!(q.ended());

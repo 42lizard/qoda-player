@@ -239,17 +239,17 @@ async fn recover(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use qoda_core::{SourceId, TrackRef};
     use qoda_provider::{CatalogPage, Library, PreparedMedia, ProviderFuture, Track};
     use std::{collections::VecDeque, sync::Mutex};
-    enum Answer {
+    pub(crate) enum Answer {
         Error(ProviderError),
         Version(&'static str),
         Pending,
     }
-    struct Fixture {
+    pub(crate) struct Fixture {
         track: Track,
         answers: Mutex<VecDeque<Answer>>,
     }
@@ -358,7 +358,7 @@ mod tests {
             })
         }
     }
-    fn fixture(answers: Vec<Answer>) -> (queue::Queue, Arc<Fixture>) {
+    pub(crate) fn fixture(answers: Vec<Answer>) -> (queue::Queue, Arc<Fixture>) {
         let track = Track {
             reference: TrackRef {
                 source: SourceId::new(),
@@ -553,67 +553,6 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(!proxy.failed().await);
-        proxy.revoke().await;
-    }
-    #[tokio::test]
-    async fn refreshed_synthetic_stream_loads_at_retained_position_without_another_visit() {
-        let (mut queue, provider) = fixture(vec![Answer::Version("v1")]);
-        let selected = queue.selected();
-        let before = queue.snapshot();
-        let (tx, mut rx) = mpsc::channel(16);
-        let mut controller = Controller::default();
-        controller.begin(work(&queue, 1, false), provider, tx);
-        let (playing, prepared) = finish(&mut controller, &mut rx).await;
-        let prepared = prepared.unwrap();
-        queue
-            .update_selected(prepared.media.track, &prepared.media.version)
-            .unwrap();
-        let proxy = crate::proxy::Proxy::start().await.unwrap();
-        let url = proxy.grant(prepared.media.stream).await;
-        let player = crate::player::Player::test_output("null").unwrap();
-        player
-            .load_prepared(crate::player::Load {
-                generation: 1,
-                url,
-                position: queue.position(),
-                gain: prepared.gain,
-                source: None,
-                description: None,
-                chain: false,
-                output: Some(crate::output::Selection::Desktop),
-                playing,
-            })
-            .unwrap();
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            let audio = player.status();
-            if audio.generation == 1 && audio.entry_ready {
-                assert!(audio.paused && audio.error.is_none());
-                break;
-            }
-            assert!(tokio::time::Instant::now() < deadline, "{audio:?}");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        // Explicit Resume on null output confirms the retained start option,
-        // after first verifying recovery itself left paused intent intact.
-        player.send(crate::player::Command::Pause(false));
-        loop {
-            let audio = player.status();
-            if let Some(position) = audio.position_seconds {
-                assert!(position >= 0.9, "Recovery restarted from zero: {audio:?}");
-                break;
-            }
-            assert!(tokio::time::Instant::now() < deadline, "{audio:?}");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(!queue.confirm_presented().unwrap());
-        assert_eq!(queue.selected(), selected);
-        assert_eq!(queue.position(), 1.0);
-        assert_eq!(
-            queue.snapshot().previous_available,
-            before.previous_available
-        );
-        assert_eq!(queue.snapshot().session, before.session);
         proxy.revoke().await;
     }
 }

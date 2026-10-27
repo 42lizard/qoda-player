@@ -31,8 +31,8 @@ grant revocation and explicit paused intent. The final desktop liveness check ha
 no intervening await before Queue mutation. Queue remains the authority for
 membership, current occurrence, visits and navigation. Player, gapless, recovery
 and proxy retain their existing native and provider implementation. The
-coordinator dispatches remaining actions, prepares selected media, publishes the
-resulting state and requests durable checkpoints. `Desktop::complete` acknowledges
+coordinator dispatches remaining actions, delegates selected media preparation,
+publishes the resulting state and requests durable checkpoints. `Desktop::complete` acknowledges
 the resulting error or success after that processing; Quit acknowledges its
 shutdown snapshot.
 
@@ -45,6 +45,36 @@ coordinator and multiplex worker report failures through one generation-aware
 operation. It classifies and retires an uncommitted future under one state lock;
 duplicate or late reports for retired input are ignored. Current or committed
 input failures still cancel the stream explicitly.
+
+## Selected prepared playback
+
+Selected prepared playback owns ordinary preparation tasks, result identity,
+automatic-progression policy, pinned recovery integration and completion through
+version verification, stream grant and native load. Command admission still owns
+validation and buffered-edit reset. Queue remains authoritative for membership,
+nominal presentation and visits; speculative successor preparation remains with
+gapless. Ordinary preparation starts a fresh recovery budget, while recovery of
+the same visit retains its bounded budget and pinned media version.
+
+The coordinator supplies the current account, Queue, output epoch and playback
+intent when crossing this interface. Completion must still own that selection
+and epoch before granting access or loading output; a consumed result cannot be
+applied twice. Pausing ordinary preparation permits a valid paused load. Cancelling
+recovery, replacing the selection or changing account/output invalidates old work.
+Tests use the existing synthetic provider adapter and native null output through
+the same initiation and completion interface as the coordinator.
+
+## Displayed track catalog
+
+The displayed track catalog owns its typed page, request lifetime, catalog revision
+and cache provenance. Browse start, accepted refresh and invalidation are the only
+ways to change that state. Socket serialization is output from that ownership,
+not the source from which playback commands reconstruct metadata. Single-track
+selection retains the existing album-detail fallback; bulk selection additionally
+requires account/revision fences and preserves displayed order atomically.
+Existing live/cached access and metadata-cache policy remain responsible for
+source permission and refresh behavior. Album, artist, search and playlist
+workflows retain their own ownership.
 
 ## Source and pacman launch
 

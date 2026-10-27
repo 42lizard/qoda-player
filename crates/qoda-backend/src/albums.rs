@@ -469,6 +469,12 @@ mod tests {
         assert!(c.view.selected.is_some() && !c.view.busy);
         assert!(c.tracks(&request).is_err());
         assert!(c.track(&reference).is_none());
+        let track_request = json!({"source":reference.source,"key":reference.key});
+        assert!(
+            crate::catalog::Controller::default()
+                .track(&c, &track_request)
+                .is_err()
+        );
         c.apply(
             Reply {
                 auth: 1,
@@ -499,6 +505,11 @@ mod tests {
         current["expected_revision"] = json!("snapshot-b");
         assert_eq!(c.tracks(&current).unwrap().len(), 2);
         assert!(c.track(&reference).is_some());
+        assert!(
+            crate::catalog::Controller::default()
+                .track(&c, &track_request)
+                .is_ok()
+        );
         c.apply(
             Reply {
                 auth: 1,
