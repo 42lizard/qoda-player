@@ -148,18 +148,19 @@ mod tests {
         provider: Arc<Provider>,
     }
     impl Environment {
-        async fn new(position: f64) -> Self {
+        async fn new() -> Self {
             let provider = Provider::new();
             let mut queue = provider.queue();
             queue.confirm_presented().unwrap();
-            let player = player::Player::test_output("null").unwrap();
+            let player =
+                player::Player::test_options("null", &[("ao-null-untimed", "no".into())]).unwrap();
             let proxy = proxy::Proxy::start().await.unwrap();
             let media = provider
                 .prepare(provider.source, "a".to_owned().try_into().unwrap())
                 .await
                 .unwrap();
             let url = proxy.grant(media.stream).await;
-            player.send(player::Command::Load(1, url.clone(), position));
+            player.send(player::Command::Load(1, url.clone(), 0.0));
             wait(&player, |s| s.entry_ready).await;
             let mut epochs = gapless::Epochs::default();
             epochs.reset().unwrap();
@@ -206,7 +207,7 @@ mod tests {
     }
     #[tokio::test]
     async fn preparation_staging_failure_resets_output_and_keeps_the_selected_visit() {
-        let mut env = Environment::new(0.0).await;
+        let mut env = Environment::new().await;
         let selected = env.queue.selected();
         let visit = env.queue.visit();
         let reply = env.prepare(env.provider.clone()).await;
@@ -223,7 +224,7 @@ mod tests {
     }
     #[tokio::test]
     async fn stale_preparation_completion_leaves_output_and_its_grant_untouched() {
-        let mut env = Environment::new(0.0).await;
+        let mut env = Environment::new().await;
         let reply = env.prepare(env.provider.clone()).await;
         env.gapless.invalidate();
         let before = serde_json::to_value(&env.queue).unwrap();
@@ -239,7 +240,7 @@ mod tests {
     #[tokio::test]
     async fn unavailable_preparation_marks_only_the_successor_without_resetting_current_output() {
         use crate::recovery::tests::{Answer, fixture};
-        let mut env = Environment::new(0.0).await;
+        let mut env = Environment::new().await;
         let (_, missing) = fixture(vec![Answer::Error(
             qoda_provider::ProviderError::MissingTrack,
         )]);
@@ -261,12 +262,23 @@ mod tests {
     }
     #[tokio::test]
     async fn paused_barrier_snapshot_retains_position_without_new_confirmation() {
-        let mut env = Environment::new(0.25).await;
+        let mut env = Environment::new().await;
         env.confirmed = None;
         let visit = env.queue.visit();
+        env.player.send(player::Command::Pause(false));
+        wait(&env.player, |s| {
+            !s.paused && s.position_seconds.is_some_and(|p| p > 0.1)
+        })
+        .await;
+        env.player.send(player::Command::Pause(true));
+        wait(&env.player, |s| {
+            s.paused && s.position_seconds.is_some_and(|p| p > 0.1)
+        })
+        .await;
+        let paused_position = env.player.status().position_seconds.unwrap();
         assert_eq!(env.queue.position(), 0.0);
         env.runtime().after_failure().await.unwrap();
-        assert!(env.queue.position() >= 0.2 && env.queue.position() <= 0.3);
+        assert!((env.queue.position() - paused_position).abs() < 0.05);
         assert!(env.confirmed.is_none());
         assert_eq!(env.queue.visit(), visit);
         assert!(!env.playing);
