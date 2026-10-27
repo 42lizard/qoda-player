@@ -1,3 +1,4 @@
+mod account;
 mod activation;
 mod albums;
 mod alsa_guard;
@@ -32,7 +33,7 @@ use player::{Command, Player};
 use qoda_core::SourceId;
 #[cfg(test)]
 use qoda_core::TrackRef;
-use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider};
+use qoda_provider::{BrowserPin, Credential, MusicProvider};
 use serde_json::{Value, json};
 use session_commands::check_queue;
 #[cfg(test)]
@@ -82,11 +83,7 @@ enum Event {
     OutputDevices(Vec<output::Device>),
     CacheDone(u64, bool, Result<(), String>),
     MetadataCacheDone(u64, Result<(), String>),
-    Connected(
-        u64,
-        Result<(PlexProvider, HashMap<String, SourceId>), ConnectError>,
-        Credential,
-    ),
+    Connected(u64, Result<account::Connected, ConnectError>, Credential),
     Vault(vault::Reply),
     Page(catalog::Reply),
     Media(u64, Result<gain::Prepared, gain::PrepareError>),
@@ -144,9 +141,11 @@ fn parse_identities(
     }
     Ok(ids)
 }
-fn identities() -> Result<HashMap<String, SourceId>, qoda_provider::ProviderError> {
+fn identities(
+    path: Option<&std::path::Path>,
+) -> Result<HashMap<String, SourceId>, qoda_provider::ProviderError> {
     use qoda_provider::ProviderError::InvalidReply;
-    let path = identities_path().ok_or(InvalidReply)?;
+    let path = path.ok_or(InvalidReply)?;
     let directory = cache_files::Directory::open(path.parent().ok_or(InvalidReply)?)
         .map_err(|_| InvalidReply)?;
     let Some(file) = directory
@@ -161,8 +160,11 @@ fn identities() -> Result<HashMap<String, SourceId>, qoda_provider::ProviderErro
         .map_err(|_| InvalidReply)?;
     parse_identities(&bytes)
 }
-fn save_identities(ids: &HashMap<String, SourceId>) -> std::io::Result<()> {
-    let path = identities_path().ok_or_else(|| std::io::Error::other("No config directory"))?;
+fn save_identities(
+    path: Option<&std::path::Path>,
+    ids: &HashMap<String, SourceId>,
+) -> std::io::Result<()> {
+    let path = path.ok_or_else(|| std::io::Error::other("No config directory"))?;
     let bytes = serde_json::to_vec(ids)?;
     parse_identities(&bytes).map_err(std::io::Error::other)?;
     cache_files::Directory::open(path.parent().unwrap())
@@ -222,21 +224,6 @@ async fn connection_io(
             }
         }
     }
-}
-fn connect(
-    tx: mpsc::Sender<Event>,
-    generation: u64,
-    credential: Credential,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let r = match identities() {
-            Ok(ids) => PlexProvider::connect(credential.clone(), ids)
-                .await
-                .map_err(ConnectError::Provider),
-            Err(_) => Err(ConnectError::Identity),
-        };
-        let _ = tx.send(Event::Connected(generation, r, credential)).await;
-    })
 }
 fn record_clock(
     queue: &mut queue::Queue,
@@ -371,29 +358,6 @@ fn storage_result(state: &mut Value, result: Result<Option<storage::Error>, stor
         }
     }
 }
-fn keyring_request(
-    vault: &mpsc::Sender<vault::Request>,
-    state: &mut Value,
-    generation: &mut u64,
-    auth_generation: u64,
-    operation: vault::Operation,
-    action: &str,
-) -> Result<(), &'static str> {
-    let next = generation
-        .checked_add(1)
-        .ok_or("Keyring generation exhausted")?;
-    vault
-        .try_send(vault::Request {
-            generation: next,
-            auth_generation,
-            operation,
-        })
-        .map_err(|_| "Keyring worker is busy or unavailable; retry.")?;
-    *generation = next;
-    state["sign_in"]["keyring_action"] = json!(action);
-    state["sign_in"]["message"] = json!("Waiting for desktop keyring. Unlock it if prompted.");
-    Ok(())
-}
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     match run().await {
@@ -495,7 +459,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut handled_end = None;
     let mut playlists = playlists::Controller::default();
     let metadata = metadata_cache::Cache::start(metadata_cache::Paths::discover()).await;
-    let mut cached_discovery = metadata
+    let cached_discovery = metadata
         .discovery()
         .await
         .filter(|discovery| !discovery.libraries.is_empty());
@@ -551,9 +515,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut search = search::Controller::default();
     state["search"] = search.view();
     let (updates, rx) = watch::channel(state.clone());
-    let vault = vault::start(tx.clone());
-    let mut vault_generation = 0_u64;
-    let mut current_credential: Option<Credential> = None;
+    let mut access = account::Controller::new(
+        cached_discovery,
+        vault::start(tx.clone()),
+        identities_path(),
+        Arc::new(account::Plex),
+    );
     let mut cache_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut metadata_task: Option<tokio::task::JoinHandle<()>> = None;
     let permits = Arc::new(tokio::sync::Semaphore::new(16));
@@ -574,10 +541,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
     });
-    let mut provider: Option<Arc<dyn MusicProvider>> = None;
     let mut preparation = prepared_playback::Controller::default();
-    let mut auth_task: Option<tokio::task::JoinHandle<()>> = None;
-    let mut auth_generation = 0_u64;
     let mut epochs = gapless::Epochs::default();
     let mut gapless = gapless::Controller::default();
     state["recovery"] = json!(preparation.recovering());
@@ -611,11 +575,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut desktop_task: Option<tokio::task::JoinHandle<()>> = None;
     updates.send_replace(state.clone());
     if let Some(c) = credential {
-        auth_generation = auth_generation
-            .checked_add(1)
-            .ok_or("Generation exhausted")?;
-        reporting.bind(auth_generation, None);
-        auth_task = Some(connect(tx.clone(), auth_generation, c));
+        access.start(c, tx.clone())?;
+        access.publish(&mut state, &mut reporting);
         state["status"] = json!("Connecting Plex");
         updates.send_replace(state.clone());
     }
@@ -648,11 +609,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let observed_at=std::time::Instant::now();
                 desktop_clock.observe(&audio,observed_at);
                 let clock_stale=desktop_clock.stale(&audio,observed_at);
-                reporting.bind(auth_generation,provider.clone().map(|p|p as Arc<dyn MusicProvider>));
+                reporting.bind(access.generation(),access.provider().map(|p|p as Arc<dyn MusicProvider>));
                 reporting.fence_generation(epochs.current);
                 reporting.observe_stop(&audio);
                 reporting.observe(reporting::Observation::capture(&queue,&audio,reporting::Context {
-                    account:auth_generation,generation:epochs.current,confirmed:presented_generation,
+                    account:access.generation(),generation:epochs.current,confirmed:presented_generation,
                     failed_or_stale:stream_failed || clock_stale,
                 }),observed_at);
                 let reporting_view=reporting.view();
@@ -678,7 +639,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                     state["revision"] = json!(revision.to_string());
-                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,provider.is_some(),desired_playing,stream_failed || clock_stale).with_ui(!ui_peers.is_empty() || ui_launcher.available());
+                    let view=mpris::View::capture(&queue,&audio,epochs.current,presented_generation,access.provider().is_some(),desired_playing,stream_failed || clock_stale).with_ui(!ui_peers.is_empty() || ui_launcher.available());
                     state["presentation"]=view.presentation();
                     state["gapless"]=json!(gapless.view);
                     state["artwork_cache"]=artwork.view().await;
@@ -749,7 +710,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &player.status(),
                 epochs.current,
                 presented_generation,
-                provider.is_some(),
+                access.provider().is_some(),
                 desired_playing,
                 last_stream_failed || last_clock_stale,
             )
@@ -778,9 +739,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             let mut context = session_commands::Context {
                 instance: &instance,
-                account: auth_generation,
-                connected: provider.is_some(),
-                credential: current_credential.is_some(),
+                account: access.generation(),
+                connected: access.provider().is_some(),
+                credential: access.has_credential(),
                 failed_or_stale: last_stream_failed || last_clock_stale,
                 can_raise: !ui_peers.is_empty() || ui_launcher.available(),
                 state: &mut state,
@@ -815,14 +776,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let seeked = command_effects.seeked;
         match event {
             Event::Search(reply) => {
-                search.accept(reply, auth_generation)?;
+                search.accept(reply, access.generation())?;
             }
             Event::StreamFailed(error, playing) => {
                 preparation
                     .interrupted(
                         error,
                         playing,
-                        provider.clone().map(|p| p as Arc<dyn MusicProvider>),
+                        access.provider().map(|p| p as Arc<dyn MusicProvider>),
                         tx.clone(),
                         &mut prepared_playback::Runtime {
                             queue: &mut queue,
@@ -835,7 +796,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             state: &mut state,
                             output: &output_settings,
                             gain: &gain_settings,
-                            account: auth_generation,
+                            account: access.generation(),
                         },
                     )
                     .await?;
@@ -855,7 +816,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             state: &mut state,
                             output: &output_settings,
                             gain: &gain_settings,
-                            account: auth_generation,
+                            account: access.generation(),
                         },
                     )
                     .await;
@@ -957,7 +918,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::MetadataCacheDone(g, result) => {
                 metadata_task = None;
                 state["metadata_cache_action"] = Value::Null;
-                if g == auth_generation {
+                if g == access.generation() {
                     let clearing = state["status"]
                         == "Metadata cache clearing. Browse again to load catalog pages.";
                     match result {
@@ -982,23 +943,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     state["error"] = json!(error);
                 }
                 if clear
-                    && g == auth_generation
-                    && let Some(provider) = provider.clone()
+                    && g == access.generation()
+                    && let Some(provider) = access.provider()
                 {
                     let refs = albums.artwork_references();
                     artwork.publish(provider, refs).await;
                 }
             }
             Event::Albums(reply) => {
-                if albums.apply(reply, auth_generation)
-                    && let Some(provider) = provider.clone()
+                if albums.apply(reply, access.generation())
+                    && let Some(provider) = access.provider()
                 {
                     albums.view.covers =
                         artwork.publish(provider, albums.artwork_references()).await;
                 }
             }
             Event::Playlists(reply) => {
-                playlists.apply(reply, auth_generation);
+                playlists.apply(reply, access.generation());
             }
             Event::Advance(g) if g == epochs.current => {
                 automatic_next = true;
@@ -1017,7 +978,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::Request(v) => {
-                let catalog_access = offline::access(provider.clone(), cached_discovery.clone());
+                let catalog_access = access.catalog_access();
                 if v["instance"] != instance {
                     continue;
                 }
@@ -1058,7 +1019,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 };
                                 let disk = artwork.disk.clone();
                                 let tx = tx.clone();
-                                let g = auth_generation;
+                                let g = access.generation();
                                 state["cache_action"] =
                                     json!(if clear { "clear" } else { "budget" });
                                 cache_task = Some(tokio::spawn(async move {
@@ -1093,13 +1054,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     json!("Choose a metadata target from 0 to 1024 MiB.");
                             } else {
                                 if clear || mib == Some(0) {
-                                    cached_discovery = None;
-                                    let live = provider
+                                    access.forget_cached_discovery();
+                                    let live = access
+                                        .provider()
                                         .as_ref()
                                         .map(|p| p.libraries())
                                         .unwrap_or_default();
                                     state["libraries"] = offline::library_views(&live, &live);
-                                    state["discovery"] = json!({"origin":if provider.is_some() {"live"} else {"none"},"stale":provider.is_none(),"incomplete":true,"message":"Offline library cache cleared or disabled. Reconnect Plex to save library discovery again."});
+                                    state["discovery"] = json!({"origin":if access.provider().is_some() {"live"} else {"none"},"stale":access.provider().is_none(),"incomplete":true,"message":"Offline library cache cleared or disabled. Reconnect Plex to save library discovery again."});
                                 }
                                 let epoch = if clear || mib == Some(0) {
                                     catalog.invalidate()?;
@@ -1115,7 +1077,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 };
                                 let cache = metadata.clone();
                                 let tx = tx.clone();
-                                let g = auth_generation;
+                                let g = access.generation();
                                 state["metadata_cache_action"] =
                                     json!(if clear { "clear" } else { "budget" });
                                 metadata_task = Some(tokio::spawn(async move {
@@ -1163,146 +1125,46 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .into();
                         }
                     }
-                    "reconnect" => {
-                        let result = check_queue(&queue, &v).map_err(|error| error.to_string());
-                        if let Err(error) = result {
-                            state["error"] = json!(error);
-                        } else if v["account_epoch"].as_str()
-                            != Some(auth_generation.to_string().as_str())
-                        {
-                            state["error"] = json!(
-                                "The account changed. Review the connection before retrying."
-                            );
-                        } else if let Some(credential) = current_credential.clone() {
-                            if let Some(task) = auth_task.take() {
-                                task.abort();
-                            }
-                            auth_generation = auth_generation
-                                .checked_add(1)
-                                .ok_or("Account generation exhausted")?;
-                            preparation.cancel();
-                            reporting.bind(auth_generation, None);
-                            catalog.invalidate()?;
-                            epochs.reset()?;
-                            gapless.invalidate();
-                            player.invalidate_load(epochs.current);
-                            player.send(Command::Pause(true));
-                            player.send(Command::Stop);
-                            proxy.revoke().await;
-                            artwork.revoke(false).await;
-                            search.invalidate()?;
-                            albums.invalidate();
-                            playlists.invalidate();
-                            provider = None;
-                            cached_discovery = metadata.discovery().await;
-                            state["libraries"] = offline::library_views(
-                                &cached_discovery
-                                    .as_ref()
-                                    .map(|d| d.libraries.clone())
-                                    .unwrap_or_default(),
-                                &[],
-                            );
-                            state["discovery"] = json!({"origin":"offline","stale":true,"incomplete":true,"message":"Reconnecting Plex · cached browsing remains read-only; playback stays paused."});
-                            state["sign_in"]["connected"] = json!(false);
-                            desired_playing = false;
-                            state["intent"] = json!("paused");
-                            state["audio"] = Value::Null;
-                            state["status"] = json!(
-                                "Reconnecting Plex; choose Resume explicitly after connection."
-                            );
-                            auth_task = Some(connect(tx.clone(), auth_generation, credential));
-                        } else {
-                            state["error"] =
-                                json!("Restore sign-in or connect Plex before reconnecting.");
-                        }
-                    }
-                    "restore_signin" => {
-                        if provider.is_some() || !state["sign_in"]["keyring_action"].is_null() {
-                            state["error"] = json!(
-                                "Disconnect and wait for the current keyring action before restoring sign-in."
-                            );
-                        } else {
-                            if let Some(task) = auth_task.take() {
-                                task.abort();
-                            }
-                            auth_generation = auth_generation
-                                .checked_add(1)
-                                .ok_or("Generation exhausted")?;
-                            preparation.cancel();
-                            reporting.bind(auth_generation, None);
-                            state["signin_url"] = Value::Null;
-                            state["status"] = json!("Restoring saved Plex sign-in");
-                            if let Err(error) = keyring_request(
-                                &vault,
-                                &mut state,
-                                &mut vault_generation,
-                                auth_generation,
-                                vault::Operation::Restore,
-                                "restore",
-                            ) {
-                                state["error"] = json!(error);
-                            }
-                        }
-                    }
-                    "save_signin" => {
-                        if !state["sign_in"]["keyring_action"].is_null() {
-                            state["error"] =
-                                json!("Wait for the current keyring action to finish.");
-                        } else if let Some(credential) = current_credential.clone() {
-                            if let Err(error) = keyring_request(
-                                &vault,
-                                &mut state,
-                                &mut vault_generation,
-                                auth_generation,
-                                vault::Operation::Save(credential),
-                                "save",
-                            ) {
-                                state["error"] = json!(error);
-                            }
-                        } else {
-                            state["error"] = json!("Connect Plex before saving sign-in.");
-                        }
-                    }
-                    "auth_start" => {
-                        if provider.is_some() {
-                            state["error"] = json!("Disconnect before changing Plex accounts");
-                            revision = revision.checked_add(1).ok_or("Revision exhausted")?;
-                            state["revision"] = json!(revision.to_string());
-                            updates.send_replace(state.clone());
-                            continue;
-                        }
-                        search.invalidate()?;
-                        if let Some(task) = auth_task.take() {
-                            task.abort();
-                        }
-                        state["signin_url"] = Value::Null;
-                        auth_generation = auth_generation
-                            .checked_add(1)
-                            .ok_or("Generation exhausted")?;
-                        preparation.cancel();
-                        reporting.bind(auth_generation, None);
-                        let g = auth_generation;
-                        let tx = tx.clone();
-                        state["status"] = json!("Starting Plex sign-in");
-                        auth_task = Some(tokio::spawn(async move {
-                            let r =
-                                BrowserPin::begin(format!("qoda-player-{}", uuid::Uuid::new_v4()))
-                                    .await;
-                            let _ = tx.send(Event::Pin(g, r)).await;
-                        }));
+                    "reconnect" | "restore_signin" | "save_signin" | "auth_start"
+                    | "disconnect" | "forget_signin" => {
+                        access
+                            .command(
+                                &v,
+                                &mut account::Runtime {
+                                    state: &mut state,
+                                    tx: &tx,
+                                    queue: &mut queue,
+                                    player: &player,
+                                    preparation: &mut preparation,
+                                    reporting: &mut reporting,
+                                    catalog: &mut catalog,
+                                    epochs: &mut epochs,
+                                    gapless: &mut gapless,
+                                    proxy: &proxy,
+                                    artwork: &artwork,
+                                    search: &mut search,
+                                    albums: &mut albums,
+                                    playlists: &mut playlists,
+                                    metadata: &metadata,
+                                    archive: &mut archive,
+                                    purge_epoch: &mut purge_epoch,
+                                    desired_playing: &mut desired_playing,
+                                },
+                            )
+                            .await?;
                     }
                     "playlist_list" | "playlist_open" | "playlist_refresh" | "playlist_create"
                     | "playlist_edit" => {
                         if matches!(v["op"].as_str(), Some("playlist_create" | "playlist_edit"))
                             && v["account_epoch"].as_str()
-                                != Some(auth_generation.to_string().as_str())
+                                != Some(access.generation().to_string().as_str())
                         {
                             state["error"] = json!(
                                 "The account changed. Refresh the app before editing a playlist."
                             );
-                        } else if let Some(provider) = provider.clone() {
+                        } else if let Some(provider) = access.provider() {
                             if let Err(error) =
-                                playlists.command(&v, provider, auth_generation, tx.clone())
+                                playlists.command(&v, provider, access.generation(), tx.clone())
                             {
                                 state["error"] = json!(error);
                             }
@@ -1314,7 +1176,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "album_list" | "album_open" | "artist_list" | "artist_open" => {
                         if let Some(provider) = catalog_access.clone() {
                             if let Err(error) =
-                                albums.command(&v, provider, auth_generation, tx.clone())
+                                albums.command(&v, provider, access.generation(), tx.clone())
                             {
                                 state["error"] = json!(error);
                             } else if v["op"] != "album_open" {
@@ -1328,7 +1190,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(provider) = catalog_access.clone() {
                             if let Err(error) = search.begin(
                                 v["query"].as_str().unwrap_or(""),
-                                auth_generation,
+                                access.generation(),
                                 provider,
                                 metadata.clone(),
                                 tx.clone(),
@@ -1412,7 +1274,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         state["intent"] = json!("paused");
                     }
                     "resume" => {
-                        if provider.is_some() {
+                        if access.provider().is_some() {
                             desired_playing = true;
                             if gapless.view.phase == "review" {
                                 gapless.view.phase = "idle";
@@ -1444,7 +1306,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "archive_page" | "archive_export" | "archive_clear" | "archive_retention" => {
                         let result = if v["account_epoch"].as_str()
-                            != Some(auth_generation.to_string().as_str())
+                            != Some(access.generation().to_string().as_str())
                         {
                             Err("The account changed; review the archive before retrying.")
                         } else {
@@ -1469,231 +1331,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             state["error"] = json!(error);
                         }
                     }
-                    "disconnect" | "forget_signin" => {
-                        let forget = v["op"] == "forget_signin";
-                        if let Some(task) = auth_task.take() {
-                            task.abort();
-                        }
-                        auth_generation = auth_generation
-                            .checked_add(1)
-                            .ok_or("Generation exhausted")?;
-                        preparation.cancel();
-                        reporting.bind(auth_generation, None);
-                        catalog.invalidate()?;
-                        epochs.reset()?;
-                        gapless.invalidate();
-                        provider = None;
-                        cached_discovery = None;
-                        state["discovery"] = json!({"origin":"none","stale":true,"incomplete":true,"message":"Disconnected; cached library discovery removed."});
-                        search.invalidate()?;
-                        playlists.invalidate();
-                        albums.invalidate();
-                        player.send(Command::Pause(true));
-                        player.send(Command::Stop);
-                        tokio::join!(artwork.revoke(true), metadata.clear());
-                        if let Err(error) = archive.clear(true).await {
-                            state["error"] = json!(error);
-                        }
-                        queue = queue.empty_session();
-                        purge_epoch = purge_epoch
-                            .checked_add(1)
-                            .ok_or("Cleanup generation exhausted")?;
-                        state["storage"]["cleanup_pending"] = json!(true);
-                        current_credential = None;
-                        state["sign_in"]["connected"] = json!(false);
-                        state["sign_in"]["can_save"] = json!(false);
-                        desired_playing = false;
-                        player.send(Command::Pause(true));
-                        player.send(Command::Stop);
-                        proxy.revoke().await;
-                        state["libraries"] = json!([]);
-                        state["selection"] = Value::Null;
-                        state["audio"] = Value::Null;
-                        state["signin_url"] = Value::Null;
-                        state["intent"] = json!("paused");
-                        state["status"] = json!("Disconnected");
-                        if forget
-                            && state["sign_in"]["keyring_action"] != "forget"
-                            && let Err(error) = keyring_request(
-                                &vault,
-                                &mut state,
-                                &mut vault_generation,
-                                auth_generation,
-                                vault::Operation::Forget,
-                                "forget",
-                            )
-                        {
-                            state["error"] = json!(error);
-                        }
-                    }
                     _ => {}
                 }
             }
-            Event::Pin(g, r) if g == auth_generation => match r {
-                Ok(pin) => {
-                    state["signin_url"] = json!(pin.url);
-                    state["status"] = json!("Finish sign-in in your browser");
-                    let tx = tx.clone();
-                    auth_task = Some(tokio::spawn(async move {
-                        let until = tokio::time::Instant::now()
-                            + std::time::Duration::from_secs(pin.expires_in);
-                        while tokio::time::Instant::now() < until {
-                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                            match pin.poll().await {
-                                Ok(Some(c)) => {
-                                    let _ = tx.send(Event::Credential(g, Ok(c))).await;
-                                    return;
-                                }
-                                Ok(None) => {}
-                                Err(e) => {
-                                    let _ = tx.send(Event::Credential(g, Err(e))).await;
-                                    return;
-                                }
-                            }
-                        }
-                        let _ = tx
-                            .send(Event::Credential(
-                                g,
-                                Err(qoda_provider::ProviderError::SignInRequired),
-                            ))
-                            .await;
-                    }));
-                }
-                Err(e) => state["error"] = json!(e.to_string()),
-            },
-            Event::Credential(g, r) if g == auth_generation => match r {
-                Ok(c) => {
-                    state["signin_url"] = Value::Null;
-                    state["status"] = json!("Connecting Plex");
-                    auth_task = Some(connect(tx.clone(), g, c));
-                }
-                Err(e) => state["error"] = json!(e.to_string()),
-            },
-            Event::Connected(g, r, credential) if g == auth_generation => match r {
-                Ok((p, ids)) => {
-                    // A verified account replaces all cached browse authority. Fence
-                    // in-flight cached results before publishing its source allowlist.
-                    catalog.invalidate()?;
-                    albums.invalidate();
-                    playlists.invalidate();
-                    artwork.revoke(true).await;
-                    let live = p.libraries();
-                    let account = p.account_scope().to_owned();
-                    if let Err(error) = archive.bind(account.clone()).await {
-                        state["error"] = json!(error);
-                    }
-                    let snapshot = offline::reconcile(
-                        cached_discovery.as_ref(),
-                        account,
-                        live.clone(),
-                        p.unavailable_sources(),
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(0, |d| d.as_secs() as i64),
-                    );
-                    let mut libraries = snapshot.libraries.clone();
-                    cached_discovery = None;
-                    match metadata.install_discovery(snapshot.clone()).await {
-                        Ok(()) => cached_discovery = Some(snapshot),
-                        Err(error) => {
-                            state["error"] = json!(error);
-                            libraries = live.clone();
-                        }
-                    }
-                    let missing = libraries.len().saturating_sub(live.len());
-                    state["discovery"] = json!({"origin":if libraries.is_empty() && p.unavailable_server_count()==0 {"none"} else if live.is_empty() {"offline"} else if p.unavailable_server_count()>0 {"partial"} else {"live"},"stale":missing>0,"incomplete":true,"message":format!("{} live libraries · {} cached libraries · {} servers unavailable. Cached sources are read-only; catalog coverage may be incomplete.",live.len(),missing,p.unavailable_server_count())});
-                    state["libraries"] = offline::library_views(&libraries, &live);
-                    if save_identities(&ids).is_err() {
-                        state["error"] = json!("Library identities could not be saved");
-                    }
-                    search.invalidate()?;
-                    state["status"] = json!(if libraries.is_empty() {
-                        "No available music libraries. Reconnect after server access changes."
-                    } else {
-                        "Choose a library; cached sources require a successful reconnect for playback."
-                    });
-                    provider = if live.is_empty() {
-                        None
-                    } else {
-                        Some(Arc::new(p))
-                    };
-                    current_credential = Some(credential);
-                    state["sign_in"]["connected"] = json!(provider.is_some());
-                    state["sign_in"]["can_save"] = json!(true);
-                    if state["sign_in"]["saved"] != "present" {
-                        state["sign_in"]["message"] =
-                            json!("Connected for this session. Save sign-in to reconnect later.");
-                    }
-                }
-                Err(e) => {
-                    if matches!(
-                        e,
-                        ConnectError::Provider(
-                            qoda_provider::ProviderError::AccessDenied
-                                | qoda_provider::ProviderError::SignInRequired
-                        )
-                    ) {
-                        preparation.cancel();
-                        reporting.bind(auth_generation, None);
-                        catalog.invalidate()?;
-                        albums.invalidate();
-                        search.invalidate()?;
-                        metadata.clear().await;
-                        let _ = archive.clear(true).await;
-                        provider = None;
-                        current_credential = None;
-                        state["sign_in"]["connected"] = json!(false);
-                        state["sign_in"]["can_save"] = json!(false);
-                        cached_discovery = None;
-                        state["libraries"] = json!([]);
-                        state["discovery"] = json!({"origin":"none","stale":true,"incomplete":true,"message":"Plex denied account access; cached library discovery was removed."});
-                    }
-                    state["status"] = json!("Plex connection failed");
-                    state["error"] = json!(e.to_string());
-                }
-            },
-            Event::Vault(reply) if reply.generation == vault_generation => {
-                state["sign_in"]["keyring_action"] = Value::Null;
-                match reply.result {
-                    Ok(vault::Outcome::Saved) => {
-                        state["sign_in"]["saved"] = json!("present");
-                        state["sign_in"]["message"] =
-                            json!("Plex sign-in saved in the desktop keyring.");
-                    }
-                    Ok(vault::Outcome::Forgotten) => {
-                        state["sign_in"]["saved"] = json!("missing");
-                        state["sign_in"]["message"] =
-                            json!("Qoda's saved Plex sign-in was removed.");
-                    }
-                    Ok(vault::Outcome::Restored(credential)) => {
-                        state["sign_in"]["saved"] = json!(if credential.is_some() {
-                            "present"
-                        } else {
-                            "missing"
-                        });
-                        if reply.auth_generation == auth_generation {
-                            if let Some(credential) = credential {
-                                state["status"] = json!("Connecting saved Plex account");
-                                state["sign_in"]["message"] =
-                                    json!("Saved sign-in restored. Playback stays paused.");
-                                auth_task = Some(connect(tx.clone(), auth_generation, credential));
-                            } else {
-                                state["status"] = json!("No saved Plex sign-in");
-                                state["sign_in"]["message"] =
-                                    json!("Connect Plex, then choose Save sign-in.");
-                            }
-                        } else {
-                            state["sign_in"]["message"] =
-                                json!("Saved sign-in checked; the restore request was cancelled.");
-                        }
-                    }
-                    Err(error) => {
-                        state["sign_in"]["saved"] = json!("unknown");
-                        state["error"] = json!(error.to_string());
-                        state["sign_in"]["message"] =
-                            json!("Keyring action did not complete; retry when it is available.");
-                    }
-                }
+            event @ (Event::Pin(..)
+            | Event::Credential(..)
+            | Event::Connected(..)
+            | Event::Vault(..)) => {
+                access
+                    .accept(
+                        event,
+                        &mut account::Runtime {
+                            state: &mut state,
+                            tx: &tx,
+                            queue: &mut queue,
+                            player: &player,
+                            preparation: &mut preparation,
+                            reporting: &mut reporting,
+                            catalog: &mut catalog,
+                            epochs: &mut epochs,
+                            gapless: &mut gapless,
+                            proxy: &proxy,
+                            artwork: &artwork,
+                            search: &mut search,
+                            albums: &mut albums,
+                            playlists: &mut playlists,
+                            metadata: &metadata,
+                            archive: &mut archive,
+                            purge_epoch: &mut purge_epoch,
+                            desired_playing: &mut desired_playing,
+                        },
+                    )
+                    .await?;
             }
             Event::Page(reply) => {
                 catalog.accept(reply, &mut state)?;
@@ -1717,7 +1386,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             state: &mut state,
                             output: &output_settings,
                             gain: &gain_settings,
-                            account: auth_generation,
+                            account: access.generation(),
                         },
                     )
                     .await;
@@ -1731,7 +1400,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .start(
                     track,
                     automatic_next,
-                    provider.clone().map(|p| p as Arc<dyn MusicProvider>),
+                    access.provider().map(|p| p as Arc<dyn MusicProvider>),
                     tx.clone(),
                     &mut prepared_playback::Runtime {
                         queue: &mut queue,
@@ -1744,7 +1413,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         state: &mut state,
                         output: &output_settings,
                         gain: &gain_settings,
-                        account: auth_generation,
+                        account: access.generation(),
                     },
                 )
                 .await?;
@@ -1756,7 +1425,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             && !audio.idle
             && !audio.paused
             && audio.error.is_none()
-            && let Some(provider) = provider.clone()
+            && let Some(provider) = access.provider()
             && let Err(error) = gapless.schedule(
                 &queue,
                 &mut epochs,
@@ -1781,7 +1450,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             &player.status(),
             epochs.current,
             presented_generation,
-            provider.is_some(),
+            access.provider().is_some(),
             desired_playing,
             last_stream_failed || last_clock_stale,
         )
@@ -1806,14 +1475,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state["albums"] = json!(albums.view);
         state["artwork_cache"] = artwork.view().await;
         state["metadata_cache"] = json!(metadata.view());
-        state["sign_in"]["can_reconnect"] = json!(current_credential.is_some());
-        state["sign_in"]["connecting"] =
-            json!(auth_task.as_ref().is_some_and(|task| !task.is_finished()));
-        state["account_epoch"] = json!(auth_generation.to_string());
-        reporting.bind(
-            auth_generation,
-            provider.clone().map(|p| p as Arc<dyn MusicProvider>),
-        );
+        access.publish(&mut state, &mut reporting);
         reporting.fence_generation(epochs.current);
         state["reporting"] = reporting.view();
         let stamp = (queue.durable_stamp(), purge_epoch);

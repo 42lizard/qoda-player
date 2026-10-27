@@ -29,3 +29,5 @@ WidgetClient 1.0 WidgetClient.qml
 QuitState 1.0 QuitState.qml
 
 ArchiveBrowser 1.0 ArchiveBrowser.qml
+BackendState 1.0 BackendState.qml
+BackendConnection 1.0 BackendConnection.qml

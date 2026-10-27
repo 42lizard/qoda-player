@@ -211,15 +211,19 @@ impl Vault {
     }
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
-    struct Fixture {
+    pub(crate) struct Fixture {
         dir: PathBuf,
         vault: Vault,
     }
     impl Fixture {
-        fn new() -> Self {
+        pub(crate) fn worker(&self, events: mpsc::Sender<crate::Event>) -> mpsc::Sender<Request> {
+            start_with(events, self.vault.clone())
+        }
+
+        pub(crate) fn new() -> Self {
             let dir =
                 std::env::temp_dir().join(format!("qoda-vault-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&dir).unwrap();

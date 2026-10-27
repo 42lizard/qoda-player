@@ -20,6 +20,15 @@ TestCase {
         verify(state.accept(envelope("B", "0")));
         compare(state.request("next").instance, "B");
     }
+    function test_shared_envelope_copies_fields_and_preserves_queue_fences() {
+        verify(state.accept(envelope("A", "2")));
+        const fields = {instance: "old", account_epoch: "0", queue_revision: "0", value: 42};
+        const first = state.request("next", fields);
+        compare(first.value, 42); compare(first.instance, "A");
+        compare(first.queue_revision, "18446744073709551614");
+        compare(fields.instance, "old"); compare(fields.queue_revision, "0");
+        verify(first.id !== state.request("next").id);
+    }
     function test_playing_indicator_requires_confirmed_backend_status() {
         let value = envelope("A", "1");
         value.intent = "playing"; value.presentation = {known: false, status: "Playing"};

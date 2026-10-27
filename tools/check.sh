@@ -12,6 +12,8 @@ python3 tools/check-continuous-pcm.py --example "$target_dir/debug/examples/cont
 
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software /usr/lib/qt6/bin/qmltestrunner -input tests/qml
 
+python3 tools/check-backend-connection.py
+
 python3 -m unittest discover -s tests/python
 
 python3 tools/check-user-guide.py

@@ -11,7 +11,7 @@ import time
 # alone do not prove compatible representations or migration behavior.
 STORAGE_FILES = ("Cargo.toml", "Cargo.lock", "crates/qoda-backend/Cargo.toml",
                  *["crates/qoda-backend/src/" + name for name in (
-                     "main.rs", "session_commands.rs", "prepared_playback.rs", "catalog.rs", "storage.rs", "queue.rs", "archive.rs", "archive/store.rs",
+                     "main.rs", "account.rs", "session_commands.rs", "prepared_playback.rs", "catalog.rs", "storage.rs", "queue.rs", "archive.rs", "archive/store.rs",
                      "cache_files.rs", "gain.rs", "output.rs", "offline.rs", "metadata_cache.rs", "artwork_store.rs")])
 
 

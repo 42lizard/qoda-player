@@ -97,3 +97,52 @@ Neither path starts playback during installation or enables automatic startup.
 The two installations retain distinct process-manager names and share user data as
 before. Their compatibility refusal, paused restart, ownership checks and instance /
 deadline fences remain required. This preserves [ADR-0001](adr/0001-independent-rust-backend.md).
+
+## QML backend connection
+
+`BackendConnection.qml` owns the Unix socket, hello, reconnect, complete-line
+handling and command availability for both the player shell and installed widget.
+`BackendState.qml` owns snapshot validation, lossless decimal counters, ordering
+within one backend instance and fresh command envelopes. Invalid complete frames
+close the connection; commands require a validated snapshot from the current
+connection. The complete-line size check does not bound unfinished SplitParser
+buffering. A replacement backend may restart its revision at zero.
+
+The shell retains its last display while disconnected, but its instance/readiness
+is reset and commands are disabled. The widget clears its snapshot. The shell's
+adapter advertises its role and owns stable visual models, Raise suppression on
+first snapshot/reconnect, and acknowledged Quit. The widget remains non-raising
+and restricts operations to its transport controls and Quit. The installed widget
+payload includes the common modules and changes its fingerprint with them.
+
+`tools/check-backend-connection.py` exercises the production shell connection and
+widget adapter with private Unix peers, fragmented lines, invalid frames, large
+counters, replacement and reconnect. Existing layout, widget, Raise and Quit tests
+retain their respective presentation coverage.
+
+## Account sign-in lifetime
+
+`account::Controller` owns account and keyring generations, the active sign-in
+worker, session credentials, live provider authority, cached discovery and typed
+keyring action/saved-state knowledge. Its command and result interface executes
+account transitions against the existing preparation, catalog, output, reporting,
+cache and archive owners. Main dispatches actions/results and publishes their
+projections; it does not sequence account cleanup. The external sign-in adapter is
+Plex in production and a pending adapter in tests; identity paths are explicit so
+tests never read or overwrite the user's source identities.
+
+Reconnect invalidates old work and output, retains read-only same-account discovery
+and returns paused. Disconnect/Forget clears account data and saved listening
+state; Forget additionally queues keyring deletion after any pending operation.
+Account generations fence late authentication/connection results. Independent
+keyring generations preserve serialized Save/Forget semantics: a cancelled restore
+may update saved-state knowledge but may not reconnect. Dropping the owner aborts
+its current sign-in worker.
+
+The current connection failure policy still groups `AccessDenied` and
+`SignInRequired` for discovery/archive cleanup. The account tests characterize that
+existing behavior; it must not be interpreted as proof that expired sign-in means
+confirmed access loss. This refactor preserves the policy rather than expanding
+its meaning. Null-output transition tests and the existing disposable keyring
+helper cover stale restore/connection results, a superseding browser sign-in,
+Save→Forget, paused reconnect, partial discovery and failed discovery.

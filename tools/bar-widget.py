@@ -14,7 +14,7 @@ import uuid
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN_ID = "qoda.player"
 MARKER = ".qoda-install.json"
-SHARED = ["CompactControls.qml", "WidgetClient.qml", "WidgetState.qml", "ThemedControl.qml", "Theme.qml", "OutputPresentation.qml"]
+SHARED = ["CompactControls.qml", "WidgetClient.qml", "WidgetState.qml", "BackendState.qml", "BackendConnection.qml", "ThemedControl.qml", "Theme.qml", "OutputPresentation.qml"]
 
 
 def fingerprint(directory):

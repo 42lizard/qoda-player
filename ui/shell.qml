@@ -14,7 +14,7 @@ ShellRoot {
     UiRequests { id: uiRequests }
     QuitState {
         id: quitState
-        connected: socket.connected
+        connected: backend.connected
         instance: root.instance
         onSendQuit: root.send("quit")
         onExitUi: Qt.quit()
@@ -39,7 +39,7 @@ ShellRoot {
     property var snapshot: ({albums: {page: null, selected: null, busy: false, message: "Choose a library to browse albums."}, libraries: [], status: "Connecting backend", intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
     property var libraryModel: []
     property var trackModel: []
-    readonly property bool trackPageReady: (!snapshot.catalog || !snapshot.catalog.cache || snapshot.catalog.cache.origin !== "offline") && socket.connected && !!snapshot.page && !!snapshot.catalog && !snapshot.catalog.busy && snapshot.page.source === libraryId && snapshot.page.query === trackQuery && !!snapshot.sign_in && snapshot.sign_in.connected
+    readonly property bool trackPageReady: (!snapshot.catalog || !snapshot.catalog.cache || snapshot.catalog.cache.origin !== "offline") && backend.connected && !!snapshot.page && !!snapshot.catalog && !snapshot.catalog.busy && snapshot.page.source === libraryId && snapshot.page.query === trackQuery && !!snapshot.sign_in && snapshot.sign_in.connected
     onTrackPageReadyChanged: if (!trackPageReady) trackSelection.clear()
     TrackSelection {
         id: trackSelection
@@ -57,7 +57,7 @@ ShellRoot {
         kind: "queue"; account: root.snapshot.account_epoch || "0"; instance: root.instance
         fence: root.snapshot.queue ? {queue_session: root.snapshot.queue.session, queue_revision: root.snapshot.queue.revision} : null
         rows: root.queueModel
-        enabled: socket.connected && root.form === "full" && !settingsSheet.visible && queueTabs.currentIndex === 0 && (queueSlot.visible || queueDrawer.opened)
+        enabled: backend.connected && root.form === "full" && !settingsSheet.visible && queueTabs.currentIndex === 0 && (queueSlot.visible || queueDrawer.opened)
         onRequested: (op, fields) => root.send(op, fields)
     }
     ReorderState {
@@ -121,7 +121,7 @@ ShellRoot {
     property string playlistJson: "[]"
     property string playlistEntriesJson: "[]"
     property var playlistView: snapshot.playlists ? snapshot.playlists.selected : null
-    readonly property bool playlistWritable: socket.connected && !!snapshot.sign_in && snapshot.sign_in.connected && !!playlistView && playlistView.playlist.can_edit && !playlistView.playlist.smart && !!snapshot.playlists && !snapshot.playlists.busy && !snapshot.playlists.uncertain
+    readonly property bool playlistWritable: backend.connected && !!snapshot.sign_in && snapshot.sign_in.connected && !!playlistView && playlistView.playlist.can_edit && !playlistView.playlist.smart && !!snapshot.playlists && !snapshot.playlists.busy && !snapshot.playlists.uncertain
     function playlistEdit(edit) {
         if (playlistView) send("playlist_edit", {reference: playlistView.playlist.reference, expected_revision: playlistView.revision, edit: edit});
     }
@@ -135,25 +135,8 @@ ShellRoot {
 
     property string libraryId: ""
     property string instance: ""
-    property int serial: 0
-    property string nonce: Date.now().toString(36)
-    function send(op, fields) {
-        if (!socket.connected || !instance) return;
-        let data = fields || {};
-        data.op = op;
-        data.instance = instance;
-        data.account_epoch = snapshot.account_epoch || "0";
-        data.id = nonce + "-" + (++serial);
-        socket.write(JSON.stringify(data) + "\n");
-        socket.flush();
-    }
-    function editQueue(op, fields) {
-        if (!snapshot.queue) return;
-        let data = fields || {};
-        data.queue_session = snapshot.queue.session;
-        data.queue_revision = snapshot.queue.revision;
-        send(op, data);
-    }
+    function send(op, fields) { backend.send(op, fields); }
+    function editQueue(op, fields) { backend.send(op, fields, true); }
     function moveEntry(index, delta) {
         let target = index + delta;
         if (target < 0 || target >= queueModel.length || !queueModel[index].can_move || !queueModel[target].can_move) return;
@@ -190,57 +173,43 @@ ShellRoot {
         if (libraryId) send("browse", {source: libraryId, offset: offset || "0", query: search.text});
     }
     Process { id: browser }
-    Socket {
-        id: socket
-        path: Quickshell.env("XDG_RUNTIME_DIR") + "/qoda/backend.sock"
-        connected: true
-        onConnectedChanged: {
-            if (connected) { uiRequests.reset(); root.instance = ""; write('{"op":"hello","protocol":1,"role":"shell"}\n'); flush(); }
-        }
-        parser: SplitParser {
-            onRead: data => {
-                try {
-                    let next = JSON.parse(data);
-                    if (next.protocol !== 1 || !next.instance) return;
-                    if (root.instance === next.instance) {
-                        let a = next.revision, b = root.snapshot.revision || "0";
-                        if (a.length < b.length || (a.length === b.length && a < b)) return;
-                    }
-                    if (!root.instance && next.albums && next.albums.page) {
-                        root.libraryId = next.albums.page.source;
-                        root.albumQuery = next.albums.page.query;
-                        search.text = root.albumQuery;
-                    }
-                    if (!root.instance && !root.libraryId && next.albums && next.albums.artists) root.libraryId = next.albums.artists.source;
-                    if (!root.instance && next.page && !root.libraryId) {
-                        root.libraryId = next.page.source;
-                        root.trackQuery = next.page.query;
-                        search.text = libraryTabs.currentIndex === 0 ? root.trackQuery : root.albumQuery;
-                    }
-                    if (!next.libraries || next.libraries.length === 0) { root.libraryId = ""; search.text = ""; root.albumQuery = ""; root.artistQuery = ""; root.trackQuery = ""; root.playlistSeed = null; }
-                    if (root.instance !== next.instance) { root.cacheBudgetInitialized = false; root.metadataBudgetInitialized = false; }
-                    if (!root.metadataBudgetInitialized && next.metadata_cache && next.metadata_cache.state !== "opening") { root.metadataBudgetDraft = next.metadata_cache.budget_mib; root.metadataBudgetInitialized = true; }
-                    if (!root.cacheBudgetInitialized && next.artwork_cache) { root.cacheBudgetDraft = next.artwork_cache.budget_mib; root.cacheBudgetInitialized = true; }
-                    const raised = uiRequests.consume(next.instance, next.ui ? next.ui.raise_token : "");
-                    root.instance = next.instance;
-                    root.snapshot = next;
-                    if (raised) root.showSurface(root.lastForm, true);
-                    if (quitState.observe(next)) return;
-                    let libraries = JSON.stringify(next.libraries || []);
-                    if (libraries !== root.libraryJson) { root.libraryJson = libraries; root.libraryModel = next.libraries || []; }
-                    let tracks = JSON.stringify(next.page ? next.page.tracks : []);
-                    if (tracks !== root.trackJson) { root.trackJson = tracks; root.trackModel = next.page ? next.page.tracks : []; }
-                    let queue = JSON.stringify(next.queue ? next.queue.entries : []);
-                    if (queue !== root.queueJson) { root.queueJson = queue; root.queueModel = next.queue ? next.queue.entries : []; }
-                    let lists = JSON.stringify(next.playlists && next.playlists.list ? next.playlists.list.playlists : []);
-                    if (lists !== root.playlistJson) { root.playlistJson = lists; root.playlistModel = next.playlists && next.playlists.list ? next.playlists.list.playlists : []; }
-                    let entries = JSON.stringify(next.playlists && next.playlists.selected ? next.playlists.selected.entries : []);
-                    if (entries !== root.playlistEntriesJson) { root.playlistEntriesJson = entries; root.playlistEntries = next.playlists && next.playlists.selected ? next.playlists.selected.entries : []; }
-                } catch (e) { }
+    BackendConnection {
+        id: backend
+        role: "shell"
+        onReset: { uiRequests.reset(); root.instance = ""; }
+        onReceived: next => {
+            if (!root.instance && next.albums && next.albums.page) {
+                root.libraryId = next.albums.page.source;
+                root.albumQuery = next.albums.page.query;
+                search.text = root.albumQuery;
             }
+            if (!root.instance && !root.libraryId && next.albums && next.albums.artists) root.libraryId = next.albums.artists.source;
+            if (!root.instance && next.page && !root.libraryId) {
+                root.libraryId = next.page.source;
+                root.trackQuery = next.page.query;
+                search.text = libraryTabs.currentIndex === 0 ? root.trackQuery : root.albumQuery;
+            }
+            if (!next.libraries || next.libraries.length === 0) { root.libraryId = ""; search.text = ""; root.albumQuery = ""; root.artistQuery = ""; root.trackQuery = ""; root.playlistSeed = null; }
+            if (root.instance !== next.instance) { root.cacheBudgetInitialized = false; root.metadataBudgetInitialized = false; }
+            if (!root.metadataBudgetInitialized && next.metadata_cache && next.metadata_cache.state !== "opening") { root.metadataBudgetDraft = next.metadata_cache.budget_mib; root.metadataBudgetInitialized = true; }
+            if (!root.cacheBudgetInitialized && next.artwork_cache) { root.cacheBudgetDraft = next.artwork_cache.budget_mib; root.cacheBudgetInitialized = true; }
+            const raised = uiRequests.consume(next.instance, next.ui ? next.ui.raise_token : "");
+            root.instance = next.instance;
+            root.snapshot = next;
+            if (raised) root.showSurface(root.lastForm, true);
+            if (quitState.observe(next)) return;
+            let libraries = JSON.stringify(next.libraries || []);
+            if (libraries !== root.libraryJson) { root.libraryJson = libraries; root.libraryModel = next.libraries || []; }
+            let tracks = JSON.stringify(next.page ? next.page.tracks : []);
+            if (tracks !== root.trackJson) { root.trackJson = tracks; root.trackModel = next.page ? next.page.tracks : []; }
+            let queue = JSON.stringify(next.queue ? next.queue.entries : []);
+            if (queue !== root.queueJson) { root.queueJson = queue; root.queueModel = next.queue ? next.queue.entries : []; }
+            let lists = JSON.stringify(next.playlists && next.playlists.list ? next.playlists.list.playlists : []);
+            if (lists !== root.playlistJson) { root.playlistJson = lists; root.playlistModel = next.playlists && next.playlists.list ? next.playlists.list.playlists : []; }
+            let entries = JSON.stringify(next.playlists && next.playlists.selected ? next.playlists.selected.entries : []);
+            if (entries !== root.playlistEntriesJson) { root.playlistEntriesJson = entries; root.playlistEntries = next.playlists && next.playlists.selected ? next.playlists.selected.entries : []; }
         }
     }
-    Timer { interval: 1000; repeat: true; running: !socket.connected; onTriggered: socket.connected = true }
     Timer { id: searchDelay; interval: 300; onTriggered: root.searchCatalog() }
     FloatingWindow {
         id: window
@@ -273,12 +242,12 @@ ShellRoot {
                 width: parent.width
                 spacing: 6
                 visible: root.accountExpanded
-                Button { text: "Connect Plex"; enabled: socket.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
+                Button { text: "Connect Plex"; enabled: backend.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
                 Button { text: "Disconnect"; enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes cached metadata, artwork and the saved session and listening archive. Keeps saved sign-in."; onClicked: root.send("disconnect") }
-                Button { text: "Restore saved sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
-                Button { text: "Reconnect Plex"; visible: !!root.snapshot.sign_in && !!root.snapshot.sign_in.can_reconnect; enabled: socket.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connecting && !root.snapshot.sign_in.keyring_action; onClicked: root.editQueue("reconnect", {}) }
-                Button { text: "Save sign-in"; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
-                Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, cached metadata/artwork, saved queue and session backups. Keeps general preferences."; enabled: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
+                Button { text: "Restore saved sign-in"; enabled: backend.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
+                Button { text: "Reconnect Plex"; visible: !!root.snapshot.sign_in && !!root.snapshot.sign_in.can_reconnect; enabled: backend.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connecting && !root.snapshot.sign_in.keyring_action; onClicked: root.editQueue("reconnect", {}) }
+                Button { text: "Save sign-in"; enabled: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
+                Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, cached metadata/artwork, saved queue and session backups. Keeps general preferences."; enabled: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
                 Label { text: root.snapshot.sign_in ? root.snapshot.sign_in.message || "" : ""; color: Theme.muted; width: parent.width; wrapMode: Text.Wrap; textFormat: Text.PlainText }
             }
             AudioSettings {
@@ -286,7 +255,7 @@ ShellRoot {
                 width: parent.width
                 snapshot: root.snapshot.replaygain || null
                 output: root.snapshot.output || null
-                connected: socket.connected
+                connected: backend.connected
                 onModeRequested: mode => root.send("set_replaygain", {mode: mode})
                 onOutputRequested: (mode, device, assumeStereo) => root.send("set_output", {mode: mode, device: device, assume_stereo: assumeStereo})
                 onRefreshOutputsRequested: root.send("refresh_outputs")
@@ -301,8 +270,8 @@ ShellRoot {
                     spacing: 6
                     Label { text: "Disk target (MiB, 0 disables)"; color: Theme.muted; padding: 6 }
                     SpinBox { from: 0; to: 4096; editable: true; value: root.cacheBudgetDraft; onValueModified: root.cacheBudgetDraft = value }
-                    Button { text: "Apply"; enabled: socket.connected && !root.snapshot.cache_action && !!root.snapshot.artwork_cache && !root.snapshot.artwork_cache.cleanup_pending; onClicked: root.send("set_artwork_budget", {mib: root.cacheBudgetDraft}) }
-                    Button { text: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? "Retry cleanup" : "Clear artwork"; enabled: socket.connected && !root.snapshot.cache_action; ToolTip.visible: hovered; ToolTip.text: "Keeps your queue, sign-in and cache target. Visible covers are fetched again."; onClicked: root.send("clear_artwork_cache") }
+                    Button { text: "Apply"; enabled: backend.connected && !root.snapshot.cache_action && !!root.snapshot.artwork_cache && !root.snapshot.artwork_cache.cleanup_pending; onClicked: root.send("set_artwork_budget", {mib: root.cacheBudgetDraft}) }
+                    Button { text: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? "Retry cleanup" : "Clear artwork"; enabled: backend.connected && !root.snapshot.cache_action; ToolTip.visible: hovered; ToolTip.text: "Keeps your queue, sign-in and cache target. Visible covers are fetched again."; onClicked: root.send("clear_artwork_cache") }
                     Label { visible: !!root.snapshot.cache_action; text: "Updating artwork cache…"; color: Theme.muted; padding: 6 }
                 }
                 Label { text: root.snapshot.metadata_cache ? "Metadata · " + root.snapshot.metadata_cache.message + (root.snapshot.metadata_cache.usage_known ? " · " + (root.snapshot.metadata_cache.bytes / 1048576).toFixed(1) + " MiB · " + root.snapshot.metadata_cache.pages + " pages · " + root.snapshot.metadata_cache.tracks + " indexed tracks" : "") : "Opening metadata cache…"; color: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
@@ -312,8 +281,8 @@ ShellRoot {
                     spacing: 6
                     Label { text: "Metadata target (MiB, 0 disables)"; color: Theme.muted; padding: 6 }
                     SpinBox { from: 0; to: 1024; editable: true; value: root.metadataBudgetDraft; onValueModified: root.metadataBudgetDraft = value }
-                    Button { text: "Apply metadata target"; enabled: socket.connected && !root.snapshot.metadata_cache_action && !!root.snapshot.metadata_cache && !root.snapshot.metadata_cache.cleanup_pending && root.snapshot.metadata_cache.state !== "opening"; onClicked: root.send("set_metadata_budget", {mib: root.metadataBudgetDraft}) }
-                    Button { text: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? "Retry metadata cleanup" : "Clear metadata"; enabled: socket.connected && !root.snapshot.metadata_cache_action; ToolTip.visible: hovered; ToolTip.text: "Resets loaded browser views and cached metadata. Keeps your queue, sign-in, artwork and cache targets."; onClicked: root.send("clear_metadata_cache") }
+                    Button { text: "Apply metadata target"; enabled: backend.connected && !root.snapshot.metadata_cache_action && !!root.snapshot.metadata_cache && !root.snapshot.metadata_cache.cleanup_pending && root.snapshot.metadata_cache.state !== "opening"; onClicked: root.send("set_metadata_budget", {mib: root.metadataBudgetDraft}) }
+                    Button { text: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? "Retry metadata cleanup" : "Clear metadata"; enabled: backend.connected && !root.snapshot.metadata_cache_action; ToolTip.visible: hovered; ToolTip.text: "Resets loaded browser views and cached metadata. Keeps your queue, sign-in, artwork and cache targets."; onClicked: root.send("clear_metadata_cache") }
                     Label { visible: !!root.snapshot.metadata_cache_action; text: "Updating metadata cache…"; color: Theme.muted; padding: 6 }
                 }
             }
@@ -322,7 +291,7 @@ ShellRoot {
                 visible: root.settingsSection === "history"
                 width: parent.width
                 snapshot: root.snapshot.archive || null
-                connected: socket.connected
+                connected: backend.connected
                 accountEpoch: root.snapshot.account_epoch || ""
                 libraries: root.snapshot.libraries || []
                 onRequested: (operation, fields) => root.send(operation, fields)
@@ -362,7 +331,7 @@ ShellRoot {
                     if (event.key === Qt.Key_Escape) { queueReorder.cancel(); playlistReorder.cancel(); }
                     event.accepted = true; return;
                 }
-                if (event.key === Qt.Key_Space && event.modifiers === Qt.NoModifier && socket.connected && root.snapshot.presentation && (root.snapshot.intent === "playing" ? root.snapshot.presentation.can_pause : root.snapshot.presentation.can_play)) {
+                if (event.key === Qt.Key_Space && event.modifiers === Qt.NoModifier && backend.connected && root.snapshot.presentation && (root.snapshot.intent === "playing" ? root.snapshot.presentation.can_pause : root.snapshot.presentation.can_play)) {
                     root.send(root.snapshot.intent === "playing" ? "pause" : "resume"); event.accepted = true;
                 }
             }
@@ -385,7 +354,7 @@ ShellRoot {
                     MenuItem { text: "Audio settings"; onTriggered: root.showSettings("audio") }
                     MenuItem { text: "Cache settings"; onTriggered: root.showSettings("cache") }
                     MenuItem { text: "Listening archive"; onTriggered: root.showSettings("history") }
-                    MenuItem { text: "Gapless"; checkable: true; checked: !!root.snapshot.gapless && root.snapshot.gapless.enabled; enabled: socket.connected && !!root.snapshot.gapless; onTriggered: root.send("set_gapless", {enabled: checked}) }
+                    MenuItem { text: "Gapless"; checkable: true; checked: !!root.snapshot.gapless && root.snapshot.gapless.enabled; enabled: backend.connected && !!root.snapshot.gapless; onTriggered: root.send("set_gapless", {enabled: checked}) }
                     MenuSeparator {}
                     MenuItem { text: "Hide player"; onTriggered: root.hideSurface() }
                     MenuItem { text: "Quit player"; onTriggered: quitState.begin() }
@@ -400,12 +369,12 @@ ShellRoot {
             RowLayout {
                 visible: !!root.snapshot.storage && ["unsaved", "blocked"].includes(root.snapshot.storage.state)
                 Label { text: root.snapshot.storage ? root.snapshot.storage.message : "Opening session storage…"; color: root.snapshot.storage && (root.snapshot.storage.state === "unsaved" || root.snapshot.storage.state === "blocked") ? Theme.danger : Theme.muted; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
-                Button { text: "Retry save"; enabled: socket.connected; onClicked: root.send("retry_save") }
+                Button { text: "Retry save"; enabled: backend.connected; onClicked: root.send("retry_save") }
             }
             DesktopControls {
                 Layout.fillWidth: true
                 snapshot: root.snapshot.mpris || null
-                connected: socket.connected
+                connected: backend.connected
                 onRetryRequested: root.send("retry_desktop")
             }
             Label { visible: !!root.snapshot.gapless && ["review", "fallback"].includes(root.snapshot.gapless.phase); text: root.snapshot.gapless ? root.snapshot.gapless.message : ""; color: root.snapshot.gapless && root.snapshot.gapless.phase === "review" ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
@@ -413,11 +382,11 @@ ShellRoot {
                 Layout.fillWidth: true
                 snapshot: root.snapshot.recovery || null
                 queue: root.snapshot.queue || null
-                connected: socket.connected
+                connected: backend.connected
                 canRetry: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
                 onActionRequested: (op, fields) => root.send(op, fields)
             }
-            Label { visible: !socket.connected || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || !!root.snapshot.error; text: socket.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: Theme.muted; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
+            Label { visible: !backend.connected || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || !!root.snapshot.error; text: backend.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: Theme.muted; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
             Label { visible: !!quitState.error || !!root.snapshot.error; text: quitState.error || root.snapshot.error || ""; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
                 QtObject {
                     id: libraryTabs; property int currentIndex: 2
@@ -501,7 +470,7 @@ ShellRoot {
                     Layout.fillWidth: true
                     snapshot: root.snapshot.discovery || null
                     canReconnect: !!root.snapshot.sign_in && !!root.snapshot.sign_in.can_reconnect
-                    busy: !socket.connected || !!root.snapshot.sign_in && (!!root.snapshot.sign_in.connecting || !!root.snapshot.sign_in.keyring_action)
+                    busy: !backend.connected || !!root.snapshot.sign_in && (!!root.snapshot.sign_in.connecting || !!root.snapshot.sign_in.keyring_action)
                     onReconnectRequested: root.editQueue("reconnect", {})
                     onSignInRequested: root.showSettings("account")
                 }
@@ -511,7 +480,7 @@ ShellRoot {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     snapshot: root.snapshot.albums || null
                     connected: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
-                    artworkEnabled: window.visible && socket.connected
+                    artworkEnabled: window.visible && backend.connected
                     onOpenArtist: reference => root.openArtist(reference)
                     onAllAlbums: root.allAlbums()
                     onOpenAlbum: reference => root.send("album_open", {reference: reference})
@@ -525,7 +494,7 @@ ShellRoot {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     snapshot: root.snapshot.search || null
                     query: root.globalQuery
-                    connected: socket.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.connected
+                    connected: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.connected
                     onActionRequested: (op, fields) => root.editQueue(op, fields)
                 }
                 ArtistBrowser {
@@ -747,7 +716,7 @@ ShellRoot {
                         visible: queueTabs.currentIndex === 1
                         Layout.fillWidth: true; Layout.fillHeight: true
                         snapshot: root.snapshot.navigation || null
-                        connected: socket.connected
+                        connected: backend.connected
                         onPageRequested: (offset, fence) => { fence.offset = offset; root.send("navigation_page", fence); }
                         onRevisitRequested: fields => root.send("navigation_select", fields)
                     }
@@ -756,7 +725,7 @@ ShellRoot {
                         visible: queueTabs.currentIndex === 2
                         Layout.fillWidth: true; Layout.fillHeight: true
                         snapshot: root.snapshot.queue || null
-                        connected: socket.connected
+                        connected: backend.connected
                         canRetry: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
                         onActionRequested: (op, fields) => root.send(op, fields)
                     }
@@ -773,7 +742,7 @@ ShellRoot {
                 Layout.fillWidth: true
                 snapshot: root.snapshot
                 selectedTrack: root.selectedTrack
-                connected: socket.connected
+                connected: backend.connected
                 onTransportRequested: op => root.send(op)
                 onQueueRequested: op => root.editQueue(op)
                 onSeekRequested: seconds => root.send("seek", {seconds: seconds})
@@ -786,7 +755,7 @@ ShellRoot {
         notice: quitState.error
         snapshot: root.snapshot
         selectedTrack: root.selectedTrack
-        connected: socket.connected
+        connected: backend.connected
         onSearchRequested: root.focusSearch()
         onExpandRequested: root.showSurface("full", true)
         onHideRequested: root.hideSurface()
@@ -816,7 +785,7 @@ ShellRoot {
         function showQueue(): void { root.openQueue(0); }
         function browseArtists(): void { root.pendingSearchFocus = false; root.closeSettings(); root.queueRequested = false; libraryTabs.currentIndex = 3; root.showSurface("full", true); }
         function browsePlaylists(): void { root.pendingSearchFocus = false; root.closeSettings(); root.queueRequested = false; libraryTabs.currentIndex = 1; root.showSurface("full", true); }
-        function status(): string { return JSON.stringify({discovery: root.snapshot.discovery || null, theme: {system: Theme.system, background: String(Theme.background), foreground: String(Theme.foreground), accent: String(Theme.accent), controlText: String(fullFrame.palette.text), controlHighlight: String(fullFrame.palette.highlight)}, libraryPicker: {source: root.libraryId, label: libraryPicker.label(libraryPicker.selected), open: libraryPicker.popupVisible}, settings: {section: root.settingsSection, visible: settingsSheet.visible, scrollable: settingsSheet.scrollable}, searchFocused: search.activeFocus, reorder: {queueActive: queueReorder.active, playlistActive: playlistReorder.active, queueEnabled: queueReorder.enabled, playlistEnabled: playlistReorder.enabled}, search: root.snapshot.search || null, output: root.snapshot.output || null, replaygain: root.snapshot.replaygain || null, audioExpanded: root.audioExpanded, uiCapability: root.snapshot.ui || null, unavailable: {visible: queueTabs.currentIndex === 2, canRetry: unavailableBrowser.canRetry, entries: unavailableBrowser.rows.length}, desktopControls: root.snapshot.mpris || null, navigation: {visible: queueTabs.currentIndex === 1, entries: navigationBrowser.rows.length, viewportHeight: navigationBrowser.viewportHeight, page: root.snapshot.navigation || null}, artists: artistBrowser.artistModel.length, queueDrawerOpen: queueDrawer.opened, queueDrawerVisible: queueDrawer.visible, albums: {canQueue: albumBrowser.canQueue, cache: root.snapshot.albums ? root.snapshot.albums.cache || null : null, thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height, sidebarWidth: libraryRail.width, railHeight: railScroll.height, railContentHeight: railScroll.contentHeight, accountTop: railAccount.mapToItem(railScroll, 0, 0).y, accountBottom: railAccount.mapToItem(railScroll, 0, railAccount.height).y, browserWidth: browserPane.width, browserHeight: browserPane.height, queueVisible: queueSlot.visible || queueDrawer.opened, queueWidth: queuePane.width, queueHeight: queuePane.height, queueRowHeight: queueView.itemAtIndex(0)?.height || 0}, connected: socket.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length, order: root.playlistEntries.map(row => row.id)} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
+        function status(): string { return JSON.stringify({discovery: root.snapshot.discovery || null, theme: {system: Theme.system, background: String(Theme.background), foreground: String(Theme.foreground), accent: String(Theme.accent), controlText: String(fullFrame.palette.text), controlHighlight: String(fullFrame.palette.highlight)}, libraryPicker: {source: root.libraryId, label: libraryPicker.label(libraryPicker.selected), open: libraryPicker.popupVisible}, settings: {section: root.settingsSection, visible: settingsSheet.visible, scrollable: settingsSheet.scrollable}, searchFocused: search.activeFocus, reorder: {queueActive: queueReorder.active, playlistActive: playlistReorder.active, queueEnabled: queueReorder.enabled, playlistEnabled: playlistReorder.enabled}, search: root.snapshot.search || null, output: root.snapshot.output || null, replaygain: root.snapshot.replaygain || null, audioExpanded: root.audioExpanded, uiCapability: root.snapshot.ui || null, unavailable: {visible: queueTabs.currentIndex === 2, canRetry: unavailableBrowser.canRetry, entries: unavailableBrowser.rows.length}, desktopControls: root.snapshot.mpris || null, navigation: {visible: queueTabs.currentIndex === 1, entries: navigationBrowser.rows.length, viewportHeight: navigationBrowser.viewportHeight, page: root.snapshot.navigation || null}, artists: artistBrowser.artistModel.length, queueDrawerOpen: queueDrawer.opened, queueDrawerVisible: queueDrawer.visible, albums: {canQueue: albumBrowser.canQueue, cache: root.snapshot.albums ? root.snapshot.albums.cache || null : null, thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height, sidebarWidth: libraryRail.width, railHeight: railScroll.height, railContentHeight: railScroll.contentHeight, accountTop: railAccount.mapToItem(railScroll, 0, 0).y, accountBottom: railAccount.mapToItem(railScroll, 0, railAccount.height).y, browserWidth: browserPane.width, browserHeight: browserPane.height, queueVisible: queueSlot.visible || queueDrawer.opened, queueWidth: queuePane.width, queueHeight: queuePane.height, queueRowHeight: queueView.itemAtIndex(0)?.height || 0}, connected: backend.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length, order: root.playlistEntries.map(row => row.id)} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
         function quit(): void { quitState.begin(); }
     }
 }
