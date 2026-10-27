@@ -28,10 +28,12 @@ mod storage;
 mod update_tests;
 mod vault;
 use player::{Command, Player};
-use qoda_core::{OccurrenceId, SourceId, TrackRef};
+use qoda_core::{SourceId, TrackRef};
 use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider};
 use serde_json::{Value, json};
-use session_commands::{check_queue, navigation_request, unavailable_request};
+use session_commands::check_queue;
+#[cfg(test)]
+use session_commands::{navigation_request, unavailable_request};
 use std::{
     collections::{HashMap, HashSet},
     io::Read,
@@ -836,6 +838,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             event
         };
+        let mut command_effects = session_commands::Effects::default();
         if let Event::Request(request) = &mut event {
             let mut commands = session_commands::Playback {
                 queue: &mut queue,
@@ -864,7 +867,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 devices: &output_devices,
                 gain: &mut gain_settings,
             };
-            if !commands
+            match commands
                 .admit(
                     request,
                     &mut context,
@@ -873,7 +876,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .await?
             {
-                event = Event::Checkpoint;
+                session_commands::Admission::Forward => {}
+                session_commands::Admission::Applied(effects) => {
+                    command_effects = effects;
+                    event = Event::Checkpoint;
+                }
+                session_commands::Admission::Rejected => event = Event::Checkpoint,
             }
         }
         if let Event::Recovery(reply) = event {
@@ -906,10 +914,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
         }
-        let mut to_prepare = None;
-        let mut automatic_next = false;
-        let mut force_save = false;
-        let mut seeked = false;
+        let mut to_prepare = command_effects.prepare;
+        let mut automatic_next = command_effects.automatic;
+        let mut force_save = command_effects.force_save;
+        let seeked = command_effects.seeked;
         match event {
             Event::Search(reply) => {
                 search.accept(reply, auth_generation)?;
@@ -1432,26 +1440,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 json!("Connect Plex before browsing or editing playlists.");
                         }
                     }
-                    "playlist_play" | "playlist_enqueue" => {
-                        let result: Result<(), String> = (|| {
-                            check_queue(&queue, &v).map_err(|e| e.to_string())?;
-                            let tracks = session_commands::playlist_tracks(&playlists, &v)?;
-                            if v["op"] == "playlist_play" {
-                                if provider.is_none() {
-                                    return Err("Restore Plex sign-in before playback.".into());
-                                }
-                                to_prepare =
-                                    queue.replace_many(tracks).map_err(|e| e.to_string())?;
-                                desired_playing = true;
-                            } else {
-                                queue.enqueue_many(tracks).map_err(|e| e.to_string())?;
-                            }
-                            Ok(())
-                        })();
-                        if let Err(error) = result {
-                            state["error"] = json!(error);
-                        }
-                    }
                     "album_list" | "album_open" | "artist_list" | "artist_open" => {
                         if let Some(provider) = catalog_access.clone() {
                             if let Err(error) =
@@ -1463,41 +1451,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         } else {
                             state["error"] = json!("Connect Plex before browsing albums.");
-                        }
-                    }
-                    "album_play" | "album_enqueue" => {
-                        let result: Result<(), String> = (|| {
-                            check_queue(&queue, &v).map_err(|e| e.to_string())?;
-                            let tracks = albums.tracks(&v)?;
-                            if provider.is_none() {
-                                return Err("Connect Plex before queueing an album.".into());
-                            }
-                            if v["op"] == "album_play" {
-                                // tracks() already validated this complete live snapshot and revision.
-                                let album = albums
-                                    .view
-                                    .selected
-                                    .as_ref()
-                                    .ok_or("Missing album snapshot")?;
-                                to_prepare = queue
-                                    .replace_album(
-                                        tracks,
-                                        album.album.reference.clone(),
-                                        album
-                                            .tracks
-                                            .iter()
-                                            .map(|entry| entry.track.reference.clone())
-                                            .collect(),
-                                    )
-                                    .map_err(|e| e.to_string())?;
-                                desired_playing = true;
-                            } else {
-                                queue.enqueue_many(tracks).map_err(|e| e.to_string())?;
-                            }
-                            Ok(())
-                        })();
-                        if let Err(error) = result {
-                            state["error"] = json!(error);
                         }
                     }
                     "search_all" => {
@@ -1513,29 +1466,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         } else {
                             state["error"] = json!("Connect Plex to search music libraries.");
-                        }
-                    }
-                    "search_play" | "search_next" | "search_enqueue" => {
-                        let result = check_queue(&queue, &v)
-                            .map_err(|error| error.to_string())
-                            .and_then(|()| {
-                                search.resolve(&v, auth_generation).map_err(str::to_owned)
-                            });
-                        match result {
-                            Ok(track) => {
-                                let result = match v["op"].as_str() {
-                                    Some("search_play") => queue.replace(track.clone()).map(|_| {
-                                        desired_playing = true;
-                                        to_prepare = Some(track);
-                                    }),
-                                    Some("search_next") => queue.enqueue(track, true).map(|_| ()),
-                                    _ => queue.enqueue(track, false).map(|_| ()),
-                                };
-                                if let Err(error) = result {
-                                    state["error"] = json!(error.to_string());
-                                }
-                            }
-                            Err(error) => state["error"] = json!(error),
                         }
                     }
                     "browse" => {
@@ -1598,48 +1528,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }));
                         }
                     }
-                    "play_selected" | "enqueue_selected" | "play_next_selected" => {
-                        let result: Result<(), String> = (|| {
-                            check_queue(&queue, &v).map_err(|error| error.to_string())?;
-                            let tracks = catalog::selected_tracks(&state, &v, auth_generation)
-                                .map_err(str::to_owned)?;
-                            let count = tracks.len();
-                            match v["op"].as_str() {
-                                Some("play_selected") => {
-                                    to_prepare = queue
-                                        .replace_many(tracks)
-                                        .map_err(|error| error.to_string())?;
-                                    desired_playing = true;
-                                }
-                                Some("play_next_selected") => queue
-                                    .enqueue_next_many(tracks)
-                                    .map_err(|error| error.to_string())?,
-                                _ => queue
-                                    .enqueue_many(tracks)
-                                    .map_err(|error| error.to_string())?,
-                            }
-                            state["status"] =
-                                json!(format!("Applied selection of {count} tracks."));
-                            Ok(())
-                        })();
-                        if let Err(error) = result {
-                            state["error"] = json!(error);
-                        }
-                    }
-                    "play" => {
-                        if provider.is_some() {
-                            match catalog_track(&state, &albums, &v) {
-                                Ok(track) => match queue.replace(track.clone()) {
-                                    Ok(_) => {
-                                        desired_playing = true;
-                                        to_prepare = Some(track)
-                                    }
-                                    Err(e) => state["error"] = json!(e.to_string()),
-                                },
-                                Err(error) => state["error"] = json!(error),
-                            }
-                        }
-                    }
                     "retry_desktop" => {
                         if desktop_task.is_none()
                             && desktop.as_ref().is_some_and(|service| !service.is_live())
@@ -1670,166 +1558,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         match result {
                             Ok(offset) => navigation_offset = offset,
                             Err(error) => state["error"] = json!(error),
-                        }
-                    }
-                    "enqueue" | "play_next" | "queue_play" | "queue_move" | "queue_remove"
-                    | "clear_upcoming" | "stop_clear" | "next" | "replay" | "previous"
-                    | "navigation_select" | "retry_unavailable" | "skip_unavailable"
-                    | "set_shuffle" | "set_repeat" => {
-                        if let Err(error) = check_queue(&queue, &v) {
-                            state["error"] = json!(error.to_string());
-                        } else {
-                            let result: Result<(), String> = (|| {
-                                match v["op"].as_str().unwrap_or("") {
-                                    "enqueue" | "play_next" => {
-                                        if provider.is_none() {
-                                            return Err("Connect Plex before adding tracks.".into());
-                                        }
-                                        let track = catalog_track(&state, &albums, &v)
-                                            .map_err(str::to_owned)?;
-                                        queue
-                                            .enqueue(track, v["op"] == "play_next")
-                                            .map_err(|e| e.to_string())?;
-                                    }
-                                    "queue_play" => {
-                                        if provider.is_none() {
-                                            return Err(
-                                                "Restore Plex sign-in before playback.".into()
-                                            );
-                                        }
-                                        let id = serde_json::from_value::<OccurrenceId>(
-                                            v["occurrence"].clone(),
-                                        )
-                                        .map_err(|_| queue::Error::Missing.to_string())?;
-                                        to_prepare =
-                                            Some(queue.select(id).map_err(|e| e.to_string())?);
-                                        desired_playing = true;
-                                    }
-                                    "retry_unavailable" | "skip_unavailable" => {
-                                        let id = unavailable_request(&queue, &v)?;
-                                        if provider.is_none() {
-                                            return Err("Restore Plex sign-in before retrying or continuing playback.".into());
-                                        }
-                                        to_prepare = if let Some(id) = id {
-                                            Some(
-                                                queue
-                                                    .retry_unavailable(id)
-                                                    .map_err(|error| error.to_string())?,
-                                            )
-                                        } else {
-                                            automatic_next = true;
-                                            queue.advance().map_err(|error| error.to_string())?
-                                        };
-                                        desired_playing = to_prepare.is_some();
-                                        if !desired_playing {
-                                            state["status"] = json!(
-                                                "No playable entries remain. Open Unavailable to retry or remove an entry."
-                                            );
-                                        }
-                                    }
-                                    "queue_move" => {
-                                        let id = serde_json::from_value(v["occurrence"].clone())
-                                            .map_err(|_| queue::Error::Missing.to_string())?;
-                                        let before = serde_json::from_value(v["before"].clone())
-                                            .map_err(|_| queue::Error::Missing.to_string())?;
-                                        queue.move_before(id, before).map_err(|e| e.to_string())?;
-                                    }
-                                    "queue_remove" => {
-                                        let id = serde_json::from_value(v["occurrence"].clone())
-                                            .map_err(|_| queue::Error::Missing.to_string())?;
-                                        if queue.remove(id).map_err(|e| e.to_string())? {
-                                            to_prepare = queue
-                                                .selected()
-                                                .map(|id| queue.visible_track(id))
-                                                .transpose()
-                                                .map_err(|e| e.to_string())?;
-                                            if to_prepare.is_none() {
-                                                desired_playing = false;
-                                            }
-                                        }
-                                    }
-                                    "clear_upcoming" => {
-                                        queue.clear_upcoming().map_err(|e| e.to_string())?
-                                    }
-                                    "stop_clear" => {
-                                        queue = queue.empty_session();
-                                        desired_playing = false;
-                                    }
-                                    "previous" => {
-                                        let audio = player.status();
-                                        if audio.generation == epochs.current
-                                            && let Some(position) = audio.position_seconds
-                                        {
-                                            let _ = queue.set_position(position);
-                                        }
-                                        to_prepare = queue.previous().map_err(|e| e.to_string())?;
-                                    }
-                                    "navigation_select" => {
-                                        let (index, occurrence) = navigation_request(&queue, &v)?;
-                                        to_prepare = Some(
-                                            queue
-                                                .revisit(index, occurrence)
-                                                .map_err(|error| error.to_string())?,
-                                        );
-                                    }
-                                    "set_shuffle" => {
-                                        let enabled = v["enabled"]
-                                            .as_bool()
-                                            .ok_or("Choose shuffle on or off.")?;
-                                        queue.set_shuffle(enabled).map_err(|e| e.to_string())?;
-                                    }
-                                    "set_repeat" => {
-                                        let mode = serde_json::from_value::<queue::Repeat>(
-                                            v["mode"].clone(),
-                                        )
-                                        .map_err(|_| "Choose Repeat Off, One or All.")?;
-                                        queue.set_repeat(mode).map_err(|e| e.to_string())?;
-                                    }
-                                    "next" | "replay" => {
-                                        if v["op"] == "replay" && provider.is_none() {
-                                            return Err(
-                                                "Restore Plex sign-in before playback.".into()
-                                            );
-                                        }
-                                        to_prepare = if v["op"] == "replay" {
-                                            queue.replay()
-                                        } else {
-                                            queue.advance()
-                                        }
-                                        .map_err(|e| e.to_string())?;
-                                        if v["op"] == "replay" && to_prepare.is_some() {
-                                            desired_playing = true;
-                                        }
-                                        if to_prepare.is_none() {
-                                            desired_playing = false;
-                                            state["status"] = json!("End of queue");
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                                Ok(())
-                            })();
-                            if let Err(error) = result {
-                                state["error"] = json!(error);
-                            }
-                            if v["op"] == "stop_clear"
-                                || (v["op"] == "queue_remove" && queue.selected().is_none())
-                                || (matches!(v["op"].as_str(), Some("next" | "skip_unavailable"))
-                                    && to_prepare.is_none())
-                            {
-                                if let Some(task) = prepare_task.take() {
-                                    task.abort();
-                                }
-                                epochs.reset()?;
-                                gapless.invalidate();
-                                player.send(Command::Pause(true));
-                                player.send(Command::Stop);
-                                proxy.revoke().await;
-                                state["selection"] = Value::Null;
-                                state["audio"] = Value::Null;
-                            }
-                            state["intent"] =
-                                json!(if desired_playing { "playing" } else { "paused" });
                         }
                     }
                     "stop" => {
@@ -1891,22 +1619,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             state["intent"] =
                                 json!(if desired_playing { "playing" } else { "paused" });
-                        }
-                    }
-                    "seek" => {
-                        if let Some(position) = v["seconds"].as_f64() {
-                            match queue.seek_to(position) {
-                                Ok(()) => {
-                                    force_save = true;
-                                    seeked = true;
-                                    if provider.is_some() {
-                                        to_prepare = queue
-                                            .selected()
-                                            .and_then(|id| queue.visible_track(id).ok());
-                                    }
-                                }
-                                Err(error) => state["error"] = json!(error.to_string()),
-                            }
                         }
                     }
                     "archive_page" | "archive_export" | "archive_clear" | "archive_retention" => {

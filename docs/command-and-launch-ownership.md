@@ -23,14 +23,18 @@ reply liveness before cancellation and again before mutation, and translated aga
 the new nominal view. A request to pause cannot become a request to resume because
 a reset changed playback intent.
 
-The command module applies output changes itself, including preparation cancellation,
-clock retention, epoch/load invalidation, grant revocation and explicit paused intent.
-For other admitted requests, the coordinator dispatches the existing action without
-an intervening await or event. Queue remains the authority for membership, current
-occurrence, visits and navigation. Player, gapless, recovery and proxy retain their
-existing native and provider implementation. The coordinator publishes the resulting
-state and requests durable checkpoints. `Desktop::complete` acknowledges the resulting
-error or success only after that processing; Quit acknowledges its shutdown snapshot.
+The command module resolves each queue edit into one operation, applies that same
+operation to the bounded trial and then to the live Queue, and returns preparation,
+automatic-next, checkpoint and seek effects. It also applies output changes,
+including preparation cancellation, clock retention, epoch/load invalidation,
+grant revocation and explicit paused intent. The final desktop liveness check has
+no intervening await before Queue mutation. Queue remains the authority for
+membership, current occurrence, visits and navigation. Player, gapless, recovery
+and proxy retain their existing native and provider implementation. The
+coordinator dispatches remaining actions, prepares selected media, publishes the
+resulting state and requests durable checkpoints. `Desktop::complete` acknowledges
+the resulting error or success after that processing; Quit acknowledges its
+shutdown snapshot.
 
 These ownership changes preserve [nominal presentation](adr/0003-nominal-playback-presentation.md)
 and [bounded continuous conversion](adr/0004-continuous-converted-input.md).

@@ -82,6 +82,101 @@ pub(crate) async fn finish_gapless_reset(
     promoted.map(|_| ())
 }
 
+#[derive(Default)]
+pub struct Effects {
+    pub prepare: Option<qoda_provider::Track>,
+    pub automatic: bool,
+    pub force_save: bool,
+    pub seeked: bool,
+}
+pub enum Admission {
+    Forward,
+    Applied(Effects),
+    Rejected,
+}
+// The same resolved operation validates a bounded trial and mutates the live
+// Queue. Neither caller nor a second string switch chooses the Queue operation.
+enum Edit {
+    Replace {
+        tracks: Vec<qoda_provider::Track>,
+        album: Option<(qoda_provider::AlbumRef, Vec<qoda_core::TrackRef>)>,
+        batch: bool,
+    },
+    Enqueue {
+        tracks: Vec<qoda_provider::Track>,
+        next: bool,
+        batch: bool,
+    },
+    Select(OccurrenceId),
+    Retry(OccurrenceId),
+    Next {
+        skip: bool,
+    },
+    Replay,
+    Previous(Option<f64>),
+    Revisit(u64, OccurrenceId),
+    Move(OccurrenceId, Option<OccurrenceId>),
+    Remove(OccurrenceId),
+    ClearUpcoming,
+    StopClear,
+    Shuffle(bool),
+    Repeat(queue::Repeat),
+    Seek(f64),
+}
+impl Edit {
+    fn apply(
+        &self,
+        queue: &mut queue::Queue,
+    ) -> Result<Option<qoda_provider::Track>, queue::Error> {
+        match self {
+            Self::Replace {
+                tracks,
+                album: Some((reference, order)),
+                ..
+            } => queue.replace_album(tracks.clone(), reference.clone(), order.clone()),
+            Self::Replace { tracks, .. } => queue.replace_many(tracks.clone()),
+            Self::Enqueue { tracks, next, .. } => {
+                if *next {
+                    queue.enqueue_next_many(tracks.clone())?;
+                } else {
+                    queue.enqueue_many(tracks.clone())?;
+                }
+                Ok(None)
+            }
+            Self::Select(id) => queue.select(*id).map(Some),
+            Self::Retry(id) => queue.retry_unavailable(*id).map(Some),
+            Self::Next { .. } => queue.advance(),
+            Self::Replay => queue.replay(),
+            Self::Previous(position) => {
+                if let Some(position) = position {
+                    queue.set_position(*position)?;
+                }
+                queue.previous()
+            }
+            Self::Revisit(index, id) => queue.revisit(*index, *id).map(Some),
+            Self::Move(id, before) => queue.move_before(*id, *before).map(|()| None),
+            Self::Remove(id) => {
+                if queue.remove(*id)? {
+                    queue
+                        .selected()
+                        .map(|id| queue.visible_track(id))
+                        .transpose()
+                } else {
+                    Ok(None)
+                }
+            }
+            Self::ClearUpcoming => queue.clear_upcoming().map(|()| None),
+            Self::StopClear => {
+                *queue = queue.empty_session();
+                Ok(None)
+            }
+            Self::Shuffle(enabled) => queue.set_shuffle(*enabled).map(|()| None),
+            Self::Repeat(mode) => queue.set_repeat(*mode).map(|()| None),
+            Self::Seek(position) => queue.seek_to(*position).map(|()| None),
+        }
+    }
+}
+
 /// Borrowed runtime ownership keeps transition sequencing inside this module.
 /// Catalog/account lifetimes remain with the coordinator, not with the command.
 pub struct Playback<'a> {
@@ -135,19 +230,19 @@ impl Playback<'_> {
         context: &mut Context<'_>,
         desktop: Option<&Desktop>,
         owner: Option<&mpris::Service>,
-    ) -> Result<bool, &'static str> {
+    ) -> Result<Admission, &'static str> {
         if request["instance"] != context.instance {
-            return Ok(false);
+            return Ok(Admission::Rejected);
         }
         context.state["error"] = Value::Null;
         if desktop.is_some_and(|command| !command.valid(owner)) {
             context.state["error"] =
                 json!("The desktop command expired or its connection was replaced.");
-            return Ok(false);
+            return Ok(Admission::Rejected);
         }
         if let Err(error) = self.validate(request, context) {
             context.state["error"] = json!(error);
-            return Ok(false);
+            return Ok(Admission::Rejected);
         }
         // Save policy before cancelling speculative output; failed and unchanged
         // preferences must leave the staged successor alone.
@@ -157,31 +252,31 @@ impl Playback<'_> {
                     if context.output.selection.as_ref() == Some(&selection)
                         && self.player.status().output_selection.as_ref() == Some(&selection) =>
                 {
-                    return Ok(false);
+                    return Ok(Admission::Rejected);
                 }
                 Ok(selection) => {
                     if let Err(error) = context.output.set(selection) {
                         context.state["error"] = json!(error);
-                        return Ok(false);
+                        return Ok(Admission::Rejected);
                     }
                 }
                 Err(error) => {
                     context.state["error"] = json!(error);
-                    return Ok(false);
+                    return Ok(Admission::Rejected);
                 }
             },
             "set_replaygain" => match serde_json::from_value::<gain::Mode>(request["mode"].clone())
             {
-                Ok(mode) if mode == context.gain.mode => return Ok(false),
+                Ok(mode) if mode == context.gain.mode => return Ok(Admission::Rejected),
                 Ok(mode) => {
                     if let Err(error) = context.gain.set(mode) {
                         context.state["error"] = json!(error);
-                        return Ok(false);
+                        return Ok(Admission::Rejected);
                     }
                 }
                 Err(_) => {
                     context.state["error"] = json!("Choose Off, Track, Album or Auto ReplayGain.");
-                    return Ok(false);
+                    return Ok(Admission::Rejected);
                 }
             },
             _ => {}
@@ -244,7 +339,7 @@ impl Playback<'_> {
                     json!("Buffered transition reset; playback paused for review.");
                 if let Err(error) = result {
                     context.state["error"] = json!(error);
-                    return Ok(false);
+                    return Ok(Admission::Rejected);
                 }
             }
         }
@@ -253,7 +348,7 @@ impl Playback<'_> {
                 context.state["error"] = json!(
                     "The desktop command expired or its connection closed before queue mutation."
                 );
-                return Ok(false);
+                return Ok(Admission::Rejected);
             }
             let view = mpris::View::capture(
                 self.queue,
@@ -268,7 +363,7 @@ impl Playback<'_> {
             let Some(mut translated) =
                 mpris::translate(&command.0.action, &view, self.queue, context.instance)
             else {
-                return Ok(false);
+                return Ok(Admission::Rejected);
             };
             // A reset changes playback intent; Toggle must not turn the original
             // request to pause into a fresh request to resume after that reset.
@@ -277,21 +372,34 @@ impl Playback<'_> {
             }
             *request = translated;
         }
-        // A native barrier may reveal a different current occurrence. Socket
-        // requests keep their original revision; desktop requests are translated
-        // against the new nominal view before mutation is admitted.
-        if let Err(error) = self.validate(request, context) {
-            context.state["error"] = json!(error);
-            return Ok(false);
+        // Resolve again after a reset: a socket keeps its revision, while a
+        // desktop command uses the translated nominal view.
+        let edit = match self.validate(request, context) {
+            Ok(edit) => edit,
+            Err(error) => {
+                context.state["error"] = json!(error);
+                return Ok(Admission::Rejected);
+            }
+        };
+        // No await between this final fence and the admitted Queue mutation.
+        if desktop.is_some_and(|command| !command.valid(owner)) {
+            context.state["error"] = json!(
+                "The desktop command expired or its connection closed before queue mutation."
+            );
+            return Ok(Admission::Rejected);
         }
         if request["op"] == "set_output" {
             self.change_output(context.output, context.state, context.failed_or_stale)
                 .await?;
-            return Ok(false);
+            return Ok(Admission::Applied(Effects::default()));
         }
-        Ok(true)
+        if let Some(edit) = edit {
+            self.apply(edit, context).await
+        } else {
+            Ok(Admission::Forward)
+        }
     }
-    fn validate(&self, request: &mut Value, context: &Context<'_>) -> Result<(), String> {
+    fn validate(&self, request: &mut Value, context: &Context<'_>) -> Result<Option<Edit>, String> {
         let op = request["op"].as_str().unwrap_or("").to_owned();
         let effect = Effect::of(&op);
         if effect.requires_queue()
@@ -313,51 +421,71 @@ impl Playback<'_> {
             // maps it to Play and therefore still requires the displayed track.
             return self.validate(request, context);
         }
-        // Simulate only through Queue's public operations. Queue retains all
-        // membership and navigation rules; no duplicate validation model.
-        let mut trial = self.queue.clone();
-        let mut queue_result = Ok(());
-        match op.as_str() {
-            "navigation_select" => {
-                navigation_request(self.queue, request)?;
-            }
+        let edit = match op.as_str() {
             "retry_unavailable" | "skip_unavailable" => {
-                unavailable_request(self.queue, request)?;
+                let id = unavailable_request(self.queue, request)?;
+                if !context.connected {
+                    return Err(
+                        "Restore Plex sign-in before retrying or continuing playback.".into(),
+                    );
+                }
+                Some(if let Some(id) = id {
+                    Edit::Retry(id)
+                } else {
+                    Edit::Next { skip: true }
+                })
+            }
+            "navigation_select" => {
+                let (index, id) = navigation_request(self.queue, request)?;
+                Some(Edit::Revisit(index, id))
             }
             "reconnect" => {
-                reconnect_request(self.queue, request, context.account, context.credential)?
+                reconnect_request(self.queue, request, context.account, context.credential)?;
+                None
             }
-            "queue_remove" => {
-                queue_result = trial.remove(occurrence(request, "occurrence")?).map(|_| ())
-            }
-            "queue_move" => {
-                let before = serde_json::from_value(request["before"].clone())
-                    .map_err(|_| queue::Error::Missing.to_string())?;
-                queue_result = trial.move_before(occurrence(request, "occurrence")?, before);
-            }
+            "queue_remove" => Some(Edit::Remove(occurrence(request, "occurrence")?)),
+            "queue_move" => Some(Edit::Move(
+                occurrence(request, "occurrence")?,
+                serde_json::from_value(request["before"].clone())
+                    .map_err(|_| queue::Error::Missing.to_string())?,
+            )),
             "queue_play" => {
-                queue_result = trial.select(occurrence(request, "occurrence")?).map(|_| ())
+                if !context.connected {
+                    return Err("Restore Plex sign-in before playback.".into());
+                }
+                Some(Edit::Select(occurrence(request, "occurrence")?))
             }
-            "seek" => {
-                queue_result = trial.seek_to(
-                    request["seconds"]
-                        .as_f64()
-                        .ok_or("Choose a valid playback position.")?,
-                )
+            "clear_upcoming" => Some(Edit::ClearUpcoming),
+            "stop_clear" => Some(Edit::StopClear),
+            "next" => Some(Edit::Next { skip: false }),
+            "replay" => {
+                if !context.connected {
+                    return Err("Restore Plex sign-in before playback.".into());
+                }
+                Some(Edit::Replay)
             }
-            "set_shuffle" => {
-                queue_result = trial.set_shuffle(
-                    request["enabled"]
-                        .as_bool()
-                        .ok_or("Choose shuffle on or off.")?,
-                )
+            "previous" => {
+                let audio = self.player.status();
+                Some(Edit::Previous(
+                    (audio.generation == self.epochs.current)
+                        .then_some(audio.position_seconds)
+                        .flatten(),
+                ))
             }
-            "set_repeat" => {
-                queue_result = trial.set_repeat(
-                    serde_json::from_value(request["mode"].clone())
-                        .map_err(|_| "Choose Off, One or All repeat.")?,
-                )
-            }
+            "seek" => Some(Edit::Seek(
+                request["seconds"]
+                    .as_f64()
+                    .ok_or("Choose a valid playback position.")?,
+            )),
+            "set_shuffle" => Some(Edit::Shuffle(
+                request["enabled"]
+                    .as_bool()
+                    .ok_or("Choose shuffle on or off.")?,
+            )),
+            "set_repeat" => Some(Edit::Repeat(
+                serde_json::from_value(request["mode"].clone())
+                    .map_err(|_| "Choose Off, One or All repeat.")?,
+            )),
             "set_gapless" if request["enabled"].as_bool().is_none() => {
                 return Err("Choose gapless on or off.".into());
             }
@@ -367,14 +495,21 @@ impl Playback<'_> {
                 }
                 let track = crate::catalog_track(context.state, context.albums, request)
                     .map_err(str::to_owned)?;
-                queue_result = if op == "play" {
-                    trial.replace(track).map(|_| ())
+                Some(if op == "play" {
+                    Edit::Replace {
+                        tracks: vec![track],
+                        album: None,
+                        batch: false,
+                    }
                 } else {
-                    trial.enqueue(track, op == "play_next").map(|_| ())
-                };
+                    Edit::Enqueue {
+                        tracks: vec![track],
+                        next: op == "play_next",
+                        batch: false,
+                    }
+                })
             }
             "search_play" | "search_next" | "search_enqueue" => {
-                check_queue(self.queue, request).map_err(|e| e.to_string())?;
                 if !context.connected {
                     return Err("Connect Plex before using search results.".into());
                 }
@@ -382,49 +517,180 @@ impl Playback<'_> {
                     .search
                     .resolve(request, context.account)
                     .map_err(str::to_owned)?;
-                queue_result = if op == "search_play" {
-                    trial.replace(track).map(|_| ())
+                Some(if op == "search_play" {
+                    Edit::Replace {
+                        tracks: vec![track],
+                        album: None,
+                        batch: false,
+                    }
                 } else {
-                    trial.enqueue(track, op == "search_next").map(|_| ())
-                };
+                    Edit::Enqueue {
+                        tracks: vec![track],
+                        next: op == "search_next",
+                        batch: false,
+                    }
+                })
             }
             "play_selected" | "enqueue_selected" | "play_next_selected" => {
-                check_queue(self.queue, request).map_err(|e| e.to_string())?;
                 let tracks = catalog::selected_tracks(context.state, request, context.account)
                     .map_err(str::to_owned)?;
-                queue_result = match op.as_str() {
-                    "play_selected" => trial.replace_many(tracks).map(|_| ()),
-                    "play_next_selected" => trial.enqueue_next_many(tracks),
-                    _ => trial.enqueue_many(tracks),
-                };
+                Some(if op == "play_selected" {
+                    Edit::Replace {
+                        tracks,
+                        album: None,
+                        batch: true,
+                    }
+                } else {
+                    Edit::Enqueue {
+                        tracks,
+                        next: op == "play_next_selected",
+                        batch: true,
+                    }
+                })
             }
             "album_play" | "album_enqueue" => {
-                check_queue(self.queue, request).map_err(|e| e.to_string())?;
                 if !context.connected {
                     return Err("Connect Plex before queueing an album.".into());
                 }
                 let tracks = context.albums.tracks(request)?;
-                queue_result = if op == "album_play" {
-                    trial.replace_many(tracks).map(|_| ())
+                Some(if op == "album_play" {
+                    let album = context
+                        .albums
+                        .view
+                        .selected
+                        .as_ref()
+                        .ok_or("Missing album snapshot")?;
+                    Edit::Replace {
+                        tracks,
+                        album: Some((
+                            album.album.reference.clone(),
+                            album
+                                .tracks
+                                .iter()
+                                .map(|entry| entry.track.reference.clone())
+                                .collect(),
+                        )),
+                        batch: false,
+                    }
                 } else {
-                    trial.enqueue_many(tracks)
-                };
+                    Edit::Enqueue {
+                        tracks,
+                        next: false,
+                        batch: false,
+                    }
+                })
             }
             "playlist_play" | "playlist_enqueue" => {
-                check_queue(self.queue, request).map_err(|e| e.to_string())?;
                 let tracks = playlist_tracks(context.playlists, request)?;
                 if op == "playlist_play" && !context.connected {
                     return Err("Restore Plex sign-in before playback.".into());
                 }
-                queue_result = if op == "playlist_play" {
-                    trial.replace_many(tracks).map(|_| ())
+                Some(if op == "playlist_play" {
+                    Edit::Replace {
+                        tracks,
+                        album: None,
+                        batch: false,
+                    }
                 } else {
-                    trial.enqueue_many(tracks)
-                };
+                    Edit::Enqueue {
+                        tracks,
+                        next: false,
+                        batch: false,
+                    }
+                })
+            }
+            _ => None,
+        };
+        if let Some(edit) = &edit {
+            edit.apply(&mut self.queue.clone())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(edit)
+    }
+    async fn apply(
+        &mut self,
+        edit: Edit,
+        context: &mut Context<'_>,
+    ) -> Result<Admission, &'static str> {
+        let selected = self.queue.selected();
+        let prepare = match edit.apply(self.queue) {
+            Ok(track) => track,
+            Err(error) => {
+                context.state["error"] = json!(error.to_string());
+                return Ok(Admission::Rejected);
+            }
+        };
+        let mut effects = Effects {
+            prepare,
+            ..Default::default()
+        };
+        match &edit {
+            Edit::Replace { tracks, batch, .. } => {
+                *self.desired_playing = true;
+                if *batch {
+                    context.state["status"] =
+                        json!(format!("Applied selection of {} tracks.", tracks.len()));
+                }
+            }
+            Edit::Enqueue { tracks, batch, .. } if *batch => {
+                context.state["status"] =
+                    json!(format!("Applied selection of {} tracks.", tracks.len()))
+            }
+            Edit::Select(_) | Edit::Retry(_) => *self.desired_playing = true,
+            Edit::Next { skip: true } => {
+                effects.automatic = true;
+                *self.desired_playing = effects.prepare.is_some();
+                if !*self.desired_playing {
+                    context.state["status"] = json!(
+                        "No playable entries remain. Open Unavailable to retry or remove an entry."
+                    );
+                }
+            }
+            Edit::Next { skip: false } | Edit::Replay => {
+                if effects.prepare.is_none() {
+                    *self.desired_playing = false;
+                    context.state["status"] = json!("End of queue");
+                } else if matches!(edit, Edit::Replay) {
+                    *self.desired_playing = true;
+                }
+            }
+            Edit::Remove(id) if Some(*id) == selected && effects.prepare.is_none() => {
+                *self.desired_playing = false
+            }
+            Edit::StopClear => *self.desired_playing = false,
+            Edit::Seek(_) => {
+                effects.force_save = true;
+                effects.seeked = true;
+                if context.connected {
+                    effects.prepare = self
+                        .queue
+                        .selected()
+                        .and_then(|id| self.queue.visible_track(id).ok());
+                }
             }
             _ => {}
         }
-        queue_result.map_err(|e| e.to_string())
+        if matches!(edit, Edit::StopClear)
+            || matches!(edit, Edit::Remove(_)) && self.queue.selected().is_none()
+            || matches!(edit, Edit::Next { .. }) && effects.prepare.is_none()
+        {
+            if let Some(task) = self.pending.take() {
+                task.abort();
+            }
+            self.epochs.reset()?;
+            self.gapless.invalidate();
+            self.player.send(Command::Pause(true));
+            self.player.send(Command::Stop);
+            self.proxy.revoke().await;
+            context.state["selection"] = Value::Null;
+            context.state["audio"] = Value::Null;
+        }
+        context.state["intent"] = json!(if *self.desired_playing {
+            "playing"
+        } else {
+            "paused"
+        });
+        Ok(Admission::Applied(effects))
     }
     async fn change_output(
         &mut self,
@@ -594,6 +860,7 @@ mod tests {
                 owner,
             )
             .await
+            .map(|admission| !matches!(admission, Admission::Rejected))
             .unwrap()
         }
     }
@@ -753,7 +1020,7 @@ mod tests {
         f.automatic = Some(1);
         let mut request = f.request("set_output");
         request["mode"] = json!("desktop");
-        assert!(!f.configured(&mut request, &mut output, None, None).await);
+        assert!(f.configured(&mut request, &mut output, None, None).await);
         assert!(f.pending.is_none() && f.automatic.is_none());
         assert!(f.epochs.current > 1);
         assert!(f.presented.is_none());
@@ -841,6 +1108,52 @@ mod tests {
         assert_eq!(request["op"], "set_repeat");
         command.complete(&f.state);
         assert!(receiver.await.unwrap().is_ok());
+        owner.shutdown().await;
+    }
+    #[tokio::test]
+    async fn desktop_expiry_and_reply_closure_during_native_reset_prevent_queue_mutation() {
+        let bus = crate::mpris::tests::Bus::new().await;
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let owner =
+            mpris::Service::build(zbus::connection::Builder::address(bus.address.as_str()), tx)
+                .await
+                .unwrap();
+        for close in [true, false] {
+            let mut f = Fixture::staged().await;
+            f.player.send(Command::Pause(false));
+            wait(&f.player, |s| s.generation == 2 && !s.idle).await;
+            let (reply, receiver) = tokio::sync::oneshot::channel();
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(200);
+            let command = Desktop::new(mpris::Request {
+                owner: owner.id(),
+                action: mpris::Action::Loop(queue::Repeat::All),
+                deadline,
+                reply,
+            });
+            assert!(command.valid(Some(&owner)));
+            let mut request = f.request("set_repeat");
+            request["mode"] = json!("all");
+            let mut output = output::Settings::load(None);
+            let accepted = {
+                let admission =
+                    f.configured(&mut request, &mut output, Some(&command), Some(&owner));
+                tokio::pin!(admission);
+                assert!(matches!(
+                    futures_util::poll!(admission.as_mut()),
+                    std::task::Poll::Pending
+                ));
+                if close {
+                    drop(receiver);
+                } else {
+                    tokio::time::sleep_until(deadline).await;
+                }
+                admission.await
+            };
+            assert!(!accepted);
+            assert_eq!(f.queue.snapshot().repeat, queue::Repeat::Off);
+            assert_eq!(f.state["intent"], "paused");
+            assert!(!f.playing);
+        }
         owner.shutdown().await;
     }
     #[tokio::test]
