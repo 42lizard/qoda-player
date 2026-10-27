@@ -140,41 +140,21 @@ def atomic_file(path, content, mode):
         Path(temporary).unlink(missing_ok=True)
 
 
-def quote_exec(value, desktop=False):
-    value = str(value).replace("%", "%%").replace("\\", "\\\\").replace('"', '\\"')
-    if desktop:
-        # Desktop Entry string escaping happens before Exec argument unquoting.
-        value = value.replace("$", "\\$").replace("`", "\\`").replace("\\", "\\\\")
-    else:
-        value = value.replace("$", "$$")
-    return '"' + value + '"'
+def integrations(prefix, *, packaged=False):
+    files = launch_module().integration_files(prefix, packaged=packaged)
+    files["prefix"]["share/icons/hicolor/scalable/apps/qoda-player.svg"] = ((ROOT / "packaging/qoda-player.svg").read_bytes(), 0o644)
+    return files
 
 
-def integrations(prefix):
-    launcher = prefix / "bin/qoda"
-    current = prefix / "lib/qoda-player/current"
-    wrapper = ("#!/usr/bin/python3\nimport runpy\nrunpy.run_path(" + repr(str(current / "launch.py")) + ", run_name='__main__')\n").encode()
-    desktop = ("[Desktop Entry]\nType=Application\nName=Qoda Player\nComment=Browse and play your music\n"
-               f"Exec=/usr/bin/python3 {quote_exec(launcher, True)} show\nIcon=qoda-player\nTerminal=false\nCategories=AudioVideo;Audio;Player;\n"
-               "StartupWMClass=qoda-player\nActions=Toggle;Compact;Quit;\n" + "".join(
-                   f"\n[Desktop Action {name}]\nName={name}\nExec=/usr/bin/python3 {quote_exec(launcher, True)} {action}\n"
-                   for name, action in [("Toggle", "toggle"), ("Compact", "compact"), ("Quit", "quit")])).encode()
-    common = ("[Unit]\nDescription=Qoda {name}\nPartOf=graphical-session.target\nRequisite=graphical-session.target\nAfter=graphical-session.target\n"
-              "StartLimitIntervalSec=60\nStartLimitBurst=3\n\n[Service]\nType=exec\n")
-    backend = (common.format(name="backend") + f"ExecStart=/usr/bin/env -- {quote_exec(current / 'qoda-backend')} --ui-launcher {quote_exec(launcher)}\n"
-               "Restart=on-failure\nRestartPreventExitStatus=74 75 76 78 127\nRestartSec=2\nKillSignal=SIGINT\nTimeoutStopSec=10\nUMask=0077\n").encode()
-    ui = (common.format(name="interface").replace("PartOf=graphical-session.target", "PartOf=graphical-session.target qoda-backend.service").replace("Requisite=graphical-session.target", "Requisite=graphical-session.target qoda-backend.service").replace("After=graphical-session.target", "After=graphical-session.target qoda-backend.service") + f"ExecStart=/usr/bin/python3 {quote_exec(current / 'launch.py')} run-ui\n"
-          "Restart=no\nTimeoutStopSec=5\nUMask=0077\n").encode()
-    return {"prefix": {"bin/qoda": (wrapper, 0o755), "share/applications/qoda-player.desktop": (desktop, 0o644),
-                       "share/icons/hicolor/scalable/apps/qoda-player.svg": ((ROOT / "packaging/qoda-player.svg").read_bytes(), 0o644)},
-            "config": {"systemd/user/qoda-backend.service": (backend, 0o644), "systemd/user/qoda-ui.service": (ui, 0o644)}}
-
-
-def launcher_module():
+def launch_module():
     spec = importlib.util.spec_from_file_location("qoda_launcher", ROOT / "tools/launch.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def launcher_module():
+    return launch_module().Launch()
 
 
 def release_state_module():
@@ -201,7 +181,7 @@ def transaction_lock(prefix):
 
 def require_stopped():
     module = launcher_module()
-    if any(module.active(unit) for unit in module.UNITS):
+    if any(module.active(unit) for unit in module.units):
         raise ValueError("Quit Qoda before switching/removing releases; no playback was stopped")
     if (Path(os.environ["XDG_RUNTIME_DIR"]) / "qoda/backend.sock").exists():
         raise ValueError("A Qoda backend socket remains; quit the development player before changing releases")
@@ -357,8 +337,8 @@ def install(prefix, config, checkpointed=False, rollback_release=None):
                 except BaseException as activation_error:
                     safe_restart = True
                     if activation_started:
-                        service.manager("stop", *reversed(service.UNITS), check=False)
-                        if any(service.active(unit) for unit in service.UNITS):
+                        service.manager("stop", *reversed(service.units), check=False)
+                        if any(service.active(unit) for unit in service.units):
                             raise ValueError("Activation failed and new services could not stop; code and recovery files retained at " + str(stage)) from activation_error
                         try:
                             compatibility.rollback_compatible((root / "current").resolve(), (backup / "current").resolve())

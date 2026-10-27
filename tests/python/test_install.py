@@ -26,7 +26,8 @@ def load(name, path):
 
 
 installer = load("qoda_install", "tools/install.py")
-launcher = load("qoda_launch", "tools/launch.py")
+launch_module = load("qoda_launch", "tools/launch.py")
+launcher = launch_module.Launch()
 
 
 class Installation(unittest.TestCase):
@@ -41,8 +42,10 @@ class Installation(unittest.TestCase):
         self.environment.start()
         self.service = mock.Mock()
         self.service.active.return_value = False
-        self.service.UNITS = launcher.UNITS
+        self.service.units = launcher.units
         self.service.control_lock = launcher.control_lock
+        self.service.for_release.return_value = self.service
+        self.service.verify_ownership.side_effect = lambda directory: launch_module.Launch.verify_ownership(self.service, directory)
         self.module = mock.patch.object(installer, "launcher_module", return_value=self.service)
         self.module.start()
         self.generation = 1
@@ -95,7 +98,7 @@ class Installation(unittest.TestCase):
         fakebin.mkdir()
         events = self.base / "service-commands.jsonl"
         systemctl = fakebin / "systemctl"
-        systemctl.write_text("#!/usr/bin/python3\nimport json,sys\nfrom pathlib import Path\nassert sys.argv[1] == '--user' and sys.argv[2] in ['show','stop']\nwith Path(" + repr(str(events)) + ").open('a') as log: log.write(json.dumps(sys.argv[1:])+'\\n')\nif sys.argv[2] == 'show':\n print('inactive' if '--property=ActiveState' in sys.argv else 'LoadState=loaded\\nResult=exit-code\\nExecMainCode=1\\nExecMainStatus=74')\n")
+        systemctl.write_text("#!/usr/bin/python3\nimport json,sys,os\nfrom pathlib import Path\nassert sys.argv[1] == '--user' and sys.argv[2] in ['show','stop']\nwith Path(" + repr(str(events)) + ").open('a') as log: log.write(json.dumps(sys.argv[1:])+'\\n')\nif '--property=FragmentPath' in sys.argv: print('FragmentPath='+str(Path(os.environ['XDG_CONFIG_HOME'])/'systemd/user'/sys.argv[-1])+'\\nDropInPaths=')\nelif sys.argv[2] == 'show':\n print('inactive' if '--property=ActiveState' in sys.argv else 'LoadState=loaded\\nResult=exit-code\\nExecMainCode=1\\nExecMainStatus=74')\n")
         systemctl.chmod(0o755)
         environment = dict(os.environ, PATH=str(fakebin) + os.pathsep + os.environ["PATH"])
         command = [str(self.prefix / "bin/qoda")]
@@ -288,7 +291,7 @@ class Installation(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def running_manager(self, backend=True, ui=True):
-        states = dict(zip(launcher.UNITS, [backend, ui]))
+        states = dict(zip(launcher.units, [backend, ui]))
         events = []
         self.service.active.side_effect = lambda unit: states[unit]
         def manager(*args, **kwargs):
@@ -310,15 +313,15 @@ class Installation(unittest.TestCase):
         states,events,_=self.running_manager()
         stage=self.stage
         def build(path):
-            self.assertTrue(states[launcher.UNITS[0]])
+            self.assertTrue(states[launcher.units[0]])
             self.assertFalse(any(call[0]=="stop" for call in events))
             return stage(path)
         with mock.patch.object(installer,"stage_release",side_effect=build):
             installer.install(self.prefix,self.config,checkpointed=True)
         self.assertEqual(current.resolve().name,"0.1.0-fixture2")
-        self.assertLess(events.index(("stop",launcher.UNITS[1])),events.index(("pause-checkpoint",)))
-        self.assertLess(events.index(("pause-checkpoint",)),events.index(("stop",launcher.UNITS[0])))
-        self.assertLess(events.index(("stop",launcher.UNITS[0])),events.index(("daemon-reload",)))
+        self.assertLess(events.index(("stop",launcher.units[1])),events.index(("pause-checkpoint",)))
+        self.assertLess(events.index(("pause-checkpoint",)),events.index(("stop",launcher.units[0])))
+        self.assertLess(events.index(("stop",launcher.units[0])),events.index(("daemon-reload",)))
         self.assertTrue(all(states.values()))
         self.service.verify_shutdown.assert_called_once()
         self.service.write_owner.assert_called_once()
@@ -341,7 +344,7 @@ class Installation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"checkpoint failure"):
             installer.install(self.prefix,self.config,checkpointed=True)
         self.assertEqual(installer.inventory(current.parent),before)
-        self.assertTrue(states[launcher.UNITS[0]])
+        self.assertTrue(states[launcher.units[0]])
         self.assertFalse(any(call[0]=="start" for call in events))
         self.running_manager()
         self.service.manager.side_effect=lambda *args,**kwargs:subprocess.CompletedProcess(args,0,stdout="FragmentPath=/other/unit\nDropInPaths=/override\n")
@@ -383,14 +386,14 @@ class Installation(unittest.TestCase):
         failed=False
         def fail_ui_once(*args,**kwargs):
             nonlocal failed
-            if args==("start",launcher.UNITS[1]) and not failed:
+            if args==("start",launcher.units[1]) and not failed:
                 failed=True;raise subprocess.CalledProcessError(1,args)
             return manager(*args,**kwargs)
         self.service.manager.side_effect=fail_ui_once
         with self.assertRaises(subprocess.CalledProcessError): installer.install(self.prefix,self.config,checkpointed=True)
         self.assertEqual(current.resolve().name,"0.1.0-fixture1")
         self.assertTrue(all(states.values()))
-        self.assertEqual(events.count(("start",launcher.UNITS[0])),2)
+        self.assertEqual(events.count(("start",launcher.units[0])),2)
         self.assertFalse(list((self.prefix / "lib").glob(".qoda-stage-*")))
 
     def test_failed_activation_with_changed_models_retains_both_payloads_and_blocks_restart(self):
@@ -399,7 +402,7 @@ class Installation(unittest.TestCase):
         original=installer.storage_evidence();changed=json.loads(json.dumps(original));changed["files"]["changed-model"]="e"*64
         changed["fingerprint"]=hashlib.sha256(json.dumps(changed["files"],sort_keys=True).encode()).hexdigest()
         def fail_ui(*args,**kwargs):
-            if args==("start",launcher.UNITS[1]): raise subprocess.CalledProcessError(1,args)
+            if args==("start",launcher.units[1]): raise subprocess.CalledProcessError(1,args)
             return manager(*args,**kwargs)
         self.service.manager.side_effect=fail_ui
         with mock.patch.object(installer,"storage_evidence",return_value=changed):
@@ -448,7 +451,7 @@ class Installation(unittest.TestCase):
             try:launcher.launch("quit")
             except ValueError as error:errors.append(error)
             finally:finished.set()
-        with mock.patch.object(launcher,"ROOT",old), mock.patch.object(launcher,"manager",self.service.manager), mock.patch.object(launcher,"active",self.service.active), mock.patch.object(launcher,"verify_shutdown",self.service.verify_shutdown):
+        with mock.patch.object(launcher,"root",old), mock.patch.object(launcher,"manager",self.service.manager), mock.patch.object(launcher,"active",self.service.active), mock.patch.object(launcher,"verify_shutdown",self.service.verify_shutdown):
             contender=threading.Thread(target=stale_launch);contender.start()
             self.assertFalse(finished.wait(.1));continue_switch.set();thread.join(5);contender.join(5)
         self.assertFalse(thread.is_alive());self.assertFalse(contender.is_alive())
@@ -589,15 +592,15 @@ class Launch(unittest.TestCase):
 
     def test_first_toggle_shows_and_existing_toggle_toggles(self):
         for ui_running in [False, True]:
-            with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.UNITS[0] or ui_running), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", return_value={"protocol": 1, "instance": "fixture"}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
+            with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.units[0] or ui_running), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager, mock.patch.object(launcher, "snapshot", return_value={"protocol": 1, "instance": "fixture"}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
                 launcher.launch("toggle")
                 ipc.assert_called_once_with("toggle" if ui_running else "show")
-                self.assertEqual([call.args for call in manager.call_args_list], [("start", launcher.UNITS[0]), ("start", launcher.UNITS[1])])
+                self.assertEqual([call.args for call in manager.call_args_list], [("start", launcher.units[0]), ("start", launcher.units[1])])
 
     def test_fenced_activation_never_starts_a_backend_and_writes_private_owner(self):
-        with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.UNITS[0]), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot", return_value={"instance": "fixture"}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
+        with mock.patch.object(launcher, "active", side_effect=lambda unit: unit == launcher.units[0]), mock.patch.object(launcher, "manager") as manager, mock.patch.object(launcher, "snapshot", return_value={"instance": "fixture"}), mock.patch.object(launcher, "ipc", return_value=True) as ipc:
             launcher.launch("search", expected_instance="fixture", expires=time.monotonic() * 1000 + 5000)
-        manager.assert_called_once_with("start", launcher.UNITS[1])
+        manager.assert_called_once_with("start", launcher.units[1])
         ipc.assert_called_once_with("search")
         owner = launcher.read_owner()
         self.assertEqual(owner["instance"], "fixture")
@@ -631,7 +634,7 @@ class Launch(unittest.TestCase):
             launcher.write_owner("fixture", time.monotonic() * 1000 + 5000)
         child = mock.Mock()
         child.poll.return_value = None
-        with mock.patch.object(launcher, "snapshot", side_effect=[{"instance":"fixture"}, {"instance":"newer"}]), mock.patch.object(launcher.subprocess, "Popen", return_value=child), mock.patch.object(launcher, "manager") as manager:
+        with mock.patch.object(launcher, "snapshot", side_effect=[{"instance":"fixture"}, {"instance":"newer"}]), mock.patch.object(subprocess, "Popen", return_value=child), mock.patch.object(launcher, "manager") as manager:
             with self.assertRaisesRegex(ValueError, "instance changed"):
                 launcher.run_ui()
         child.terminate.assert_called_once()
@@ -641,7 +644,7 @@ class Launch(unittest.TestCase):
     def test_expired_ui_handoff_starts_nothing(self):
         with launcher.control_lock():
             launcher.write_owner("fixture", time.monotonic() * 1000 - 1)
-        with mock.patch.object(launcher.subprocess, "Popen") as process:
+        with mock.patch.object(subprocess, "Popen") as process:
             with self.assertRaisesRegex(ValueError, "expired"):
                 launcher.run_ui()
         process.assert_not_called()
@@ -659,7 +662,7 @@ class Launch(unittest.TestCase):
         stage = self.runtime / "prefix/lib/.qoda-stage-fixture"
         stage.mkdir()
         (stage / "recovery-needed").touch()
-        with mock.patch.object(launcher, "ROOT", root), mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager:
+        with mock.patch.object(launcher, "root", root), mock.patch.object(launcher, "active", return_value=False), mock.patch.object(launcher, "manager", return_value=subprocess.CompletedProcess([], 0, stdout="LoadState=loaded\nResult=success\nExecMainCode=1\nExecMainStatus=0\n")) as manager:
             with self.assertRaisesRegex(ValueError, "interrupted installation"):
                 launcher.launch("show")
             manager.assert_not_called()

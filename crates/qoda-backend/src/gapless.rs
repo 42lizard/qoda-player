@@ -341,7 +341,7 @@ impl Controller {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::player::Command;
     use futures_util::StreamExt;
@@ -350,7 +350,7 @@ mod tests {
         ByteRange, CatalogPage, Library, MediaResponse, MediaSource, PreparedMedia, ProviderFuture,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
-    pub(super) struct Audio(pub(super) bytes::Bytes);
+    pub(crate) struct Audio(pub(crate) bytes::Bytes);
     impl MediaSource for Audio {
         fn open(&self, range: Option<ByteRange>, head: bool) -> ProviderFuture<'_, MediaResponse> {
             Box::pin(async move {
@@ -391,20 +391,20 @@ mod tests {
             })
         }
     }
-    pub(super) struct Provider {
-        pub(super) source: SourceId,
+    pub(crate) struct Provider {
+        pub(crate) source: SourceId,
         calls: AtomicUsize,
         fail: bool,
     }
     impl Provider {
-        pub(super) fn new() -> Arc<Self> {
+        pub(crate) fn new() -> Arc<Self> {
             Arc::new(Self {
                 source: SourceId::new(),
                 calls: AtomicUsize::new(0),
                 fail: false,
             })
         }
-        pub(super) fn track(&self, key: &str) -> Track {
+        pub(crate) fn track(&self, key: &str) -> Track {
             Track {
                 reference: TrackRef {
                     source: self.source,
@@ -416,14 +416,14 @@ mod tests {
                 duration_ms: Some(Counter::new(1000)),
             }
         }
-        pub(super) fn queue(&self) -> Queue {
+        pub(crate) fn queue(&self) -> Queue {
             let mut q = Queue::default();
             q.replace_many(vec![self.track("a"), self.track("b"), self.track("c")])
                 .unwrap();
             q
         }
     }
-    pub(super) fn wav() -> bytes::Bytes {
+    pub(crate) fn wav() -> bytes::Bytes {
         let pcm = vec![0_u8; 96000];
         let mut data = Vec::new();
         data.extend(b"RIFF");
@@ -470,7 +470,7 @@ mod tests {
             })
         }
     }
-    pub(super) async fn wait(player: &Player, predicate: impl Fn(&Status) -> bool) -> Status {
+    pub(crate) async fn wait(player: &Player, predicate: impl Fn(&Status) -> bool) -> Status {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let status = player.status();
@@ -779,70 +779,8 @@ mod tests {
 
 #[cfg(test)]
 mod boundary_tests {
-    use super::tests::{Audio, Provider, wait, wav};
+    use super::tests::{Audio, Provider, wav};
     use super::*;
-    use crate::player::Command;
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn buffered_reset_promotes_observed_selection_then_rejects_the_old_ui_revision_and_remains_paused()
-     {
-        let provider = Provider::new();
-        let mut queue = provider.queue();
-        let mut epochs = Epochs::default();
-        epochs.reset().unwrap();
-        let mut controller = Controller::default();
-        let proxy = Proxy::start().await.unwrap();
-        let player = Player::test_output("null").unwrap();
-        let mut presented = None;
-        let media = provider
-            .prepare(provider.source, "a".to_owned().try_into().unwrap())
-            .await
-            .unwrap();
-        queue.update_selected(media.track, &media.version).unwrap();
-        let url = proxy.grant(media.stream).await;
-        player.send(Command::Load(1, url, 0.0));
-        player.send(Command::Pause(false));
-        let first = wait(&player, |s| s.position_seconds.is_some_and(|p| p > 0.0)).await;
-        crate::record_clock(&mut queue, &first, 1, &mut presented, false);
-        let (tx, mut rx) = mpsc::channel(4);
-        controller
-            .schedule(
-                &queue,
-                &mut epochs,
-                provider.clone(),
-                tx,
-                crate::gain::Mode::Off,
-                false,
-            )
-            .unwrap();
-        let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
-            panic!("No future");
-        };
-        controller
-            .ready(reply, &queue, &epochs, &player, &proxy)
-            .await
-            .unwrap();
-        let stale = queue.snapshot();
-        let next = queue.pending()[0];
-        wait(&player, |s| s.generation == 2 && !s.idle).await;
-        let Some(before) = controller.cancel(&player, &proxy).await.unwrap() else {
-            panic!("Decoded future was falsely acknowledged untouched");
-        };
-        crate::finish_gapless_reset(
-            &mut controller,
-            &mut queue,
-            &mut epochs,
-            &before,
-            &mut presented,
-            &proxy,
-        )
-        .await
-        .unwrap();
-        assert_eq!(queue.selected(), Some(next));
-        assert!(queue.check(stale.session, stale.revision).is_err());
-        assert!(epochs.current > 2);
-        assert!(player.status().idle && player.status().paused);
-        assert_eq!(controller.view.phase, "review");
-    }
     #[tokio::test]
     async fn an_unobserved_short_native_successor_is_consumed_once_without_inventing_credit_or_repeating_it()
      {

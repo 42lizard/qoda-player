@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -78,7 +79,9 @@ def check(archive):
         assert len(manifest['commit'])==40 and manifest['version']==version.rsplit('-',1)[0]
         assert (release/'ui/shell.qml').is_file()
         unit=(root/'usr/lib/systemd/user/qoda-packaged-backend.service').read_text()
-        assert 'entry.py run-backend' in unit and '[Install]' not in unit
+        command=next(line.removeprefix('ExecStart=') for line in unit.splitlines() if line.startswith('ExecStart='))
+        assert shlex.split(command)==['/usr/bin/python3','/usr/lib/qoda-player/entry.py','run-backend']
+        assert '[Install]' not in unit
         # Start the actual packaged backend with an empty private profile. No UI,
         # audio stream, session bus, credential, network source or user data.
         runtime=base/'runtime';runtime.mkdir(mode=0o700)

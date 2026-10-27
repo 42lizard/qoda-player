@@ -540,7 +540,10 @@ impl Service {
             .await
             .map_err(|_| zbus::Error::Failure("Desktop connection timed out.".into()))?
     }
-    async fn build(builder: Builder<'_>, tx: mpsc::Sender<crate::Event>) -> zbus::Result<Self> {
+    pub(crate) async fn build(
+        builder: Builder<'_>,
+        tx: mpsc::Sender<crate::Event>,
+    ) -> zbus::Result<Self> {
         let id = uuid::Uuid::new_v4();
         let live = Arc::new(AtomicBool::new(true));
         let initial = View::default();
@@ -674,7 +677,7 @@ impl Drop for Service {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use futures_util::StreamExt;
     use qoda_core::{Counter, SourceId, TrackRef};
@@ -940,13 +943,13 @@ mod tests {
         };
         assert!(!request.is_live());
     }
-    struct Bus {
+    pub(crate) struct Bus {
         child: tokio::process::Child,
         directory: std::path::PathBuf,
-        address: String,
+        pub(crate) address: String,
     }
     impl Bus {
-        async fn new() -> Self {
+        pub(crate) async fn new() -> Self {
             let directory =
                 std::env::temp_dir().join(format!("qoda-mpris-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&directory).unwrap();

@@ -23,13 +23,18 @@ class PackageEntry(unittest.TestCase):
             commands=base/'commands';commands.mkdir()
             log=base/'calls'
             manager=commands/'systemctl'
-            manager.write_text('#!/usr/bin/python3\nimport sys,os\nfrom pathlib import Path\na=sys.argv[1:]\nwith open(os.environ["CALL_LOG"],"a") as f:f.write(" ".join(a)+"\\n")\nif "--property=FragmentPath" in a: print("FragmentPath="+os.environ["UNIT_DIR"]+"/"+a[-1]+"\\nDropInPaths=")\nelif "--property=ActiveState" in a: print("inactive")\nelse: print("LoadState=loaded\\nResult=success\\nExecMainCode=0\\nExecMainStatus=0")\n')
+            manager.write_text('#!/usr/bin/python3\nimport sys,os\nfrom pathlib import Path\na=sys.argv[1:]\nwith open(os.environ["CALL_LOG"],"a") as f:f.write(" ".join(a)+"\\n")\nif "--property=FragmentPath" in a: print("FragmentPath="+os.environ["UNIT_DIR"]+"/"+a[-1]+"\\nDropInPaths=")\nelif "--property=ActiveState" in a: print("inactive")\nelse: print("LoadState=loaded\\nResult=success\\nExecMainCode=1\\nExecMainStatus="+os.environ.get("EXIT_STATUS","0"))\n')
             manager.chmod(0o755)
             env=dict(os.environ,PATH=str(commands)+':'+os.environ['PATH'],XDG_RUNTIME_DIR=str(runtime),CALL_LOG=str(log),UNIT_DIR=str(base/'usr/lib/systemd/user'))
             result=subprocess.run(['python3',str(package/'entry.py'),'status'],env=env,capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)
             states=json.loads(result.stdout)['services']
             self.assertEqual(set(states),{'qoda-packaged-backend.service','qoda-packaged-ui.service'})
+            self.assertNotIn('start',log.read_text())
+            env['EXIT_STATUS']='74'
+            failed=subprocess.run(['python3',str(package/'entry.py'),'quit'],env=env,capture_output=True,text=True)
+            self.assertNotEqual(failed.returncode,0)
+            self.assertIn('journalctl --user -u qoda-packaged-backend.service',failed.stderr)
             self.assertNotIn('start',log.read_text())
             env['UNIT_DIR']=str(base/'overridden')
             refused=subprocess.run(['python3',str(package/'entry.py'),'show'],env=env,capture_output=True,text=True)

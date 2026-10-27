@@ -24,7 +24,7 @@ def load(name, filename):
 
 def check():
     installer = load("install_check", "install.py")
-    launcher = load("launch_check", "launch.py")
+    launcher = load("launch_check", "launch.py").Launch()
     with tempfile.TemporaryDirectory(prefix="qoda-installed-check-") as temporary:
         base = Path(temporary)
         runtime = base / "runtime"
@@ -36,8 +36,10 @@ def check():
                        "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(base / "absent-test-bus")}
         # All manager operations are replaced; host units are never reloaded or started.
         manager = mock.Mock()
-        manager.UNITS = launcher.UNITS
+        manager.units = launcher.units
         manager.control_lock = launcher.control_lock
+        manager.for_release.return_value = manager
+        manager.verify_ownership.side_effect = lambda directory: type(launcher).verify_ownership(manager, directory)
         manager.active.return_value = False
         def reload_only(*args):
             if args != ("daemon-reload",):
@@ -54,7 +56,7 @@ def check():
                 fakebin = base / "fakebin"
                 fakebin.mkdir()
                 command = fakebin / "systemctl"
-                command.write_text("#!/usr/bin/python3\nimport sys\nassert sys.argv[1:3] == ['--user', 'show']\nprint('inactive' if '--property=ActiveState' in sys.argv else 'LoadState=loaded\\nResult=success\\nExecMainCode=0\\nExecMainStatus=0')\n")
+                command.write_text("#!/usr/bin/python3\nimport sys,os\nfrom pathlib import Path\nassert sys.argv[1:3] == ['--user', 'show']\nif '--property=FragmentPath' in sys.argv: print('FragmentPath='+str(Path(os.environ['XDG_CONFIG_HOME'])/'systemd/user'/sys.argv[-1])+'\\nDropInPaths=')\nelse: print('inactive' if '--property=ActiveState' in sys.argv else 'LoadState=loaded\\nResult=success\\nExecMainCode=0\\nExecMainStatus=0')\n")
                 command.chmod(0o755)
                 result = subprocess.run([str(prefix / "bin/qoda"), "status"], capture_output=True, text=True, check=True,
                                         env=dict(os.environ, PATH=str(fakebin) + os.pathsep + os.environ["PATH"]))
@@ -99,24 +101,24 @@ def check():
                         return subprocess.CompletedProcess(args,0,stdout="")
                     if args[0]=="show":
                         return subprocess.CompletedProcess(args,0,stdout="FragmentPath="+str(config / "systemd/user" / args[-1])+"\nDropInPaths=\n")
-                    if args==("start",launcher.UNITS[0]):
+                    if args==("start",launcher.units[0]):
                         with (base / "native-update.log").open("ab") as log:
                             process=subprocess.Popen([str(current / "qoda-backend"),"--ui-launcher",str(prefix / "bin/qoda")],stdin=subprocess.DEVNULL,stdout=log,stderr=log)
                         return subprocess.CompletedProcess(args,0,stdout="")
-                    if args[0]=="stop" and all(unit in launcher.UNITS for unit in args[1:]):
-                        if launcher.UNITS[0] in args and process and process.poll() is None:
+                    if args[0]=="stop" and all(unit in launcher.units for unit in args[1:]):
+                        if launcher.units[0] in args and process and process.poll() is None:
                             process.send_signal(signal.SIGINT);last_exit=process.wait(timeout=15)
                         return subprocess.CompletedProcess(args,last_exit,stdout="")
                     raise AssertionError("Forbidden host/native manager operation: "+repr(args))
                 def verify_exit():
                     if last_exit!=0:raise ValueError("Private native backend checkpoint failed")
                 manager.manager.side_effect=native_manager
-                manager.active.side_effect=lambda unit:unit==launcher.UNITS[0] and process is not None and process.poll() is None
+                manager.active.side_effect=lambda unit:unit==launcher.units[0] and process is not None and process.poll() is None
                 manager.pause_checkpoint.side_effect=launcher.pause_checkpoint
                 manager.verify_shutdown.side_effect=verify_exit
                 manager.snapshot.side_effect=launcher.snapshot
                 manager.ipc.side_effect=AssertionError("No UI is started by the private manager adapter")
-                native_manager("start",launcher.UNITS[0])
+                native_manager("start",launcher.units[0])
                 deadline=time.monotonic()+10
                 while True:
                     try:before=launcher.snapshot();break
@@ -139,7 +141,7 @@ def check():
                 rolled=launcher.snapshot()
                 if current.resolve()!=original or rolled["instance"]==after["instance"] or rolled["intent"]!="paused":
                     raise AssertionError("Compatible rollback did not select and restart the original paused release")
-                native_manager("stop",launcher.UNITS[0]);verify_exit()
+                native_manager("stop",launcher.units[0]);verify_exit()
                 installer.remove(prefix, config)
                 if not all((base / path).exists() for path in installed_data):
                     raise AssertionError("Uninstall removed private session data")

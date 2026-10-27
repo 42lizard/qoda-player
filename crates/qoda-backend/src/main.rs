@@ -20,6 +20,7 @@ mod queue;
 mod recovery;
 mod reporting;
 mod search;
+mod session_commands;
 mod shutdown;
 mod source_format;
 mod storage;
@@ -30,6 +31,7 @@ use player::{Command, Player};
 use qoda_core::{OccurrenceId, SourceId, TrackRef};
 use qoda_provider::{BrowserPin, Credential, MusicProvider, PlexProvider};
 use serde_json::{Value, json};
+use session_commands::{check_queue, navigation_request, unavailable_request};
 use std::{
     collections::{HashMap, HashSet},
     io::Read,
@@ -348,38 +350,6 @@ fn output_view(
     }
     view
 }
-async fn finish_gapless_reset(
-    gapless: &mut gapless::Controller,
-    queue: &mut queue::Queue,
-    epochs: &mut gapless::Epochs,
-    before: &player::Status,
-    presented: &mut Option<u64>,
-    proxy: &proxy::Proxy,
-) -> Result<(), String> {
-    let stream_failed = proxy.failed().await;
-    let promoted = gapless.handoff(queue, epochs, before, proxy).await;
-    record_clock(queue, before, epochs.current, presented, stream_failed);
-    gapless.invalidate();
-    proxy.revoke().await;
-    epochs.reset().map_err(str::to_owned)?;
-    gapless.review();
-    promoted.map(|_| ())
-}
-fn navigation_request(
-    queue: &queue::Queue,
-    request: &Value,
-) -> Result<(u64, OccurrenceId), String> {
-    check_queue(queue, request).map_err(|error| error.to_string())?;
-    let index = serde_json::from_value::<qoda_core::Counter>(request["index"].clone())
-        .map_err(|_| "Choose an entry from the current Previous path.")?
-        .get();
-    let occurrence = serde_json::from_value::<OccurrenceId>(request["occurrence"].clone())
-        .map_err(|_| "Choose an entry from the current Previous path.")?;
-    queue
-        .navigation_target(index, occurrence)
-        .map_err(|error| error.to_string())?;
-    Ok((index, occurrence))
-}
 fn version_failure(error: &queue::Error, version: &str) -> Option<queue::Unavailable> {
     (*error == queue::Error::Version && !version.is_empty() && version.len() <= 512)
         .then_some(queue::Unavailable::VersionChanged)
@@ -400,105 +370,6 @@ fn preparation_failure(
         }
     }
     Ok(None)
-}
-fn unavailable_request(
-    queue: &queue::Queue,
-    request: &Value,
-) -> Result<Option<OccurrenceId>, String> {
-    check_queue(queue, request).map_err(|error| error.to_string())?;
-    if request["op"] == "skip_unavailable" {
-        if queue.selected_unavailable() {
-            return Ok(None);
-        }
-    } else if request["op"] == "retry_unavailable"
-        && let Ok(id) = serde_json::from_value::<OccurrenceId>(request["occurrence"].clone())
-        && queue.is_unavailable(id)
-    {
-        return Ok(Some(id));
-    }
-    Err("That unavailable entry changed. Review the current session.".into())
-}
-fn reconnect_request(
-    queue: &queue::Queue,
-    request: &Value,
-    account: u64,
-    credential: bool,
-) -> Result<(), String> {
-    check_queue(queue, request).map_err(|e| e.to_string())?;
-    if !credential {
-        return Err("Restore sign-in or connect Plex before reconnecting.".into());
-    }
-    if request["account_epoch"].as_str() != Some(account.to_string().as_str()) {
-        return Err("The account changed. Review the connection before retrying.".into());
-    }
-    Ok(())
-}
-fn guarded_queue_command(op: &str) -> bool {
-    matches!(
-        op,
-        "play"
-            | "play_selected"
-            | "album_play"
-            | "playlist_play"
-            | "queue_play"
-            | "replay"
-            | "previous"
-            | "navigation_select"
-            | "retry_unavailable"
-            | "skip_unavailable"
-            | "next"
-            | "seek"
-            | "stop"
-            | "stop_clear"
-            | "queue_remove"
-            | "clear_upcoming"
-            | "queue_move"
-            | "enqueue"
-            | "play_next"
-            | "enqueue_selected"
-            | "play_next_selected"
-            | "set_shuffle"
-            | "set_repeat"
-            | "set_gapless"
-            | "set_replaygain"
-            | "set_output"
-            | "album_enqueue"
-            | "playlist_enqueue"
-            | "disconnect"
-            | "reconnect"
-            | "forget_signin"
-            | "search_play"
-            | "search_next"
-            | "search_enqueue"
-            | "quit"
-    )
-}
-fn changes_current(op: &str, request: &Value, queue: &queue::Queue) -> bool {
-    matches!(
-        op,
-        "play"
-            | "play_selected"
-            | "album_play"
-            | "playlist_play"
-            | "queue_play"
-            | "replay"
-            | "previous"
-            | "navigation_select"
-            | "retry_unavailable"
-            | "skip_unavailable"
-            | "next"
-            | "seek"
-            | "stop"
-            | "stop_clear"
-            | "disconnect"
-            | "reconnect"
-            | "forget_signin"
-            | "quit"
-            | "set_output"
-            | "search_play"
-    ) || op == "queue_remove"
-        && serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
-            == queue.selected()
 }
 enum ResumePlan {
     Waiting,
@@ -537,13 +408,6 @@ fn resume_selection(
         Some(track) => ResumePlan::Prepare(track),
         None => ResumePlan::Exhausted,
     })
-}
-fn check_queue(queue: &queue::Queue, request: &Value) -> Result<(), queue::Error> {
-    let session = serde_json::from_value(request["queue_session"].clone())
-        .map_err(|_| queue::Error::Conflict)?;
-    let revision = serde_json::from_value(request["queue_revision"].clone())
-        .map_err(|_| queue::Error::Conflict)?;
-    queue.check(session, revision)
 }
 fn storage_result(state: &mut Value, result: Result<Option<storage::Error>, storage::Error>) {
     match result {
@@ -843,7 +707,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     result => {
                         if !proxy.failed().await {
                         desired_playing=false;
-                        if let Ok(before)=player.barrier().await {let _=finish_gapless_reset(&mut gapless,&mut queue,&mut epochs,&before,&mut presented_generation,&proxy).await;}
+                        if let Ok(before)=player.barrier().await {let _=session_commands::finish_gapless_reset(&mut gapless,&mut queue,&mut epochs,&before,&mut presented_generation,&proxy).await;}
                         else {gapless.invalidate();proxy.revoke().await;epochs.reset()?;gapless.review();}
                         state["error"]=json!(result.err().unwrap_or_else(||"An unbound native transition was reset; review the selected occurrence.".into()));
                         state["intent"]=json!("paused");gapless_changed=true;
@@ -934,10 +798,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        let mut desktop_reply = None;
-        let mut desktop_action = None;
-        let mut desktop_deadline = None;
-        let mut desktop_owner = None;
+        let mut desktop_command = None;
         let mut event = if let Event::Desktop(request) = event {
             if !desktop
                 .as_ref()
@@ -966,10 +827,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .with_ui(!ui_peers.is_empty() || ui_launcher.available());
             if let Some(command) = mpris::translate(&request.action, &view, &queue, &instance) {
-                desktop_deadline = Some(request.deadline);
-                desktop_owner = Some(request.owner);
-                desktop_action = Some(request.action);
-                desktop_reply = Some(request.reply);
+                desktop_command = Some(session_commands::Desktop::new(request));
                 Event::Request(command)
             } else {
                 let _ = request.reply.send(Ok(()));
@@ -978,235 +836,44 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             event
         };
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && matches!(
-                request["op"].as_str(),
-                Some("search_play" | "search_next" | "search_enqueue")
-            )
-            && let Err(error) = check_queue(&queue, request)
-                .map_err(|error| error.to_string())
-                .and_then(|()| {
-                    if provider.is_some() {
-                        search
-                            .resolve(request, auth_generation)
-                            .map(|_| ())
-                            .map_err(str::to_owned)
-                    } else {
-                        Err("Connect Plex before using search results.".into())
-                    }
-                })
-        {
-            state["error"] = json!(error);
-            event = Event::Checkpoint;
-        }
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && catalog::is_batch(request["op"].as_str().unwrap_or(""))
-            && let Err(error) = catalog::selected_tracks(&state, request, auth_generation)
-        {
-            state["error"] = json!(error);
-            event = Event::Checkpoint;
-        }
-        if let Event::Request(request) = &mut event
-            && request["instance"] == instance
-            && matches!(request["op"].as_str(), Some("retry_stream" | "skip_stream"))
-        {
-            if recovery.view.phase != "exhausted"
-                || check_queue(&queue, request).is_err()
-                || serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
-                    != queue.selected()
-            {
-                state["error"] = json!("Recovery selection changed; review the current queue.");
-                event = Event::Checkpoint;
-            } else {
-                request["op"] = json!(if request["op"] == "retry_stream" {
-                    "play"
-                } else {
-                    "next"
-                });
-            }
-        }
-        // Reject stale/invalid path rows before cancelling any speculative output.
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && request["op"] == "navigation_select"
-            && let Err(error) = navigation_request(&queue, request)
-        {
-            state["error"] = json!(error);
-            event = Event::Checkpoint;
-        }
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && matches!(
-                request["op"].as_str(),
-                Some("retry_unavailable" | "skip_unavailable")
-            )
-            && let Err(error) = unavailable_request(&queue, request)
-        {
-            state["error"] = json!(error);
-            event = Event::Checkpoint;
-        }
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && request["op"] == "set_output"
-        {
-            match output_settings.request(request, &output_devices) {
-                Ok(selection)
-                    if output_settings.selection.as_ref() == Some(&selection)
-                        && player.status().output_selection.as_ref() == Some(&selection) =>
-                {
-                    state["error"] = Value::Null;
-                    event = Event::Checkpoint;
-                }
-                Ok(selection) => {
-                    if let Err(error) = output_settings.set(selection) {
-                        state["error"] = json!(error);
-                        event = Event::Checkpoint;
-                    }
-                }
-                Err(error) => {
-                    state["error"] = json!(error);
-                    event = Event::Checkpoint;
-                }
-            }
-        }
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && request["op"] == "reconnect"
-            && let Err(error) = reconnect_request(
-                &queue,
-                request,
-                auth_generation,
-                current_credential.is_some(),
-            )
-        {
-            state["error"] = json!(error);
-            event = Event::Checkpoint;
-        }
-        // Validate and persist before touching speculative output. A failed
-        // save or an unchanged mode must not cancel/rebuild a staged successor.
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && request["op"] == "set_replaygain"
-        {
-            match serde_json::from_value::<gain::Mode>(request["mode"].clone()) {
-                Ok(mode) if mode == gain_settings.mode => {
-                    state["error"] = Value::Null;
-                    event = Event::Checkpoint;
-                }
-                Ok(mode) => {
-                    if let Err(error) = gain_settings.set(mode) {
-                        state["error"] = json!(error);
-                        event = Event::Checkpoint;
-                    }
-                }
-                Err(_) => {
-                    state["error"] = json!("Choose Off, Track, Album or Auto ReplayGain.");
-                    event = Event::Checkpoint;
-                }
-            }
-        }
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && (guarded_queue_command(request["op"].as_str().unwrap_or(""))
-                || request["op"] == "pause")
-            && (request.get("queue_session").is_none() || check_queue(&queue, request).is_ok())
-            && recovery.cancel()
-        {
-            desired_playing = false;
-            player.send(Command::Pause(true));
-            player.send(Command::Stop);
-            epochs.reset()?;
-            player.invalidate_load(epochs.current);
-            gapless.invalidate();
-            proxy.revoke().await;
-            presented_generation = None;
-            state["audio"] = Value::Null;
-            state["intent"] = json!("paused");
-            state["status"] = json!("Recovery cancelled; resume explicitly.");
-        }
-        if let Event::Request(request) = &event
-            && request["instance"] == instance
-            && guarded_queue_command(request["op"].as_str().unwrap_or(""))
-            && (request.get("queue_session").is_none() || check_queue(&queue, request).is_ok())
-        {
-            let op = request["op"].as_str().unwrap_or("");
-            let cancelled = gapless.cancel(&player, &proxy).await;
-            let reset = match cancelled {
-                Ok(Some(before)) => Some(Ok(before)),
-                Ok(None)
-                    if gapless.chained
-                        && changes_current(op, request, &queue)
-                        && presented_generation != Some(epochs.current) =>
-                {
-                    Some(player.barrier().await)
-                }
-                Ok(None) => None,
-                Err(_) => Some(player.barrier().await),
+        if let Event::Request(request) = &mut event {
+            let mut commands = session_commands::Playback {
+                queue: &mut queue,
+                player: &player,
+                proxy: &proxy,
+                epochs: &mut epochs,
+                gapless: &mut gapless,
+                recovery: &mut recovery,
+                desired_playing: &mut desired_playing,
+                presented: &mut presented_generation,
+                pending: &mut prepare_task,
+                automatic: &mut automatic_preparation,
             };
-            if let Some(reset) = reset {
-                desired_playing = false;
-                match reset {
-                    Ok(before) => {
-                        if let Err(error) = finish_gapless_reset(
-                            &mut gapless,
-                            &mut queue,
-                            &mut epochs,
-                            &before,
-                            &mut presented_generation,
-                            &proxy,
-                        )
-                        .await
-                        {
-                            state["error"] = json!(error);
-                            event = Event::Checkpoint;
-                        }
-                    }
-                    Err(error) => {
-                        gapless.invalidate();
-                        proxy.revoke().await;
-                        epochs.reset()?;
-                        player.send(Command::Pause(true));
-                        gapless.review();
-                        state["error"] = json!(error);
-                        event = Event::Checkpoint;
-                    }
-                }
-                state["audio"] = Value::Null;
-                state["intent"] = json!("paused");
-                state["status"] = json!("Buffered transition reset; playback paused for review.");
-            }
-        }
-        if let Some(action) = &desktop_action {
-            if desktop_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now())
-                || !desktop_owner.is_some_and(|owner| {
-                    desktop
-                        .as_ref()
-                        .is_some_and(|service| service.id() == owner && service.is_live())
-                })
-                || desktop_reply
-                    .as_ref()
-                    .is_some_and(|reply| reply.is_closed())
+            let mut context = session_commands::Context {
+                instance: &instance,
+                account: auth_generation,
+                connected: provider.is_some(),
+                credential: current_credential.is_some(),
+                failed_or_stale: last_stream_failed || last_clock_stale,
+                can_raise: !ui_peers.is_empty() || ui_launcher.available(),
+                state: &mut state,
+                albums: &albums,
+                playlists: &playlists,
+                search: &search,
+                output: &mut output_settings,
+                devices: &output_devices,
+                gain: &mut gain_settings,
+            };
+            if !commands
+                .admit(
+                    request,
+                    &mut context,
+                    desktop_command.as_ref(),
+                    desktop.as_ref(),
+                )
+                .await?
             {
                 event = Event::Checkpoint;
-                state["error"] = json!(
-                    "The desktop command expired or its connection closed before queue mutation."
-                );
-            } else if matches!(event, Event::Request(_)) {
-                let view = mpris::View::capture(
-                    &queue,
-                    &player.status(),
-                    epochs.current,
-                    presented_generation,
-                    provider.is_some(),
-                    desired_playing,
-                    last_stream_failed || last_clock_stale,
-                )
-                .with_ui(!ui_peers.is_empty() || ui_launcher.available());
-                event = mpris::translate(action, &view, &queue, &instance)
-                    .map(Event::Request)
-                    .unwrap_or(Event::Checkpoint);
             }
         }
         if let Event::Recovery(reply) = event {
@@ -1307,7 +974,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     desired_playing = false;
                     match player.barrier().await {
                         Ok(before) => {
-                            let _ = finish_gapless_reset(
+                            let _ = session_commands::finish_gapless_reset(
                                 &mut gapless,
                                 &mut queue,
                                 &mut epochs,
@@ -1467,8 +1134,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                         state["revision"] = json!(revision.to_string());
                         updates.send_replace(state.clone());
-                        if let Some(reply) = desktop_reply.take() {
-                            let _ = reply.send(Ok(()));
+                        if let Some(command) = desktop_command.take() {
+                            command.complete(&state);
                         }
                         break;
                     }
@@ -1586,39 +1253,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
-                    "set_output" => {
-                        desired_playing = false;
-                        automatic_preparation = None;
-                        if let Some(task) = prepare_task.take() {
-                            task.abort();
-                        }
-                        match player.barrier().await {
-                            Ok(before) => {
-                                record_clock(
-                                    &mut queue,
-                                    &before,
-                                    epochs.current,
-                                    &mut presented_generation,
-                                    last_stream_failed || last_clock_stale,
-                                );
-                            }
-                            Err(error) => state["error"] = json!(error),
-                        }
-                        epochs.reset()?;
-                        player.invalidate_load(epochs.current);
-                        gapless.invalidate();
-                        proxy.revoke().await;
-                        presented_generation = None;
-                        if let Err(error) =
-                            player.configure(output_settings.selection.clone()).await
-                        {
-                            state["error"] = json!(error);
-                        }
-                        state["audio"] = Value::Null;
-                        state["intent"] = json!("paused");
-                        state["status"] =
-                            json!("Output changed; position retained. Choose Resume explicitly.");
-                    }
+                    "set_output" => {} // Applied atomically by command admission.
                     "refresh_outputs" => {
                         if output_task.as_ref().is_none_or(|task| task.is_finished()) {
                             let tx = tx.clone();
@@ -1800,24 +1435,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "playlist_play" | "playlist_enqueue" => {
                         let result: Result<(), String> = (|| {
                             check_queue(&queue, &v).map_err(|e| e.to_string())?;
-                            let reference = serde_json::from_value::<qoda_provider::PlaylistRef>(
-                                v["reference"].clone(),
-                            )
-                            .map_err(|_| "Choose a loaded playlist.")?;
-                            let snapshot = playlists.checked_snapshot(
-                                &reference,
-                                v["expected_revision"].as_str().unwrap_or_default(),
-                            )?;
-                            let start = if let Some(id) = v["item_id"].as_str() {
-                                snapshot
-                                    .entries
-                                    .iter()
-                                    .position(|e| e.id == id)
-                                    .ok_or("This playlist entry changed. Refresh first.")?
-                            } else {
-                                0
-                            };
-                            let tracks=snapshot.entries[start..].iter().map(|entry|entry.track.clone().ok_or_else(||"Some playlist source references could not be resolved; the snapshot was not partially queued.".to_owned())).collect::<Result<Vec<_>,_>>()?;
+                            let tracks = session_commands::playlist_tracks(&playlists, &v)?;
                             if v["op"] == "playlist_play" {
                                 if provider.is_none() {
                                     return Err("Restore Plex sign-in before playback.".into());
@@ -2803,12 +2421,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
         state["revision"] = json!(revision.to_string());
         updates.send_replace(state.clone());
-        if let Some(reply) = desktop_reply.take() {
-            let result = state["error"]
-                .as_str()
-                .map(|error| Err(error.to_owned()))
-                .unwrap_or(Ok(()));
-            let _ = reply.send(result);
+        if let Some(command) = desktop_command.take() {
+            command.complete(&state);
         }
     }
     let audio = player.status();
@@ -2884,13 +2498,13 @@ mod tests {
         let queue = queue::Queue::default();
         let snapshot = queue.snapshot();
         let mut request = json!({"queue_session":snapshot.session,"queue_revision":snapshot.revision,"account_epoch":"3"});
-        assert!(reconnect_request(&queue, &request, 3, true).is_ok());
-        assert!(reconnect_request(&queue, &request, 3, false).is_err());
+        assert!(session_commands::reconnect_request(&queue, &request, 3, true).is_ok());
+        assert!(session_commands::reconnect_request(&queue, &request, 3, false).is_err());
         request["account_epoch"] = json!("2");
-        assert!(reconnect_request(&queue, &request, 3, true).is_err());
+        assert!(session_commands::reconnect_request(&queue, &request, 3, true).is_err());
         request["account_epoch"] = json!("3");
         request["queue_revision"] = json!("18446744073709551615");
-        assert!(reconnect_request(&queue, &request, 3, true).is_err());
+        assert!(session_commands::reconnect_request(&queue, &request, 3, true).is_err());
     }
     use super::*;
     fn queued_selection() -> queue::Queue {
@@ -3067,8 +2681,6 @@ mod tests {
         assert_eq!(unavailable_request(&q, &request).unwrap(), Some(id));
         request["op"] = json!("skip_unavailable");
         assert_eq!(unavailable_request(&q, &request).unwrap(), None);
-        assert!(guarded_queue_command("retry_unavailable"));
-        assert!(changes_current("skip_unavailable", &request, &q));
     }
     #[test]
     fn navigation_commands_require_current_session_revision_and_exact_route_identity() {
@@ -3089,10 +2701,6 @@ mod tests {
         assert!(navigation_request(&other, &request).is_err());
         q.set_shuffle(true).unwrap();
         assert!(navigation_request(&q, &request).is_err());
-        assert!(guarded_queue_command("navigation_select"));
-        assert!(changes_current("navigation_select", &request, &q));
-        assert!(!guarded_queue_command("navigation_page"));
-        assert!(!changes_current("navigation_page", &request, &q));
     }
     #[test]
     fn stop_then_immediate_play_reloads_the_same_occurrence_instead_of_unpausing_stale_native_state()

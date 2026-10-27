@@ -11,7 +11,7 @@ import time
 # alone do not prove compatible representations or migration behavior.
 STORAGE_FILES = ("Cargo.toml", "Cargo.lock", "crates/qoda-backend/Cargo.toml",
                  *["crates/qoda-backend/src/" + name for name in (
-                     "main.rs", "storage.rs", "queue.rs", "archive.rs", "archive/store.rs",
+                     "main.rs", "session_commands.rs", "storage.rs", "queue.rs", "archive.rs", "archive/store.rs",
                      "cache_files.rs", "gain.rs", "output.rs", "offline.rs", "metadata_cache.rs", "artwork_store.rs")])
 
 
@@ -144,15 +144,11 @@ def rollback_compatible(current, target, check_data=True):
 
 
 def ownership(service, config):
-    for unit in service.UNITS:
-        result = service.manager("show", "--property=FragmentPath", "--property=DropInPaths", unit)
-        values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-        if values.get("FragmentPath") != str(config / "systemd/user" / unit) or values.get("DropInPaths"):
-            raise ValueError("Loaded Qoda units are overridden or unowned; no service was stopped")
+    service.verify_ownership(config / "systemd/user")
 
 
 def stop_checkpointed(service, config):
-    running = tuple(service.active(unit) for unit in service.UNITS)
+    running = tuple(service.active(unit) for unit in service.units)
     if any(running):
         ownership(service, config)
     if running[0]:
@@ -160,11 +156,11 @@ def stop_checkpointed(service, config):
     elif (Path(os.environ["XDG_RUNTIME_DIR"]) / "qoda/backend.sock").exists():
         raise ValueError("An unmanaged backend remains; stop it separately before switching releases")
     if running[1]:
-        service.manager("stop", service.UNITS[1])
+        service.manager("stop", service.units[1])
     if running[0]:
         service.pause_checkpoint()
-        result = service.manager("stop", service.UNITS[0], check=False)
-        if any(service.active(unit) for unit in service.UNITS):
+        result = service.manager("stop", service.units[0], check=False)
+        if any(service.active(unit) for unit in service.units):
             raise ValueError("Qoda is still stopping; release switch cancelled")
         service.verify_shutdown()
         if result.returncode != 0:
@@ -177,8 +173,8 @@ def stop_checkpointed(service, config):
 def restart_paused(service, root, running):
     if not running[0]:
         return
-    service.ROOT = (root / "current").resolve()
-    service.manager("start", service.UNITS[0])
+    service = service.for_release((root / "current").resolve())
+    service.manager("start", service.units[0])
     deadline = time.monotonic() + 10
     while True:
         try:
@@ -196,13 +192,13 @@ def restart_paused(service, root, running):
                 raise ValueError("Activated native playback was not paused")
             break
         except OSError:
-            if time.monotonic() >= deadline or not service.active(service.UNITS[0]):
+            if time.monotonic() >= deadline or not service.active(service.units[0]):
                 raise ValueError("Activated backend did not become ready") from None
             time.sleep(.05)
     if running[1]:
         service.write_owner(ready["instance"], deadline * 1000)
-        service.manager("start", service.UNITS[1])
+        service.manager("start", service.units[1])
         while not service.ipc("show"):
-            if time.monotonic() >= deadline or not service.active(service.UNITS[1]):
+            if time.monotonic() >= deadline or not service.active(service.units[1]):
                 raise ValueError("Activated UI did not become ready")
             time.sleep(.05)

@@ -4,12 +4,6 @@ use qoda_provider::{CatalogPage, Track};
 use serde_json::Value;
 use std::collections::HashSet;
 
-pub fn is_batch(op: &str) -> bool {
-    matches!(
-        op,
-        "play_selected" | "enqueue_selected" | "play_next_selected"
-    )
-}
 pub fn selected_tracks(
     state: &Value,
     request: &Value,

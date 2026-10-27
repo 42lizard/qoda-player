@@ -302,3 +302,9 @@ not arbitrary devices; it installs/closes parameters and writes no audio frames.
 Do not run it as part of general CI or assume it qualifies physical playback.
 
 The [nominal listening archive](listening-archive.md) is independent of Previous and session checkpoint backups. Its retention, export and migration contract was recorded before storage was added.
+
+Command admission, buffered reset ordering and the two installed launch paths are
+mapped in [command and launch ownership](command-and-launch-ownership.md). Tests
+for command admission use native null output and synthetic provider streams; CLI
+contracts exercise source and pacman entry points with a private process-manager
+adapter. These checks do not qualify physical audio output.

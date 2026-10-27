@@ -99,7 +99,7 @@ async fn installed_pause_handshake_waits_for_native_pause_and_a_new_durable_seri
     opened.unwrap();
     durable.flush(queue.clone(), 0).await.unwrap();
     let initial_serial = durable.serial();
-    let mut child=tokio::process::Command::new("python3").args(["-c","import importlib.util,sys; s=importlib.util.spec_from_file_location('qoda',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.pause_checkpoint()",concat!(env!("CARGO_MANIFEST_DIR"),"/../../tools/launch.py")]).env("XDG_RUNTIME_DIR",&runtime).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true).spawn().unwrap();
+    let mut child=tokio::process::Command::new("python3").args(["-c","import importlib.util,sys; s=importlib.util.spec_from_file_location('qoda',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.Launch().pause_checkpoint()",concat!(env!("CARGO_MANIFEST_DIR"),"/../../tools/launch.py")]).env("XDG_RUNTIME_DIR",&runtime).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true).spawn().unwrap();
     let (socket, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
         .await
         .unwrap()

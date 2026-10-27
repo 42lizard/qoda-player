@@ -25,30 +25,16 @@ def stage(source, destination, version):
     (release / 'release.json').write_text(json.dumps({'version': version, 'commit': commit, 'protocol': 1, 'storage_compatibility': installer.storage_evidence()}, indent=2) + '\n')
     (release.parent.parent / 'current').symlink_to('releases/' + version)
     shutil.copy2(source / 'packaging/arch/entry.py', release.parent.parent / 'entry.py')
-    integrations = installer.integrations(prefix)
+    integrations = installer.integrations(prefix, packaged=True)
     for name, (content, mode) in integrations['prefix'].items():
         path = destination / 'usr' / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        if name == 'bin/qoda':
-            content = b"#!/usr/bin/python3\nimport runpy\nrunpy.run_path('/usr/lib/qoda-player/entry.py', run_name='__main__')\n"
         path.write_bytes(content)
         path.chmod(mode)
     for name, (content, mode) in integrations['config'].items():
-        name = name.replace('qoda-backend.service', 'qoda-packaged-backend.service').replace('qoda-ui.service', 'qoda-packaged-ui.service')
-        text = content.decode().replace('qoda-backend.service', 'qoda-packaged-backend.service').replace('qoda-ui.service', 'qoda-packaged-ui.service')
-        if name.endswith('qoda-packaged-backend.service'):
-            expected = 'ExecStart=/usr/bin/env -- "/usr/lib/qoda-player/current/qoda-backend" --ui-launcher "/usr/bin/qoda"'
-            if text.count(expected) != 1:
-                raise ValueError('Source backend unit changed; review packaged compatibility entry')
-            text = text.replace(expected, 'ExecStart=/usr/bin/python3 /usr/lib/qoda-player/entry.py run-backend')
-        else:
-            expected = '/usr/lib/qoda-player/current/launch.py'
-            if text.count(expected) != 1:
-                raise ValueError('Source UI unit changed; review packaged entry')
-            text = text.replace(expected, '/usr/lib/qoda-player/entry.py')
         path = destination / 'usr/lib' / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_bytes(content)
         path.chmod(mode)
     for name, relative in [('LICENSE', 'usr/share/licenses/qoda-player/LICENSE'), ('README.md', 'usr/share/doc/qoda-player/README.md')]:
         path = destination / relative

@@ -1,0 +1,920 @@
+//! Listening-session command admission owns validation before cancellation,
+//! native reset ordering and desktop acknowledgement. Queue owns membership,
+//! visits and navigation; Player/gapless retain native output implementation.
+use crate::{
+    albums, catalog, gain, gapless, mpris, output,
+    player::{self, Command, Player},
+    playlists, proxy, queue, record_clock, recovery, search,
+};
+use qoda_core::OccurrenceId;
+use serde_json::{Value, json};
+pub(crate) fn navigation_request(
+    queue: &queue::Queue,
+    request: &Value,
+) -> Result<(u64, OccurrenceId), String> {
+    check_queue(queue, request).map_err(|error| error.to_string())?;
+    let index = serde_json::from_value::<qoda_core::Counter>(request["index"].clone())
+        .map_err(|_| "Choose an entry from the current Previous path.")?
+        .get();
+    let occurrence = serde_json::from_value::<OccurrenceId>(request["occurrence"].clone())
+        .map_err(|_| "Choose an entry from the current Previous path.")?;
+    queue
+        .navigation_target(index, occurrence)
+        .map_err(|error| error.to_string())?;
+    Ok((index, occurrence))
+}
+
+pub(crate) fn unavailable_request(
+    queue: &queue::Queue,
+    request: &Value,
+) -> Result<Option<OccurrenceId>, String> {
+    check_queue(queue, request).map_err(|error| error.to_string())?;
+    if request["op"] == "skip_unavailable" {
+        if queue.selected_unavailable() {
+            return Ok(None);
+        }
+    } else if request["op"] == "retry_unavailable"
+        && let Ok(id) = serde_json::from_value::<OccurrenceId>(request["occurrence"].clone())
+        && queue.is_unavailable(id)
+    {
+        return Ok(Some(id));
+    }
+    Err("That unavailable entry changed. Review the current session.".into())
+}
+pub(crate) fn reconnect_request(
+    queue: &queue::Queue,
+    request: &Value,
+    account: u64,
+    credential: bool,
+) -> Result<(), String> {
+    check_queue(queue, request).map_err(|e| e.to_string())?;
+    if !credential {
+        return Err("Restore sign-in or connect Plex before reconnecting.".into());
+    }
+    if request["account_epoch"].as_str() != Some(account.to_string().as_str()) {
+        return Err("The account changed. Review the connection before retrying.".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn check_queue(queue: &queue::Queue, request: &Value) -> Result<(), queue::Error> {
+    let session = serde_json::from_value(request["queue_session"].clone())
+        .map_err(|_| queue::Error::Conflict)?;
+    let revision = serde_json::from_value(request["queue_revision"].clone())
+        .map_err(|_| queue::Error::Conflict)?;
+    queue.check(session, revision)
+}
+pub(crate) async fn finish_gapless_reset(
+    gapless: &mut gapless::Controller,
+    queue: &mut queue::Queue,
+    epochs: &mut gapless::Epochs,
+    before: &player::Status,
+    presented: &mut Option<u64>,
+    proxy: &proxy::Proxy,
+) -> Result<(), String> {
+    let stream_failed = proxy.failed().await;
+    let promoted = gapless.handoff(queue, epochs, before, proxy).await;
+    record_clock(queue, before, epochs.current, presented, stream_failed);
+    gapless.invalidate();
+    proxy.revoke().await;
+    epochs.reset().map_err(str::to_owned)?;
+    gapless.review();
+    promoted.map(|_| ())
+}
+
+/// Borrowed runtime ownership keeps transition sequencing inside this module.
+/// Catalog/account lifetimes remain with the coordinator, not with the command.
+pub struct Playback<'a> {
+    pub queue: &'a mut queue::Queue,
+    pub player: &'a Player,
+    pub proxy: &'a proxy::Proxy,
+    pub epochs: &'a mut gapless::Epochs,
+    pub gapless: &'a mut gapless::Controller,
+    pub recovery: &'a mut recovery::Controller,
+    pub desired_playing: &'a mut bool,
+    pub presented: &'a mut Option<u64>,
+    pub pending: &'a mut Option<tokio::task::JoinHandle<()>>,
+    pub automatic: &'a mut Option<u64>,
+}
+pub struct Context<'a> {
+    pub instance: &'a str,
+    pub account: u64,
+    pub connected: bool,
+    pub credential: bool,
+    pub failed_or_stale: bool,
+    pub can_raise: bool,
+    pub state: &'a mut Value,
+    pub albums: &'a albums::Controller,
+    pub playlists: &'a playlists::Controller,
+    pub search: &'a search::Controller,
+    pub output: &'a mut output::Settings,
+    pub devices: &'a [output::Device],
+    pub gain: &'a mut gain::Settings,
+}
+pub struct Desktop(mpris::Request);
+impl Desktop {
+    pub fn new(request: mpris::Request) -> Self {
+        Self(request)
+    }
+    fn valid(&self, owner: Option<&mpris::Service>) -> bool {
+        self.0.is_live()
+            && owner.is_some_and(|service| service.id() == self.0.owner && service.is_live())
+    }
+    pub fn complete(self, state: &Value) {
+        let result = state["error"]
+            .as_str()
+            .map(|s| Err(s.to_owned()))
+            .unwrap_or(Ok(()));
+        let _ = self.0.reply.send(result);
+    }
+}
+impl Playback<'_> {
+    pub async fn admit(
+        &mut self,
+        request: &mut Value,
+        context: &mut Context<'_>,
+        desktop: Option<&Desktop>,
+        owner: Option<&mpris::Service>,
+    ) -> Result<bool, &'static str> {
+        if request["instance"] != context.instance {
+            return Ok(false);
+        }
+        context.state["error"] = Value::Null;
+        if desktop.is_some_and(|command| !command.valid(owner)) {
+            context.state["error"] =
+                json!("The desktop command expired or its connection was replaced.");
+            return Ok(false);
+        }
+        if let Err(error) = self.validate(request, context) {
+            context.state["error"] = json!(error);
+            return Ok(false);
+        }
+        // Save policy before cancelling speculative output; failed and unchanged
+        // preferences must leave the staged successor alone.
+        match request["op"].as_str().unwrap_or("") {
+            "set_output" => match context.output.request(request, context.devices) {
+                Ok(selection)
+                    if context.output.selection.as_ref() == Some(&selection)
+                        && self.player.status().output_selection.as_ref() == Some(&selection) =>
+                {
+                    return Ok(false);
+                }
+                Ok(selection) => {
+                    if let Err(error) = context.output.set(selection) {
+                        context.state["error"] = json!(error);
+                        return Ok(false);
+                    }
+                }
+                Err(error) => {
+                    context.state["error"] = json!(error);
+                    return Ok(false);
+                }
+            },
+            "set_replaygain" => match serde_json::from_value::<gain::Mode>(request["mode"].clone())
+            {
+                Ok(mode) if mode == context.gain.mode => return Ok(false),
+                Ok(mode) => {
+                    if let Err(error) = context.gain.set(mode) {
+                        context.state["error"] = json!(error);
+                        return Ok(false);
+                    }
+                }
+                Err(_) => {
+                    context.state["error"] = json!("Choose Off, Track, Album or Auto ReplayGain.");
+                    return Ok(false);
+                }
+            },
+            _ => {}
+        }
+        let effect = Effect::of(request["op"].as_str().unwrap_or(""));
+        if (effect != Effect::None || request["op"] == "pause") && self.recovery.cancel() {
+            *self.desired_playing = false;
+            self.player.send(Command::Pause(true));
+            self.player.send(Command::Stop);
+            self.epochs.reset()?;
+            self.player.invalidate_load(self.epochs.current);
+            self.gapless.invalidate();
+            self.proxy.revoke().await;
+            *self.presented = None;
+            context.state["audio"] = Value::Null;
+            context.state["intent"] = json!("paused");
+            context.state["status"] = json!("Recovery cancelled; resume explicitly.");
+        }
+        if effect != Effect::None {
+            let cancelled = self.gapless.cancel(self.player, self.proxy).await;
+            let reset = match cancelled {
+                Ok(Some(before)) => Some(Ok(before)),
+                Ok(None)
+                    if self.gapless.chained
+                        && effect.changes_current(request, self.queue)
+                        && *self.presented != Some(self.epochs.current) =>
+                {
+                    Some(self.player.barrier().await)
+                }
+                Ok(None) => None,
+                Err(_) => Some(self.player.barrier().await),
+            };
+            if let Some(reset) = reset {
+                *self.desired_playing = false;
+                let result = match reset {
+                    Ok(before) => {
+                        finish_gapless_reset(
+                            self.gapless,
+                            self.queue,
+                            self.epochs,
+                            &before,
+                            self.presented,
+                            self.proxy,
+                        )
+                        .await
+                    }
+                    Err(error) => {
+                        self.gapless.invalidate();
+                        self.proxy.revoke().await;
+                        self.epochs.reset()?;
+                        self.player.invalidate_load(self.epochs.current);
+                        self.player.send(Command::Pause(true));
+                        self.gapless.review();
+                        Err(error.to_owned())
+                    }
+                };
+                context.state["audio"] = Value::Null;
+                context.state["intent"] = json!("paused");
+                context.state["status"] =
+                    json!("Buffered transition reset; playback paused for review.");
+                if let Err(error) = result {
+                    context.state["error"] = json!(error);
+                    return Ok(false);
+                }
+            }
+        }
+        if let Some(command) = desktop {
+            if !command.valid(owner) {
+                context.state["error"] = json!(
+                    "The desktop command expired or its connection closed before queue mutation."
+                );
+                return Ok(false);
+            }
+            let view = mpris::View::capture(
+                self.queue,
+                &self.player.status(),
+                self.epochs.current,
+                *self.presented,
+                context.connected,
+                *self.desired_playing,
+                context.failed_or_stale || self.proxy.failed().await,
+            )
+            .with_ui(context.can_raise);
+            let Some(mut translated) =
+                mpris::translate(&command.0.action, &view, self.queue, context.instance)
+            else {
+                return Ok(false);
+            };
+            // A reset changes playback intent; Toggle must not turn the original
+            // request to pause into a fresh request to resume after that reset.
+            if request["op"] == "pause" {
+                translated["op"] = json!("pause");
+            }
+            *request = translated;
+        }
+        // A native barrier may reveal a different current occurrence. Socket
+        // requests keep their original revision; desktop requests are translated
+        // against the new nominal view before mutation is admitted.
+        if let Err(error) = self.validate(request, context) {
+            context.state["error"] = json!(error);
+            return Ok(false);
+        }
+        if request["op"] == "set_output" {
+            self.change_output(context.output, context.state, context.failed_or_stale)
+                .await?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+    fn validate(&self, request: &mut Value, context: &Context<'_>) -> Result<(), String> {
+        let op = request["op"].as_str().unwrap_or("").to_owned();
+        let effect = Effect::of(&op);
+        if effect.requires_queue()
+            || request.get("queue_session").is_some()
+                && (effect != Effect::None || matches!(op.as_str(), "pause" | "resume"))
+        {
+            check_queue(self.queue, request).map_err(|e| e.to_string())?;
+        }
+        if matches!(op.as_str(), "retry_stream" | "skip_stream") {
+            if self.recovery.view.phase != "exhausted"
+                || check_queue(self.queue, request).is_err()
+                || serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
+                    != self.queue.selected()
+            {
+                return Err("Recovery selection changed; review the current queue.".into());
+            }
+            request["op"] = json!(if op == "retry_stream" { "play" } else { "next" });
+            // Retry uses the retained selection; the coordinator historically
+            // maps it to Play and therefore still requires the displayed track.
+            return self.validate(request, context);
+        }
+        // Simulate only through Queue's public operations. Queue retains all
+        // membership and navigation rules; no duplicate validation model.
+        let mut trial = self.queue.clone();
+        let mut queue_result = Ok(());
+        match op.as_str() {
+            "navigation_select" => {
+                navigation_request(self.queue, request)?;
+            }
+            "retry_unavailable" | "skip_unavailable" => {
+                unavailable_request(self.queue, request)?;
+            }
+            "reconnect" => {
+                reconnect_request(self.queue, request, context.account, context.credential)?
+            }
+            "queue_remove" => {
+                queue_result = trial.remove(occurrence(request, "occurrence")?).map(|_| ())
+            }
+            "queue_move" => {
+                let before = serde_json::from_value(request["before"].clone())
+                    .map_err(|_| queue::Error::Missing.to_string())?;
+                queue_result = trial.move_before(occurrence(request, "occurrence")?, before);
+            }
+            "queue_play" => {
+                queue_result = trial.select(occurrence(request, "occurrence")?).map(|_| ())
+            }
+            "seek" => {
+                queue_result = trial.seek_to(
+                    request["seconds"]
+                        .as_f64()
+                        .ok_or("Choose a valid playback position.")?,
+                )
+            }
+            "set_shuffle" => {
+                queue_result = trial.set_shuffle(
+                    request["enabled"]
+                        .as_bool()
+                        .ok_or("Choose shuffle on or off.")?,
+                )
+            }
+            "set_repeat" => {
+                queue_result = trial.set_repeat(
+                    serde_json::from_value(request["mode"].clone())
+                        .map_err(|_| "Choose Off, One or All repeat.")?,
+                )
+            }
+            "set_gapless" if request["enabled"].as_bool().is_none() => {
+                return Err("Choose gapless on or off.".into());
+            }
+            "play" | "enqueue" | "play_next" => {
+                if !context.connected {
+                    return Err("Connect Plex before adding or playing tracks.".into());
+                }
+                let track = crate::catalog_track(context.state, context.albums, request)
+                    .map_err(str::to_owned)?;
+                queue_result = if op == "play" {
+                    trial.replace(track).map(|_| ())
+                } else {
+                    trial.enqueue(track, op == "play_next").map(|_| ())
+                };
+            }
+            "search_play" | "search_next" | "search_enqueue" => {
+                check_queue(self.queue, request).map_err(|e| e.to_string())?;
+                if !context.connected {
+                    return Err("Connect Plex before using search results.".into());
+                }
+                let track = context
+                    .search
+                    .resolve(request, context.account)
+                    .map_err(str::to_owned)?;
+                queue_result = if op == "search_play" {
+                    trial.replace(track).map(|_| ())
+                } else {
+                    trial.enqueue(track, op == "search_next").map(|_| ())
+                };
+            }
+            "play_selected" | "enqueue_selected" | "play_next_selected" => {
+                check_queue(self.queue, request).map_err(|e| e.to_string())?;
+                let tracks = catalog::selected_tracks(context.state, request, context.account)
+                    .map_err(str::to_owned)?;
+                queue_result = match op.as_str() {
+                    "play_selected" => trial.replace_many(tracks).map(|_| ()),
+                    "play_next_selected" => trial.enqueue_next_many(tracks),
+                    _ => trial.enqueue_many(tracks),
+                };
+            }
+            "album_play" | "album_enqueue" => {
+                check_queue(self.queue, request).map_err(|e| e.to_string())?;
+                if !context.connected {
+                    return Err("Connect Plex before queueing an album.".into());
+                }
+                let tracks = context.albums.tracks(request)?;
+                queue_result = if op == "album_play" {
+                    trial.replace_many(tracks).map(|_| ())
+                } else {
+                    trial.enqueue_many(tracks)
+                };
+            }
+            "playlist_play" | "playlist_enqueue" => {
+                check_queue(self.queue, request).map_err(|e| e.to_string())?;
+                let tracks = playlist_tracks(context.playlists, request)?;
+                if op == "playlist_play" && !context.connected {
+                    return Err("Restore Plex sign-in before playback.".into());
+                }
+                queue_result = if op == "playlist_play" {
+                    trial.replace_many(tracks).map(|_| ())
+                } else {
+                    trial.enqueue_many(tracks)
+                };
+            }
+            _ => {}
+        }
+        queue_result.map_err(|e| e.to_string())
+    }
+    async fn change_output(
+        &mut self,
+        settings: &output::Settings,
+        state: &mut Value,
+        failed_or_stale: bool,
+    ) -> Result<(), &'static str> {
+        *self.desired_playing = false;
+        *self.automatic = None;
+        if let Some(task) = self.pending.take() {
+            task.abort();
+        }
+        match self.player.barrier().await {
+            Ok(before) => {
+                record_clock(
+                    self.queue,
+                    &before,
+                    self.epochs.current,
+                    self.presented,
+                    failed_or_stale || self.proxy.failed().await,
+                );
+            }
+            Err(error) => state["error"] = json!(error),
+        }
+        self.epochs.reset()?;
+        self.player.invalidate_load(self.epochs.current);
+        self.gapless.invalidate();
+        self.proxy.revoke().await;
+        *self.presented = None;
+        if let Err(error) = self.player.configure(settings.selection.clone()).await {
+            state["error"] = json!(error);
+        }
+        state["audio"] = Value::Null;
+        state["intent"] = json!("paused");
+        state["status"] = json!("Output changed; position retained. Choose Resume explicitly.");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gapless::tests::{Provider, wait};
+    use qoda_provider::MusicProvider;
+    struct Fixture {
+        queue: queue::Queue,
+        player: Player,
+        proxy: proxy::Proxy,
+        epochs: gapless::Epochs,
+        gapless: gapless::Controller,
+        recovery: recovery::Controller,
+        playing: bool,
+        presented: Option<u64>,
+        pending: Option<tokio::task::JoinHandle<()>>,
+        automatic: Option<u64>,
+        state: Value,
+    }
+    impl Fixture {
+        async fn staged() -> Self {
+            let (mut fixture, reply) = Self::preparing().await;
+            fixture
+                .gapless
+                .ready(
+                    reply,
+                    &fixture.queue,
+                    &fixture.epochs,
+                    &fixture.player,
+                    &fixture.proxy,
+                )
+                .await
+                .unwrap();
+            fixture
+        }
+        async fn preparing() -> (Self, gapless::Reply) {
+            let provider = Provider::new();
+            let mut queue = provider.queue();
+            let player = Player::test_output("null").unwrap();
+            let proxy = proxy::Proxy::start().await.unwrap();
+            let media = provider
+                .prepare(provider.source, "a".to_owned().try_into().unwrap())
+                .await
+                .unwrap();
+            queue.update_selected(media.track, &media.version).unwrap();
+            queue.confirm_presented().unwrap();
+            player.send(Command::Load(1, proxy.grant(media.stream).await, 0.0));
+            wait(&player, |s| s.entry_ready).await;
+            let mut epochs = gapless::Epochs::default();
+            epochs.reset().unwrap();
+            let mut gapless = gapless::Controller::default();
+            let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+            gapless
+                .schedule(
+                    &queue,
+                    &mut epochs,
+                    provider.clone(),
+                    tx,
+                    gain::Mode::Off,
+                    false,
+                )
+                .unwrap();
+            let Some(crate::Event::Gapless(reply)) = rx.recv().await else {
+                panic!("No successor")
+            };
+            (
+                Self {
+                    queue,
+                    player,
+                    proxy,
+                    epochs,
+                    gapless,
+                    recovery: recovery::Controller::default(),
+                    playing: true,
+                    presented: Some(1),
+                    pending: None,
+                    automatic: None,
+                    state: json!({"intent":"playing"}),
+                },
+                reply,
+            )
+        }
+        fn request(&self, op: &str) -> Value {
+            let q = self.queue.snapshot();
+            json!({"instance":"fixture","op":op,"queue_session":q.session,"queue_revision":q.revision})
+        }
+        async fn admit(&mut self, request: &mut Value) -> bool {
+            self.configured(request, &mut output::Settings::load(None), None, None)
+                .await
+        }
+        async fn configured(
+            &mut self,
+            request: &mut Value,
+            output: &mut output::Settings,
+            desktop: Option<&Desktop>,
+            owner: Option<&mpris::Service>,
+        ) -> bool {
+            let mut gain = gain::Settings::load(None);
+            Playback {
+                queue: &mut self.queue,
+                player: &self.player,
+                proxy: &self.proxy,
+                epochs: &mut self.epochs,
+                gapless: &mut self.gapless,
+                recovery: &mut self.recovery,
+                desired_playing: &mut self.playing,
+                presented: &mut self.presented,
+                pending: &mut self.pending,
+                automatic: &mut self.automatic,
+            }
+            .admit(
+                request,
+                &mut Context {
+                    instance: "fixture",
+                    account: 1,
+                    connected: true,
+                    credential: true,
+                    failed_or_stale: false,
+                    can_raise: false,
+                    state: &mut self.state,
+                    albums: &albums::Controller::default(),
+                    playlists: &playlists::Controller::default(),
+                    search: &search::Controller::default(),
+                    output,
+                    devices: &[],
+                    gain: &mut gain,
+                },
+                desktop,
+                owner,
+            )
+            .await
+            .unwrap()
+        }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn committed_successor_reset_promotes_observed_selection_and_rejects_stale_edit() {
+        let mut f = Fixture::staged().await;
+        let next = f.queue.pending()[0];
+        let mut request = f.request("queue_remove");
+        request["occurrence"] = json!(next);
+        f.player.send(Command::Pause(false));
+        wait(&f.player, |s| s.generation == 2 && !s.idle).await;
+        assert!(!f.admit(&mut request).await);
+        assert_eq!(f.queue.selected(), Some(next));
+        assert!(f.epochs.current > 2);
+        assert!(f.player.status().idle && f.player.status().paused);
+        assert_eq!(f.gapless.view.phase, "review");
+        assert_eq!(f.state["intent"], "paused");
+        assert!(!f.playing);
+    }
+    #[tokio::test]
+    async fn stale_instance_revision_and_invalid_payload_leave_future_output_untouched() {
+        let mut f = Fixture::staged().await;
+        let before = f.queue.snapshot();
+        for mut request in [
+            {
+                let mut r = f.request("queue_remove");
+                r["instance"] = json!("replaced");
+                r
+            },
+            {
+                let mut r = f.request("clear_upcoming");
+                r["queue_revision"] = json!("18446744073709551615");
+                r
+            },
+            {
+                let mut r = f.request("clear_upcoming");
+                r.as_object_mut().unwrap().remove("queue_session");
+                r
+            },
+            {
+                let mut r = f.request("seek");
+                r["seconds"] = json!(-1);
+                r
+            },
+            {
+                let mut r = f.request("queue_move");
+                r["occurrence"] = json!(f.queue.selected());
+                r["before"] = Value::Null;
+                r
+            },
+            {
+                let mut r = f.request("set_gapless");
+                r["enabled"] = json!("yes");
+                r
+            },
+        ] {
+            assert!(!f.admit(&mut request).await);
+            assert_eq!(f.gapless.view.phase, "staged");
+            assert_eq!(f.epochs.current, 1);
+            assert_eq!(f.queue.snapshot().revision, before.revision);
+            assert!(f.playing);
+        }
+    }
+    #[tokio::test]
+    async fn untouched_successor_edit_preserves_the_current_epoch_and_intent() {
+        let mut f = Fixture::staged().await;
+        let selected = f.queue.selected();
+        let mut request = f.request("clear_upcoming");
+        assert!(f.admit(&mut request).await);
+        assert_eq!(f.gapless.view.phase, "idle");
+        assert_eq!(f.queue.selected(), selected);
+        assert_eq!(f.epochs.current, 1);
+        assert!(f.playing);
+        assert!(f.player.status().paused);
+    }
+    #[tokio::test]
+    async fn native_barrier_failure_refuses_the_command_and_leaves_review_paused() {
+        let mut f = Fixture::staged().await;
+        let before = f.queue.snapshot();
+        f.player.send(Command::Quit);
+        let mut request = f.request("set_gapless");
+        request["enabled"] = json!(false);
+        assert!(!f.admit(&mut request).await);
+        assert_eq!(f.gapless.view.phase, "review");
+        assert_eq!(f.state["intent"], "paused");
+        assert!(f.epochs.current > 1);
+        assert!(!f.playing);
+        assert!(f.state["error"].is_string());
+        assert_eq!(f.queue.snapshot().revision, before.revision);
+    }
+    #[tokio::test]
+    async fn pause_cancels_recovery_and_rejects_its_late_reply_without_resuming() {
+        let mut f = Fixture::staged().await;
+        let key = recovery::Key::capture(&f.queue, 1, f.epochs.current).unwrap();
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        f.recovery.begin(
+            recovery::Work {
+                key,
+                request: gain::Request {
+                    reference: f
+                        .queue
+                        .visible_track(f.queue.selected().unwrap())
+                        .unwrap()
+                        .reference,
+                    mode: gain::Mode::Off,
+                    album_session: false,
+                    fidelity: false,
+                },
+                version: "fixture:a".into(),
+                playing: true,
+                failure: qoda_provider::ProviderError::Network,
+            },
+            Provider::new(),
+            tx,
+        );
+        let mut request = f.request("pause");
+        assert!(f.admit(&mut request).await);
+        assert!(!f.playing);
+        assert_eq!(f.state["intent"], "paused");
+        assert!(!f.recovery.owns(key));
+        assert!(
+            f.recovery
+                .accept(recovery::Reply {
+                    key,
+                    attempts: 1,
+                    result: Some(Err(recovery::Failure::Version))
+                })
+                .is_none()
+        );
+        assert!(f.epochs.current > 1);
+        assert!(f.player.barrier().await.unwrap().paused);
+    }
+    #[tokio::test]
+    async fn cancelled_preparation_reply_cannot_restage_a_successor() {
+        let (mut f, reply) = Fixture::preparing().await;
+        let selected = f.queue.selected();
+        let mut request = f.request("clear_upcoming");
+        assert!(f.admit(&mut request).await);
+        f.gapless
+            .ready(reply, &f.queue, &f.epochs, &f.player, &f.proxy)
+            .await
+            .unwrap();
+        assert_eq!(f.gapless.view.phase, "idle");
+        assert_eq!(f.queue.selected(), selected);
+        assert_eq!(f.epochs.current, 1);
+    }
+    #[tokio::test]
+    async fn output_change_cancels_preparation_and_invalidates_old_render_ownership() {
+        let mut f = Fixture::staged().await;
+        let path =
+            std::env::temp_dir().join(format!("qoda-command-output-{}", uuid::Uuid::new_v4()));
+        let mut output = output::Settings::load(Some(path.clone()));
+        output.selection = None;
+        f.queue.set_position(0.25).unwrap();
+        let selected = f.queue.selected();
+        f.pending = Some(tokio::spawn(std::future::pending()));
+        f.automatic = Some(1);
+        let mut request = f.request("set_output");
+        request["mode"] = json!("desktop");
+        assert!(!f.configured(&mut request, &mut output, None, None).await);
+        assert!(f.pending.is_none() && f.automatic.is_none());
+        assert!(f.epochs.current > 1);
+        assert!(f.presented.is_none());
+        assert!(!f.playing);
+        assert_eq!(f.queue.selected(), selected);
+        assert_eq!(f.state["intent"], "paused");
+        assert!(f.player.status().paused);
+        assert_eq!(output.selection, Some(output::Selection::Desktop));
+        assert_eq!(
+            f.player.load_prepared(player::Load {
+                generation: 1,
+                url: "not-opened:stale-fixture".into(),
+                position: 0.0,
+                gain: gain::Applied::off(),
+                source: None,
+                description: None,
+                chain: false,
+                output: None,
+                playing: true,
+            }),
+            Err("Stale playback preparation rejected")
+        );
+        assert!(f.player.status().paused);
+
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[tokio::test]
+    async fn expired_and_closed_desktop_commands_leave_the_staged_successor_untouched() {
+        let mut f = Fixture::staged().await;
+        let bus = crate::mpris::tests::Bus::new().await;
+        let (tx, _rx) = tokio::sync::mpsc::channel(4);
+        let owner =
+            mpris::Service::build(zbus::connection::Builder::address(bus.address.as_str()), tx)
+                .await
+                .unwrap();
+        for closed in [false, true] {
+            let (reply, receiver) = tokio::sync::oneshot::channel();
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+            let command = Desktop::new(mpris::Request {
+                owner: owner.id(),
+                action: mpris::Action::Loop(queue::Repeat::All),
+                deadline: if closed {
+                    deadline
+                } else {
+                    deadline - std::time::Duration::from_secs(4)
+                },
+                reply,
+            });
+            if closed {
+                drop(receiver);
+            }
+            let mut request = f.request("set_repeat");
+            request["mode"] = json!("all");
+            assert!(
+                !f.configured(
+                    &mut request,
+                    &mut output::Settings::load(None),
+                    Some(&command),
+                    Some(&owner)
+                )
+                .await
+            );
+            assert_eq!(f.gapless.view.phase, "staged");
+            assert_eq!(f.epochs.current, 1);
+            assert!(f.playing);
+        }
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        let command = Desktop::new(mpris::Request {
+            owner: owner.id(),
+            action: mpris::Action::Loop(queue::Repeat::All),
+            deadline: tokio::time::Instant::now() + std::time::Duration::from_secs(3),
+            reply,
+        });
+        let mut request = f.request("set_repeat");
+        request["mode"] = json!("all");
+        assert!(
+            f.configured(
+                &mut request,
+                &mut output::Settings::load(None),
+                Some(&command),
+                Some(&owner)
+            )
+            .await
+        );
+        assert_eq!(request["op"], "set_repeat");
+        command.complete(&f.state);
+        assert!(receiver.await.unwrap().is_ok());
+        owner.shutdown().await;
+    }
+    #[tokio::test]
+    async fn invalid_command_does_not_cancel_the_staged_successor() {
+        let mut f = Fixture::staged().await;
+        let mut request = f.request("queue_remove");
+        request["occurrence"] = json!(OccurrenceId::new());
+        let before = f.queue.snapshot();
+        assert!(!f.admit(&mut request).await);
+        assert_eq!(f.gapless.view.phase, "staged");
+        assert_eq!(f.epochs.current, 1);
+        assert_eq!(f.queue.snapshot().revision, before.revision);
+        assert!(f.playing);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Effect {
+    None,
+    Current,
+    QueueCurrent,
+    Edit,
+    Preference,
+    Remove,
+}
+impl Effect {
+    fn of(op: &str) -> Self {
+        match op {
+            "play" | "seek" | "stop" | "disconnect" | "forget_signin" | "quit" | "set_output" => {
+                Self::Current
+            }
+            "play_selected" | "album_play" | "playlist_play" | "queue_play" | "replay"
+            | "previous" | "navigation_select" | "retry_unavailable" | "skip_unavailable"
+            | "next" | "stop_clear" | "reconnect" | "search_play" => Self::QueueCurrent,
+            "queue_remove" => Self::Remove,
+            "clear_upcoming" | "queue_move" | "enqueue" | "play_next" | "enqueue_selected"
+            | "play_next_selected" | "set_shuffle" | "set_repeat" | "album_enqueue"
+            | "playlist_enqueue" | "search_next" | "search_enqueue" => Self::Edit,
+            "set_gapless" | "set_replaygain" => Self::Preference,
+            _ => Self::None,
+        }
+    }
+    fn requires_queue(self) -> bool {
+        matches!(self, Self::QueueCurrent | Self::Edit | Self::Remove)
+    }
+    fn changes_current(self, request: &Value, queue: &queue::Queue) -> bool {
+        matches!(self, Self::Current | Self::QueueCurrent)
+            || self == Self::Remove
+                && serde_json::from_value::<OccurrenceId>(request["occurrence"].clone()).ok()
+                    == queue.selected()
+    }
+}
+fn occurrence(request: &Value, key: &str) -> Result<OccurrenceId, String> {
+    serde_json::from_value(request[key].clone()).map_err(|_| queue::Error::Missing.to_string())
+}
+pub(crate) fn playlist_tracks(
+    controller: &playlists::Controller,
+    request: &Value,
+) -> Result<Vec<qoda_provider::Track>, String> {
+    let reference =
+        serde_json::from_value::<qoda_provider::PlaylistRef>(request["reference"].clone())
+            .map_err(|_| "Choose a loaded playlist.")?;
+    let snapshot = controller.checked_snapshot(
+        &reference,
+        request["expected_revision"].as_str().unwrap_or_default(),
+    )?;
+    let start = if let Some(id) = request["item_id"].as_str() {
+        snapshot
+            .entries
+            .iter()
+            .position(|entry| entry.id == id)
+            .ok_or("This playlist entry changed. Refresh first.")?
+    } else {
+        0
+    };
+    snapshot.entries[start..].iter().map(|entry| entry.track.clone().ok_or_else(|| "Some playlist source references could not be resolved; the snapshot was not partially queued.".to_owned())).collect()
+}
