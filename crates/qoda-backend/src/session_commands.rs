@@ -134,7 +134,13 @@ impl Edit {
                 album: Some((reference, order)),
                 ..
             } => queue.replace_album(tracks.clone(), reference.clone(), order.clone()),
-            Self::Replace { tracks, .. } => queue.replace_many(tracks.clone()),
+            Self::Replace { tracks, .. } => match tracks.as_slice() {
+                [track] => queue
+                    .replace(track.clone())
+                    .and_then(|id| queue.visible_track(id))
+                    .map(Some),
+                _ => queue.replace_many(tracks.clone()),
+            },
             Self::Enqueue { tracks, next, .. } => {
                 if *next {
                     queue.enqueue_next_many(tracks.clone())?;
