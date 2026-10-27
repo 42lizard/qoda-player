@@ -88,6 +88,7 @@ pub struct Effects {
     pub automatic: bool,
     pub force_save: bool,
     pub seeked: bool,
+    pub stop_reporting: bool,
 }
 pub enum Admission {
     Forward,
@@ -409,11 +410,86 @@ impl Playback<'_> {
             .await?;
             return Ok(Admission::Applied(Effects::default()));
         }
+        if let Some(effects) = self
+            .transport(request["op"].as_str().unwrap_or(""), context)
+            .await?
+        {
+            return Ok(Admission::Applied(effects));
+        }
         if let Some(edit) = edit {
             self.apply(edit, context).await
         } else {
             Ok(Admission::Forward)
         }
+    }
+    async fn transport(
+        &mut self,
+        op: &str,
+        context: &mut Context<'_>,
+    ) -> Result<Option<Effects>, &'static str> {
+        let mut effects = Effects::default();
+        match op {
+            "stop" => {
+                effects.stop_reporting = true;
+                self.preparation.cancel();
+                if self.queue.selected().is_some() {
+                    let _ = self.queue.seek_to(0.0);
+                }
+                *self.desired_playing = false;
+                self.epochs.reset()?;
+                self.gapless.invalidate();
+                self.player.send(Command::Pause(true));
+                self.player.send(Command::Stop);
+                self.proxy.revoke().await;
+                context.state["selection"] = Value::Null;
+                context.state["audio"] = Value::Null;
+                context.state["intent"] = json!("paused");
+                context.state["status"] =
+                    json!("Stopped. Resume starts the retained selection from the beginning.");
+                effects.force_save = true;
+            }
+            "pause" => {
+                pause_for_checkpoint(self.queue, self.player, self.epochs.current);
+                effects.force_save = true;
+                *self.desired_playing = false;
+                context.state["intent"] = json!("paused");
+            }
+            "resume" => {
+                if context.connected {
+                    *self.desired_playing = true;
+                    if self.gapless.view.phase == "review" {
+                        self.gapless.view.phase = "idle";
+                        self.gapless.view.message =
+                            "Resuming the selected occurrence after review.".into();
+                    }
+                    match resume_selection(
+                        self.queue,
+                        &self.player.status(),
+                        self.epochs.current,
+                        self.preparation.preparing(),
+                    ) {
+                        Ok(ResumePlan::Waiting) => {}
+                        Ok(ResumePlan::Unpause) => self.player.send(Command::Pause(false)),
+                        Ok(ResumePlan::Prepare(track)) => effects.prepare = Some(track),
+                        Ok(ResumePlan::Exhausted) => {
+                            *self.desired_playing = false;
+                            context.state["status"] = json!("End of queue — choose Replay");
+                        }
+                        Err(error) => {
+                            *self.desired_playing = false;
+                            context.state["error"] = json!(error.to_string());
+                        }
+                    }
+                    context.state["intent"] = json!(if *self.desired_playing {
+                        "playing"
+                    } else {
+                        "paused"
+                    });
+                }
+            }
+            _ => return Ok(None),
+        }
+        Ok(Some(effects))
     }
     fn validate(&self, request: &mut Value, context: &Context<'_>) -> Result<Option<Edit>, String> {
         let op = request["op"].as_str().unwrap_or("").to_owned();
@@ -749,6 +825,54 @@ impl Playback<'_> {
     }
 }
 
+pub(crate) fn pause_for_checkpoint(queue: &mut queue::Queue, player: &Player, generation: u64) {
+    let audio = player.status();
+    if audio.generation == generation
+        && let Some(position) = audio.position_seconds
+    {
+        let _ = queue.set_position(position);
+    }
+    player.send(Command::Pause(true));
+}
+enum ResumePlan {
+    Waiting,
+    Unpause,
+    Prepare(qoda_provider::Track),
+    Exhausted,
+}
+// Native Stop is asynchronous. An old engine generation must never be unpaused
+// in place of loading the retained selection after Stop or another reset.
+fn resume_selection(
+    queue: &mut queue::Queue,
+    audio: &player::Status,
+    generation: u64,
+    preparing: bool,
+) -> Result<ResumePlan, queue::Error> {
+    if preparing {
+        return Ok(ResumePlan::Waiting);
+    }
+    if audio.generation == generation && !audio.idle && audio.error.is_none() {
+        return Ok(ResumePlan::Unpause);
+    }
+    let track = if queue.ended() && queue.selected_unavailable() {
+        queue
+            .selected()
+            .map(|id| queue.retry_unavailable(id))
+            .transpose()?
+    } else if queue.ended() || queue.selected().is_none() {
+        queue.advance()?
+    } else {
+        queue
+            .selected()
+            .map(|id| queue.visible_track(id))
+            .transpose()?
+    };
+    Ok(match track {
+        Some(track) => ResumePlan::Prepare(track),
+        None => ResumePlan::Exhausted,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -845,6 +969,19 @@ mod tests {
             desktop: Option<&Desktop>,
             owner: Option<&mpris::Service>,
         ) -> bool {
+            !matches!(
+                self.execute(request, output, desktop, owner, true).await,
+                Admission::Rejected
+            )
+        }
+        async fn execute(
+            &mut self,
+            request: &mut Value,
+            output: &mut output::Settings,
+            desktop: Option<&Desktop>,
+            owner: Option<&mpris::Service>,
+            connected: bool,
+        ) -> Admission {
             let mut gain = gain::Settings::load(None);
             Playback {
                 queue: &mut self.queue,
@@ -861,7 +998,7 @@ mod tests {
                 &mut Context {
                     instance: "fixture",
                     account: 1,
-                    connected: true,
+                    connected,
                     credential: true,
                     observations: &mut self.observations,
                     can_raise: false,
@@ -878,9 +1015,102 @@ mod tests {
                 owner,
             )
             .await
-            .map(|admission| !matches!(admission, Admission::Rejected))
             .unwrap()
         }
+    }
+    impl Fixture {
+        async fn selected() -> Self {
+            let (mut f, _) = Self::preparing().await;
+            f.gapless.invalidate();
+            f
+        }
+        async fn transport(&mut self, op: &str, connected: bool) -> Effects {
+            let mut request = self.request(op);
+            match self
+                .execute(
+                    &mut request,
+                    &mut output::Settings::load(None),
+                    None,
+                    None,
+                    connected,
+                )
+                .await
+            {
+                Admission::Applied(effects) => effects,
+                _ => panic!("Transport did not complete: {}", self.state),
+            }
+        }
+    }
+    #[tokio::test]
+    async fn pause_and_resume_complete_the_same_visit_without_repreparation() {
+        let mut f = Fixture::selected().await;
+        let visit = f.queue.visit();
+        let selected = f.queue.selected();
+        let effects = f.transport("pause", true).await;
+        assert!(effects.force_save && !effects.stop_reporting);
+        assert!(!f.playing);
+        wait(&f.player, |s| s.paused).await;
+        f.gapless.review();
+        let effects = f.transport("resume", true).await;
+        assert!(effects.prepare.is_none());
+        assert!(f.playing);
+        wait(&f.player, |s| !s.paused).await;
+        assert_eq!(f.gapless.view.phase, "idle");
+        assert_eq!(f.queue.selected(), selected);
+        assert_eq!(f.queue.visit(), visit);
+        f.proxy.revoke().await;
+    }
+    #[tokio::test]
+    async fn stop_then_immediate_resume_prepares_the_retained_occurrence_after_reset() {
+        let mut f = Fixture::selected().await;
+        let selected = f.queue.selected();
+        let before = f.queue.snapshot();
+        let visit = f.queue.visit();
+        let generation = f.epochs.current;
+        let effects = f.transport("stop", true).await;
+        assert!(effects.force_save && effects.stop_reporting);
+        assert!(!f.playing);
+        assert!(f.epochs.current > generation);
+        assert_eq!(f.queue.position(), 0.0);
+        let effects = f.transport("resume", true).await;
+        assert!(effects.prepare.is_some());
+        assert!(f.playing);
+        assert_eq!(f.queue.selected(), selected);
+        assert_eq!(f.queue.snapshot().session, before.session);
+        assert_eq!(f.queue.snapshot().membership_count, before.membership_count);
+        assert_eq!(f.queue.visit(), visit);
+        assert!(f.player.barrier().await.unwrap().paused);
+        assert_eq!(f.presented, Some(generation)); // no fabricated new confirmation
+    }
+    #[tokio::test]
+    async fn disconnected_and_empty_resume_do_not_start_playback() {
+        let mut f = Fixture::selected().await;
+        f.transport("pause", true).await;
+        let before = serde_json::to_value(&f.queue).unwrap();
+        assert!(f.transport("resume", false).await.prepare.is_none());
+        assert!(!f.playing);
+        assert_eq!(serde_json::to_value(&f.queue).unwrap(), before);
+        f.queue = f.queue.empty_session();
+        f.transport("stop", true).await;
+        assert!(f.transport("resume", true).await.prepare.is_none());
+        assert!(!f.playing);
+        assert_eq!(f.state["status"], "End of queue — choose Replay");
+    }
+    #[tokio::test]
+    async fn explicit_resume_retries_the_exhausted_unavailable_selection() {
+        let mut f = Fixture::selected().await;
+        let track = f.queue.visible_track(f.queue.selected().unwrap()).unwrap();
+        f.queue.replace(track).unwrap();
+        let selected = f.queue.selected().unwrap();
+        f.queue
+            .mark_unavailable(selected, queue::Unavailable::Missing)
+            .unwrap();
+        assert!(f.queue.advance().unwrap().is_none());
+        f.transport("stop", true).await;
+        assert!(f.transport("resume", true).await.prepare.is_some());
+        assert_eq!(f.queue.selected(), Some(selected));
+        assert!(!f.queue.ended());
+        assert!(f.playing);
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn committed_successor_reset_promotes_observed_selection_and_rejects_stale_edit() {

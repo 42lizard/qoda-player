@@ -227,15 +227,6 @@ async fn connection_io(
     }
 }
 pub(crate) use observation::record_clock;
-fn pause_for_checkpoint(queue: &mut queue::Queue, player: &Player, generation: u64) {
-    let audio = player.status();
-    if audio.generation == generation
-        && let Some(position) = audio.position_seconds
-    {
-        let _ = queue.set_position(position);
-    }
-    player.send(Command::Pause(true));
-}
 fn gain_view(settings: &gain::Settings, audio: &player::Status, generation: u64) -> Value {
     let mut view = settings.view();
     if audio.generation == generation && audio.entry_ready && !audio.idle && audio.error.is_none() {
@@ -264,75 +255,6 @@ fn output_view(
         }
     }
     view
-}
-enum ResumePlan {
-    Waiting,
-    Unpause,
-    Prepare(qoda_provider::Track),
-    Exhausted,
-}
-// Native Stop is asynchronous. An old engine generation must never be unpaused
-// in place of loading the retained selection after Stop or another reset.
-fn resume_selection(
-    queue: &mut queue::Queue,
-    audio: &player::Status,
-    generation: u64,
-    preparing: bool,
-) -> Result<ResumePlan, queue::Error> {
-    if preparing {
-        return Ok(ResumePlan::Waiting);
-    }
-    if audio.generation == generation && !audio.idle && audio.error.is_none() {
-        return Ok(ResumePlan::Unpause);
-    }
-    let track = if queue.ended() && queue.selected_unavailable() {
-        queue
-            .selected()
-            .map(|id| queue.retry_unavailable(id))
-            .transpose()?
-    } else if queue.ended() || queue.selected().is_none() {
-        queue.advance()?
-    } else {
-        queue
-            .selected()
-            .map(|id| queue.visible_track(id))
-            .transpose()?
-    };
-    Ok(match track {
-        Some(track) => ResumePlan::Prepare(track),
-        None => ResumePlan::Exhausted,
-    })
-}
-fn storage_result(state: &mut Value, result: Result<Option<storage::Error>, storage::Error>) {
-    match result {
-        Ok(warning) => {
-            state["storage"]["state"] = json!("saved");
-            state["storage"]["cleanup_pending"] = json!(false);
-            state["storage"]["message"] = json!(
-                warning
-                    .map(|e| e.to_string())
-                    .unwrap_or_else(|| "Session saved locally.".into())
-            );
-        }
-        Err(error) => {
-            state["storage"]["state"] = json!(if matches!(
-                error,
-                storage::Error::Corrupt
-                    | storage::Error::Newer
-                    | storage::Error::Unsafe
-                    | storage::Error::ReopenRequired
-            ) {
-                "blocked"
-            } else {
-                "unsaved"
-            });
-            state["storage"]["message"] = json!(if state["storage"]["cleanup_pending"] == true {
-                format!("Saved session cleanup is incomplete. {error}")
-            } else {
-                error.to_string()
-            });
-        }
-    }
 }
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -458,17 +380,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let artwork = artwork::Artwork::persistent(tx.clone()).await?;
     state["artwork_cache"] = artwork.view().await;
     state["metadata_cache"] = json!(metadata.view());
-    let (mut durable, restored) = storage::Controller::start(storage::path(), tx.clone()).await;
-    let (mut queue, start_error) = match restored {
-        Ok(queue) => (queue, None),
-        Err(error) => (queue::Queue::default(), Some(error)),
-    };
-    let mut purge_epoch = 0_u64;
-    let mut last_requested = (queue.durable_stamp(), purge_epoch);
-    state["storage"] = json!({"state":"saved","message":"Session storage ready.","serial":"0","cleanup_pending":false});
-    if let Some(error) = start_error {
-        storage_result(&mut state, Err(error));
-    }
+    let (mut durable, mut queue) = storage::Session::start(storage::path(), tx.clone()).await;
+    state["storage"] = durable.view();
     let mut archive = archive::Controller::start(archive::path());
     state["archive"] = json!(archive.view());
     let mut navigation_offset = None;
@@ -701,6 +614,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 session_commands::Admission::Rejected => event = Event::Checkpoint,
             }
         }
+        if command_effects.stop_reporting {
+            reporting.request_stop();
+        }
         let mut to_prepare = command_effects.prepare;
         let mut automatic_next = command_effects.automatic;
         let mut force_save = command_effects.force_save;
@@ -836,9 +752,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::Stored(reply) => {
-                if reply.serial == durable.serial() {
-                    storage_result(&mut state, reply.result);
-                    state["storage"]["serial"] = json!(reply.serial.to_string());
+                if durable.accept(reply) {
+                    state["storage"] = durable.view();
                     revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                     state["revision"] = json!(revision.to_string());
                     updates.send_replace(state.clone());
@@ -983,7 +898,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     playlists: &mut playlists,
                                     metadata: &metadata,
                                     archive: &mut archive,
-                                    purge_epoch: &mut purge_epoch,
+                                    durable: &mut durable,
                                     desired_playing: &mut desired_playing,
                                 },
                             )
@@ -1083,63 +998,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             Err(error) => state["error"] = json!(error),
                         }
                     }
-                    "stop" => {
-                        reporting.request_stop();
-                        preparation.cancel();
-                        if queue.selected().is_some() {
-                            let _ = queue.seek_to(0.0);
-                        }
-                        desired_playing = false;
-                        epochs.reset()?;
-                        gapless.invalidate();
-                        player.send(Command::Pause(true));
-                        player.send(Command::Stop);
-                        proxy.revoke().await;
-                        state["selection"] = Value::Null;
-                        state["audio"] = Value::Null;
-                        state["intent"] = json!("paused");
-                        state["status"] = json!(
-                            "Stopped. Resume starts the retained selection from the beginning."
-                        );
-                        force_save = true;
-                    }
-                    "pause" => {
-                        pause_for_checkpoint(&mut queue, &player, epochs.current);
-                        force_save = true;
-                        desired_playing = false;
-                        state["intent"] = json!("paused");
-                    }
-                    "resume" => {
-                        if access.provider().is_some() {
-                            desired_playing = true;
-                            if gapless.view.phase == "review" {
-                                gapless.view.phase = "idle";
-                                gapless.view.message =
-                                    "Resuming the selected occurrence after review.".into();
-                            }
-                            let preparing = preparation.preparing();
-                            match resume_selection(
-                                &mut queue,
-                                &player.status(),
-                                epochs.current,
-                                preparing,
-                            ) {
-                                Ok(ResumePlan::Waiting) => {}
-                                Ok(ResumePlan::Unpause) => player.send(Command::Pause(false)),
-                                Ok(ResumePlan::Prepare(track)) => to_prepare = Some(track),
-                                Ok(ResumePlan::Exhausted) => {
-                                    desired_playing = false;
-                                    state["status"] = json!("End of queue — choose Replay");
-                                }
-                                Err(error) => {
-                                    desired_playing = false;
-                                    state["error"] = json!(error.to_string());
-                                }
-                            }
-                            state["intent"] =
-                                json!(if desired_playing { "playing" } else { "paused" });
-                        }
-                    }
                     "archive_page" | "archive_export" | "archive_clear" | "archive_retention" => {
                         let result = if v["account_epoch"].as_str()
                             != Some(access.generation().to_string().as_str())
@@ -1194,7 +1052,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             playlists: &mut playlists,
                             metadata: &metadata,
                             archive: &mut archive,
-                            purge_epoch: &mut purge_epoch,
+                            durable: &mut durable,
                             desired_playing: &mut desired_playing,
                         },
                     )
@@ -1317,17 +1175,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         access.publish(&mut state, &mut reporting);
         reporting.fence_generation(epochs.current);
         state["reporting"] = reporting.view();
-        let stamp = (queue.durable_stamp(), purge_epoch);
-        if force_save || stamp != last_requested {
-            last_requested = stamp;
-            match durable.submit(queue.clone(), purge_epoch) {
-                Ok(()) => {
-                    state["storage"]["state"] = json!("saving");
-                    state["storage"]["message"] = json!("Saving session…");
-                }
-                Err(error) => storage_result(&mut state, Err(error)),
-            }
-        }
+        durable.checkpoint(&queue, force_save);
+        state["storage"] = durable.view();
         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
         state["revision"] = json!(revision.to_string());
         updates.send_replace(state.clone());
@@ -1361,7 +1210,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     maintenance.shutdown(&artwork, &metadata).await;
     server.abort();
     let archive_checkpoint = archive.flush().await;
-    let checkpoint = shutdown::checkpoint(durable.flush(queue.clone(), purge_epoch).await);
+    let checkpoint = shutdown::checkpoint(durable.flush(&queue).await);
     if let Some(desktop) = desktop {
         desktop.shutdown().await;
     }
@@ -1564,23 +1413,6 @@ mod tests {
             assert_eq!(q.snapshot().unavailable_entries.len(), 500);
             assert!(q.navigation_page(None).entries.is_empty());
             assert!(q.advance().unwrap().is_none());
-            let failed = q.selected();
-            assert!(matches!(
-                resume_selection(
-                    &mut q,
-                    &player::Status {
-                        idle: true,
-                        ..Default::default()
-                    },
-                    0,
-                    false
-                )
-                .unwrap(),
-                ResumePlan::Prepare(_)
-            ));
-            assert_eq!(q.selected(), failed);
-            assert!(!q.ended());
-            assert_eq!(q.snapshot().unavailable_entries.len(), 500);
         }
     }
     #[test]
@@ -1615,63 +1447,6 @@ mod tests {
         assert!(navigation_request(&other, &request).is_err());
         q.set_shuffle(true).unwrap();
         assert!(navigation_request(&q, &request).is_err());
-    }
-    #[test]
-    fn stop_then_immediate_play_reloads_the_same_occurrence_instead_of_unpausing_stale_native_state()
-     {
-        let mut q = queued_selection();
-        let selected = q.selected();
-        let before = q.snapshot();
-        q.seek_to(0.0).unwrap();
-        let audio = player::Status {
-            generation: 7,
-            idle: false,
-            paused: false,
-            ..Default::default()
-        };
-        let plan = resume_selection(&mut q, &audio, 8, false).unwrap();
-        assert!(matches!(plan, ResumePlan::Prepare(_)));
-        assert_eq!(q.selected(), selected);
-        assert_eq!(q.snapshot().membership_count, before.membership_count);
-        assert_eq!(q.snapshot().session, before.session);
-        assert_eq!(q.position(), 0.0);
-        assert!(matches!(
-            resume_selection(&mut q, &audio, 8, true).unwrap(),
-            ResumePlan::Waiting
-        ));
-        assert_eq!(q.selected(), selected);
-    }
-    #[test]
-    fn resume_unpauses_only_the_matching_live_engine_and_explicitly_retries_errors() {
-        let mut q = queued_selection();
-        let audio = player::Status {
-            generation: 7,
-            idle: false,
-            paused: true,
-            ..Default::default()
-        };
-        assert!(matches!(
-            resume_selection(&mut q, &audio, 7, false).unwrap(),
-            ResumePlan::Unpause
-        ));
-        let failed = player::Status {
-            error: Some("Synthetic engine failure"),
-            ..audio
-        };
-        assert!(matches!(
-            resume_selection(&mut q, &failed, 7, false).unwrap(),
-            ResumePlan::Prepare(_)
-        ));
-        let mut empty = queue::Queue::default();
-        let idle = player::Status {
-            idle: true,
-            ..Default::default()
-        };
-        assert!(matches!(
-            resume_selection(&mut empty, &idle, 0, false).unwrap(),
-            ResumePlan::Exhausted
-        ));
-        assert_eq!(empty.snapshot().membership_count, 0);
     }
     #[tokio::test]
     async fn socket_requires_hello_and_preserves_partial_frames_across_updates() {

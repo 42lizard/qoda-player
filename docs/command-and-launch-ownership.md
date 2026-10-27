@@ -196,3 +196,38 @@ adapters. Native null-output tests enter both timer and pre-command paths and
 verify one promotion, old-grant revocation and no replacement load. These preserve
 [ADR-0003](adr/0003-nominal-playback-presentation.md) and
 [ADR-0004](adr/0004-continuous-converted-input.md); no physical output claim follows.
+
+## Complete transport commands
+
+Listening-session command admission also completes Pause, Resume and Stop. Pause
+retains a matching native position and requests a forced checkpoint. Stop cancels
+preparation, resets output, revokes the stream and retains the selected occurrence
+at the beginning; Stop and clear remains the distinct queue-discarding operation.
+Resume retains pending preparation, unpauses only matching live output, or asks
+for preparation of the retained/next selection. The coordinator consumes reporting
+and preparation/checkpoint effects rather than finishing transport policy.
+
+Production and native null-output tests cross the same command interface. The
+prepared-playback fixture no longer recreates forwarded Pause. Its late completion
+checks exercise Pause/Resume/Pause while preparation is pending; transport tests
+also cover retained visits, Stop followed by immediate Resume, disconnected/empty
+Resume and retry of an unavailable selection. Existing desktop deadline and
+buffered-reset tests remain in place.
+
+## Durable listening-session checkpoints
+
+`storage::Session` owns queue-stamp deduplication, purge generations, accepted
+completion serials, explicit Retry save and the storage projection. Sign out tells
+this owner to retain a purge obligation after replacing the queue; account code
+no longer manages storage generations or cleanup presentation. The serialized
+storage worker retains bounded requests, coalescing, SQLite transactions, security
+checks and backup policy. Final shutdown uses the same owner's flush, with the
+existing checkpoint/backup exit classification.
+
+A failed submission still counts as attempted: unchanged queue state does not
+silently retry, and Retry save forces another attempt. Old completions cannot mark
+a newer request or Sign out cleanup saved. Cleanup remains pending until the
+corresponding save commits; a committed save with a backup warning stays saved.
+Tests use temporary SQLite for save/reopen/purge and a controlled bounded storage
+transport for delayed completion and Busy/retry ordering, through the production
+checkpoint interface.

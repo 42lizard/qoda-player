@@ -1,4 +1,7 @@
 //! Durable local sessions, independent of provider credentials and temporary access.
+mod session;
+pub(crate) use session::Session;
+
 use crate::{Event, queue::Queue};
 use rusqlite::{Connection, MAIN_DB, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};

@@ -458,12 +458,15 @@ mod tests {
             .await
             .unwrap();
             match result {
-                crate::session_commands::Admission::Forward if op == "pause" => {
-                    // Forwarded Pause retains the coordinator's checkpoint/intent step.
-                    crate::pause_for_checkpoint(&mut self.queue, &self.player, self.epochs.current);
-                    self.playing = false;
+                crate::session_commands::Admission::Applied(effects) => {
+                    assert_eq!(effects.force_save, op == "pause");
+                    if op == "resume" {
+                        assert!(
+                            effects.prepare.is_none(),
+                            "Pending preparation must be retained"
+                        );
+                    }
                 }
-                crate::session_commands::Admission::Applied(_) if op == "set_output" => {}
                 _ => panic!("Command was not admitted: {}", self.state),
             }
         }
@@ -513,6 +516,9 @@ mod tests {
             .await
             .unwrap();
         let (g, result) = media(&mut rx).await;
+        env.command(&mut owner, "pause").await;
+        env.command(&mut owner, "resume").await;
+        assert!(env.playing && owner.preparing());
         env.command(&mut owner, "pause").await;
         owner.complete(g, result, &mut env.runtime()).await;
         env.loaded().await;

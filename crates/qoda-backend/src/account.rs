@@ -120,7 +120,7 @@ pub struct Runtime<'a> {
     pub playlists: &'a mut playlists::Controller,
     pub metadata: &'a metadata_cache::Cache,
     pub archive: &'a mut archive::Controller,
-    pub purge_epoch: &'a mut u64,
+    pub durable: &'a mut crate::storage::Session,
     pub desired_playing: &'a mut bool,
 }
 impl Controller {
@@ -239,7 +239,7 @@ impl Controller {
             playlists,
             metadata,
             archive,
-            purge_epoch,
+            durable,
             desired_playing,
         } = runtime;
         match v["op"].as_str().unwrap_or("") {
@@ -387,10 +387,8 @@ impl Controller {
                     state["error"] = json!(error);
                 }
                 **queue = queue.empty_session();
-                **purge_epoch = purge_epoch
-                    .checked_add(1)
-                    .ok_or("Cleanup generation exhausted")?;
-                state["storage"]["cleanup_pending"] = json!(true);
+                durable.purge()?;
+                state["storage"] = durable.view();
                 self.credential = None;
                 state["sign_in"]["connected"] = json!(false);
                 state["sign_in"]["can_save"] = json!(false);
@@ -673,7 +671,7 @@ mod tests {
         playlists: playlists::Controller,
         metadata: metadata_cache::Cache,
         archive: archive::Controller,
-        purge_epoch: u64,
+        durable: crate::storage::Session,
         playing: bool,
     }
     impl Environment {
@@ -688,9 +686,9 @@ mod tests {
             let (queue, _) = fixture(vec![]);
             Self {
                 archive: archive::Controller::start(Ok(root.join("archive.sqlite3"))),
-                root,
+                root: root.clone(),
                 state: json!({"sign_in":{},"storage":{}}),
-                tx,
+                tx: tx.clone(),
                 events,
                 queue,
                 player: Player::test_output("null").unwrap(),
@@ -705,7 +703,12 @@ mod tests {
                 albums: albums::Controller::with_cache(metadata.clone()),
                 playlists: Default::default(),
                 metadata,
-                purge_epoch: 0,
+                durable: crate::storage::Session::start(
+                    Ok(root.join("session.sqlite3")),
+                    tx.clone(),
+                )
+                .await
+                .0,
                 playing: false,
             }
         }
@@ -727,7 +730,7 @@ mod tests {
                 playlists: &mut self.playlists,
                 metadata: &self.metadata,
                 archive: &mut self.archive,
-                purge_epoch: &mut self.purge_epoch,
+                durable: &mut self.durable,
                 desired_playing: &mut self.playing,
             }
         }
@@ -883,7 +886,7 @@ mod tests {
         assert_eq!(env.state["libraries"], json!([]));
         assert!(owner.provider().is_none());
         assert_eq!(env.queue.snapshot().membership_count, 0);
-        assert_eq!(env.purge_epoch, 1);
+        assert_eq!(env.durable.view()["cleanup_pending"], true);
         assert!(env.metadata.discovery().await.is_none());
     }
     #[tokio::test]
@@ -943,7 +946,7 @@ mod tests {
         assert!(owner.provider().is_none());
         assert!(owner.catalog_access().is_some());
         assert_eq!(env.queue.durable_stamp(), stamp);
-        assert_eq!(env.purge_epoch, 0);
+        assert_eq!(env.durable.view()["cleanup_pending"], false);
         env.connected(
             &mut owner,
             vec![library("Live")],

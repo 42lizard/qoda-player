@@ -118,7 +118,7 @@ async fn installed_pause_handshake_waits_for_native_pause_and_a_new_durable_seri
     let pause: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
     assert_eq!(pause["op"], "pause");
     assert_eq!(pause["instance"], "native-update-fixture");
-    pause_for_checkpoint(&mut queue, &player, 7);
+    session_commands::pause_for_checkpoint(&mut queue, &player, 7);
     let audio = player.barrier().await.unwrap();
     assert!(audio.paused);
     assert_eq!(queue.visit(), visit);
