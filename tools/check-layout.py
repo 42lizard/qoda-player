@@ -118,6 +118,7 @@ HOOKS = """
             next.output = Object.assign({}, next.output, {selection: {mode: "fidelity_resampled", device: "fixture", assume_stereo: true}, processing: {source: {rate: 44100, bits: 24}, target: {rate: 48000, bits: 16}, sample: "s16"}, source: {rate: 44100, bits: 24}, observed: {rate: 48000, format: "s16", valid_bits: 16, stereo_layout: false, stereo_assumed: true}});
             root.snapshot = next; root.showSettings("audio");
         }
+        function searchDownloadEligible(): bool { return globalSearch.canDownload("source-A"); }
         function searchFixture(): void {
             const next = Object.assign({}, root.snapshot);
             next.libraries = [...(next.libraries || []), {id: "source-A", title: "Music", server: "Home", downloads: true}, {id: "source-B", title: "Music", server: "Studio", downloads: true}];
@@ -125,7 +126,7 @@ HOOKS = """
                 {track: {reference: {source: "source-A", key: "42"}, title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry"}, library: "Music", server: "Home", actionable: true},
                 {track: {reference: {source: "source-B", key: "42"}, title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry"}, library: "Music", server: "Studio", actionable: true}]};
             next.recovery = {phase: "idle"};
-            root.snapshot = next; root.globalQuery = "fixture"; libraryTabs.currentIndex = 4;
+            root.snapshot = next; root.libraryModel = next.libraries; root.globalQuery = "fixture"; libraryTabs.currentIndex = 4;
         }
 
         function recoveryFixture(): void { const next = Object.assign({}, root.snapshot); next.recovery = {phase: "exhausted", attempts: 2, limit: 2, message: "Connection interrupted; recovery stopped. Retry or Skip explicitly."}; root.snapshot = next; root.closeSettings(); }
@@ -426,6 +427,7 @@ def check(output=None, theme_check=False, guide=False):
                 time.sleep(0.15)
                 capture("recovery-small")
                 ipc("searchFixture")
+                assert ipc("searchDownloadEligible") == "true"
                 ipc("resize", 1320, 820)
                 time.sleep(0.15)
                 assert status()["tab"] == 4 and len(status()["search"]["results"]) == 2
