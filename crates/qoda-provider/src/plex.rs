@@ -1,5 +1,6 @@
 mod albums;
 mod artists;
+mod downloads;
 mod playlists;
 mod reporting;
 mod transcode;
@@ -598,70 +599,125 @@ impl MusicProvider for PlexProvider {
             })
         })
     }
+    fn downloads(&self, source: SourceId) -> bool {
+        self.sources.contains_key(&source)
+    }
+    fn download(&self, source: SourceId, key: ProviderTrackKey) -> ProviderFuture<'_, Download> {
+        Box::pin(self.export_original(source, key))
+    }
     fn prepare(
         &self,
         source: SourceId,
         key: ProviderTrackKey,
     ) -> ProviderFuture<'_, PreparedMedia> {
-        Box::pin(async move {
-            let s =
-                self.sources
-                    .get(&source)
-                    .ok_or(if self.unavailable_sources.contains(&source) {
-                        ProviderError::Network
-                    } else {
-                        ProviderError::UnknownSource
-                    })?;
-            let key = String::from(key);
-            let mut metadata_url = path(&s.base, &["library", "metadata", &key]);
-            metadata_url
-                .query_pairs_mut()
-                .append_pair("includeMedia", "1");
-            let body = xml(&self.http, metadata_url, s.headers.clone()).await?;
-            let d = Document::parse(&body).map_err(|_| ProviderError::InvalidReply)?;
-            let node = d
-                .descendants()
-                .find(|n| n.has_tag_name("Track"))
-                .ok_or(ProviderError::MissingTrack)?;
-            if node
-                .attribute("librarySectionID")
-                .or_else(|| d.root_element().attribute("librarySectionID"))
-                .is_some_and(|id| id != s.key)
-            {
-                return Err(ProviderError::MissingTrack);
-            }
-            let track = parse_track(node, source)?;
-            let media = node
-                .children()
-                .find(|n| n.has_tag_name("Media"))
-                .ok_or(ProviderError::UnsupportedMedia)?;
-            let parts: Vec<_> = media
-                .children()
-                .filter(|n| n.has_tag_name("Part"))
-                .collect();
-            if parts.len() != 1 {
+        Box::pin(async move { Ok(self.original(source, key, false).await?.media) })
+    }
+}
+impl PlexProvider {
+    async fn original(
+        &self,
+        source: SourceId,
+        key: ProviderTrackKey,
+        download: bool,
+    ) -> Result<Download, ProviderError> {
+        let s = self
+            .sources
+            .get(&source)
+            .ok_or(if self.unavailable_sources.contains(&source) {
+                ProviderError::Network
+            } else {
+                ProviderError::UnknownSource
+            })?;
+        let key = String::from(key);
+        let mut metadata_url = path(&s.base, &["library", "metadata", &key]);
+        metadata_url
+            .query_pairs_mut()
+            .append_pair("includeMedia", "1");
+        let body = xml(&self.http, metadata_url, s.headers.clone()).await?;
+        let d = Document::parse(&body).map_err(|_| ProviderError::InvalidReply)?;
+        let node = d
+            .descendants()
+            .find(|n| n.has_tag_name("Track"))
+            .ok_or(ProviderError::MissingTrack)?;
+        if node
+            .attribute("librarySectionID")
+            .or_else(|| d.root_element().attribute("librarySectionID"))
+            .is_some_and(|id| id != s.key)
+        {
+            return Err(ProviderError::MissingTrack);
+        }
+        let track = parse_track(node, source)?;
+        let media = node
+            .children()
+            .find(|n| n.has_tag_name("Media"))
+            .ok_or(ProviderError::UnsupportedMedia)?;
+        let parts: Vec<_> = media
+            .children()
+            .filter(|n| n.has_tag_name("Part"))
+            .collect();
+        if parts.len() != 1 {
+            return Err(ProviderError::UnsupportedMedia);
+        }
+        let part = parts[0];
+        let part_key = attr(part, "key");
+        if !part_key.starts_with("/library/parts/") {
+            return Err(ProviderError::UnsupportedMedia);
+        }
+        let mut url = relative(&s.base, &part_key)?;
+        if download {
+            if !url.path().starts_with("/library/parts/") {
                 return Err(ProviderError::UnsupportedMedia);
             }
-            let part = parts[0];
-            let part_key = attr(part, "key");
-            if !part_key.starts_with("/library/parts/") {
-                return Err(ProviderError::UnsupportedMedia);
-            }
-            let url = relative(&s.base, &part_key)?;
-            Ok(PreparedMedia {
+            url.set_query(None);
+            url.query_pairs_mut().append_pair("download", "1");
+        }
+        let extension = attr(media, "container");
+        let extension = if !extension.is_empty()
+            && extension.len() <= 12
+            && extension.bytes().all(|b| b.is_ascii_alphanumeric())
+        {
+            extension.to_ascii_lowercase()
+        } else {
+            "audio".to_owned()
+        };
+        let version = if download {
+            format!(
+                "{:x}",
+                Sha256::digest(
+                    format!(
+                        "{}:{}:{}:{}:{}",
+                        attr(media, "id"),
+                        attr(part, "id"),
+                        part_key,
+                        attr(part, "size"),
+                        attr(node, "updatedAt")
+                    )
+                    .as_bytes()
+                )
+            )
+        } else {
+            format!("{}:{}", attr(media, "id"), attr(part, "id"))
+        };
+        Ok(Download {
+            expected_length: part.attribute("size").and_then(|n| n.parse().ok()),
+            extension,
+            media: PreparedMedia {
                 track,
-                version: format!("{}:{}", attr(media, "id"), attr(part, "id")),
+                version,
                 stream: Box::new(PlexStream {
+                    download_mode: download,
                     http: self.http.clone(),
                     url,
                     headers: s.headers.clone(),
                     etag: Arc::new(std::sync::Mutex::new(None)),
                 }),
-            })
+            },
         })
     }
 }
+
 struct PlexStream {
+    download_mode: bool,
     http: Client,
     url: Url,
     headers: HeaderMap,
@@ -684,7 +740,10 @@ impl MediaSource for PlexStream {
             if ![200, 206, 416].contains(&status) {
                 return Err(match status {
                     401 => ProviderError::SignInRequired,
+                    403 if self.download_mode => ProviderError::DownloadDenied,
                     403 => ProviderError::AccessDenied,
+                    404 if self.download_mode => ProviderError::MissingTrack,
+                    412 if self.download_mode => ProviderError::UnsupportedMedia,
                     _ => ProviderError::Network,
                 });
             }
@@ -710,7 +769,13 @@ impl MediaSource for PlexStream {
             }
             let content_type = header("content-type");
             let content_range = header("content-range");
-            let content_length = r.content_length();
+            // HEAD has an empty body: reqwest's body size hint is zero even
+            // when Content-Length describes the original file representation.
+            let content_length = if head && self.download_mode {
+                header("content-length").and_then(|value| value.parse().ok())
+            } else {
+                r.content_length()
+            };
             Ok(MediaResponse {
                 status,
                 content_type,

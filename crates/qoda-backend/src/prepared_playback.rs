@@ -578,6 +578,7 @@ mod tests {
             .admit(
                 &mut request,
                 &mut crate::session_commands::Context {
+                    local_copy: Ok(None),
                     instance: "fixture",
                     account: self.account,
                     connected: true,

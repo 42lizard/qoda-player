@@ -14,6 +14,8 @@ ColumnLayout {
     property bool busy: !!snapshot && snapshot.busy
     readonly property bool canQueue: connected && !busy && !!selected && (!snapshot.cache || snapshot.cache.origin === "live")
     property var albumModel: []
+    property bool downloadsEnabled: false
+    signal downloadRequested(var fields)
     property var trackModel: []
     property string pageJson: "[]"
     property string tracksJson: "[]"
@@ -173,6 +175,9 @@ ColumnLayout {
                     Layout.fillWidth: true
                     Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: modelData.track.artist; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                }
+                Button { text: "⋮"; implicitWidth: 28; visible: albums.downloadsEnabled; Accessible.name: I18n.t("More track actions"); onClicked: trackMenu.open()
+                    Menu { id: trackMenu; MenuItem { text: I18n.t("Download original"); enabled: albums.canQueue && albums.downloadsEnabled; onTriggered: albums.downloadRequested({reference: albums.selected.album.reference, expected_revision: albums.selected.revision, track_key: modelData.track.reference.key}) } }
                 }
                 Button { objectName: "playAlbumFromHere"; text: I18n.t("Play from here"); enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
                 Button { objectName: "enqueueAlbumTrack"; text: I18n.t("+ Queue"); enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }

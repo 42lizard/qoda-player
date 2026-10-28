@@ -62,6 +62,14 @@ references. Symlinks below a root, FIFOs, devices and other special files are
 excluded. Scan-limit messages mean the library is incomplete: choose narrower
 roots. Album details retain the player's 500-track snapshot limit.
 
+## Plex downloads
+
+[Download original Plex tracks](downloads.md) into a chosen watched folder via
+Menu → Downloads. The explicit import service writes completed files; the local
+provider stays read-only. The reserved `.qoda-download-staging` directory is
+excluded from scans so incomplete transfers cannot appear as music. Completed
+copies survive Plex sign-out and are played as local tracks.
+
 ## Playback and changed files
 
 Local playback uses revocable loopback grants with range/HEAD support, followed

@@ -20,9 +20,11 @@ TestCase {
         onCheckboxRequested: selection.toggle(index)
     }
     SignalSpy { id: actions; target: row; signalName: "actionRequested" }
+    SignalSpy { id: downloads; target: row; signalName: "downloadRequested" }
     function init() {
         selection.tracks = ["A", "B", "C"].map(key => ({reference: {source: "fixture", key: key}}));
-        selection.clear(); actions.clear(); row.enabled = true;
+        selection.clear(); actions.clear(); downloads.clear(); row.enabled = true;
+        test.width = 1000; row.downloadEnabled = false; row.localCopyAvailable = false;
         waitForPolish(row);
     }
     function test_title_modifiers_select_without_playing() {
@@ -56,5 +58,23 @@ TestCase {
         row.enabled = false;
         mouseClick(findChild(row, "trackDetails"), 8, 8);
         compare(selection.count, 0);
+    }
+    function test_narrow_download_actions_wrap_and_remain_keyboard_usable() {
+        test.width = 300;
+        row.downloadEnabled = true;
+        waitForPolish(row);
+        let flow = findChild(row, "trackActions");
+        tryVerify(() => [...flow.children].filter(child => child.visible).every(child => child.x >= 0 && child.x + child.width <= flow.width + 1));
+        tryVerify(() => flow.y + flow.height <= row.height);
+        let more = findChild(row, "moreTrackActions");
+        more.forceActiveFocus(); keyClick(Qt.Key_Space);
+        let original = findChild(row, "downloadOriginal");
+        tryCompare(original, "visible", true);
+        original.forceActiveFocus(); keyClick(Qt.Key_Return);
+        compare(downloads.count, 1);
+        compare(actions.count, 0);
+    }
+    function test_local_track_without_export_or_copy_has_no_download_control() {
+        compare(findChild(row, "moreTrackActions").visible, false);
     }
 }

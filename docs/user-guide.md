@@ -12,6 +12,7 @@ by your desktop. Colors follow your Omarchy theme when available.
 
 - [Install, update and remove](#install-update-and-remove)
 - [Local music folders](#local-music-folders)
+- [Download Plex tracks](#download-plex-tracks)
 - [Connect Plex](#connect-plex)
 - [Browse and search](#browse-and-search)
 - [Play music and manage the queue](#play-music-and-manage-the-queue)
@@ -113,6 +114,22 @@ recursively every five seconds; **Rescan now** retries metadata immediately.
 Missing drives stay configured. Local saved playlists and extracted covers are
 not available. See [local music folders](local-music.md) for watch limits,
 format handling, changed-file behavior and settings storage.
+
+## Download Plex tracks
+
+Open **Menu → Downloads**, choose a watched local folder, and explicitly select
+**Create / use folder**. Then use **Download original** in a Plex track's **⋮**
+menu, download selected tracks, or use the search/album track download action.
+The server must allow downloading. Qoda preserves the original file and tags.
+
+![Background downloads with fictional music](assets/user-guide/downloads.png)
+
+Downloads shows progress, cancellation and retry controls. Continuation after
+interruption restarts from zero and requires an explicit action. Completed copies
+appear in the local library and can be added to the queue without Plex. Existing
+Plex queue entries stay unchanged. Disconnecting or clearing finished history
+never deletes completed music. See [downloads](downloads.md) for limits, missing
+copies, storage, permissions and restart behavior.
 
 ## Connect Plex
 

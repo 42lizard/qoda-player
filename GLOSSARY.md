@@ -147,3 +147,9 @@ Evidence for a particular output path, format, package set, and processing confi
 
 **Local folder library**:
 A read-only music-provider source rooted in one configured filesystem directory. It has stable source/track identities, a watched metadata snapshot and revocable playback grants. It is distinct from Qoda local storage (preferences, caches and session databases). Local saved playlist mutation is unsupported.
+
+**Download job**:
+An explicit original-file import request, owned by the backend independently of playback. It pins a Plex source/version and a watched destination, persists without credentials, and remains paused after interruption until explicitly continued.
+
+**Imported local copy**:
+An original file atomically published by a download job and recorded with source/version provenance, filesystem identity and checksum. It plays through the read-only local provider, survives account/cache/history cleanup, and never silently replaces a Plex queue occurrence.

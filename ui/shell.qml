@@ -138,7 +138,22 @@ ShellRoot {
 
     property string libraryId: ""
     property string instance: ""
-    function send(op, fields) { backend.send(op, fields); }
+    function send(op, fields) {
+        if (op.startsWith("download_")) fields = Object.assign({}, fields || {}, {downloads_revision: snapshot.downloads ? snapshot.downloads.destination_revision : "0"});
+        backend.send(op, fields);
+    }
+    function download(fields) {
+        if (!snapshot.downloads || !snapshot.downloads.destination) { showSettings("downloads"); return; }
+        send("download_start", fields);
+    }
+    function localCopy(reference) {
+        return (snapshot.downloads ? snapshot.downloads.copies || [] : []).find(copy => copy.origin.source === reference.source && copy.origin.key === reference.key) || null;
+    }
+    function queueLocalCopy(reference) {
+        const copy = localCopy(reference);
+        if (copy) editQueue("download_local", {copy_key: copy.key, copy_source: copy.local.source});
+    }
+    function canDownload(source) { return !!snapshot.downloads && snapshot.downloads.available && libraryModel.some(library => library.id === source && library.downloads === true); }
     function editQueue(op, fields) { backend.send(op, fields, true); }
     function moveEntry(index, delta) {
         let target = index + delta;
@@ -256,6 +271,20 @@ ShellRoot {
                 if (!settingsSheet.visible && root.form === "full" && window.visible) root.closeSettings();
                 root.tryFocusSearch();
             })
+            Downloads {
+                id: downloadsPanel
+                width: parent.width
+                visible: root.settingsSection === "downloads"
+                snapshot: root.snapshot.downloads || null
+                folders: root.snapshot.local_files ? root.snapshot.local_files.folders || [] : []
+                connected: backend.connected
+                problem: root.snapshot.error || ""
+                onFoldersRequested: root.showSettings("folders")
+                onActionRequested: (op, fields) => {
+                    if (op === "download_local") root.editQueue(op, fields);
+                    else root.send(op, fields);
+                }
+            }
             LocalFolders {
                 width: parent.width
                 visible: root.settingsSection === "folders"
@@ -378,6 +407,7 @@ ShellRoot {
                     id: playerMenu
                     Shortcut { sequence: "Ctrl+K"; enabled: playerMenu.visible; onActivated: root.focusSearch() }
                     onClosed: Qt.callLater(root.tryFocusSearch)
+                    MenuItem { text: I18n.t("Downloads"); onTriggered: root.showSettings("downloads") }
                     MenuItem { text: I18n.t("Local music folders"); onTriggered: root.showSettings("folders") }
                     MenuItem { text: I18n.t("Account"); onTriggered: root.showSettings("account") }
                     MenuItem { text: I18n.t("Audio settings"); onTriggered: root.showSettings("audio") }
@@ -515,6 +545,8 @@ ShellRoot {
                     snapshot: root.snapshot.albums || null
                     connected: root.playbackAvailable
                     artworkEnabled: window.visible && backend.connected
+                    downloadsEnabled: root.canDownload(root.libraryId)
+                    onDownloadRequested: fields => root.download(fields)
                     onOpenArtist: reference => root.openArtist(reference)
                     onAllAlbums: root.allAlbums()
                     onOpenAlbum: reference => root.send("album_open", {reference: reference})
@@ -530,7 +562,7 @@ ShellRoot {
                     snapshot: root.snapshot.search || null
                     query: root.globalQuery
                     connected: backend.connected && root.playbackAvailable
-                    onActionRequested: (op, fields) => root.editQueue(op, fields)
+                    onActionRequested: (op, fields) => { if (op === "download_start") root.download(fields); else root.editQueue(op, fields); }
                 }
                 ArtistBrowser {
                     id: artistBrowser
@@ -551,7 +583,8 @@ ShellRoot {
                 Layout.preferredHeight: childrenRect.height
                 spacing: 6
                 Label { text: I18n.t("%1 selected on this page", [I18n.number(trackSelection.count)]); color: Theme.muted; padding: 6 }
-                Button { text: I18n.t("Select page"); enabled: root.trackPageReady && root.trackModel.length > 0; onClicked: trackSelection.selectAll() }
+                Button { text: I18n.t("Download selected"); enabled: root.trackPageReady && trackSelection.count > 0 && root.canDownload(root.libraryId); onClicked: root.download({tracks: trackSelection.references, catalog_revision: root.snapshot.catalog.revision}) }
+                        Button { text: I18n.t("Select page"); enabled: root.trackPageReady && root.trackModel.length > 0; onClicked: trackSelection.selectAll() }
                 Button { text: I18n.t("Clear selection"); enabled: trackSelection.count > 0; onClicked: trackSelection.clear() }
                 Button { text: I18n.t("Play selected"); enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_selected") }
                 Button { text: I18n.t("Play selected next"); enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_next_selected") }
@@ -571,6 +604,10 @@ ShellRoot {
                     track: modelData
                     selected: trackSelection.contains(index)
                     enabled: root.trackPageReady
+                    localCopyAvailable: !!root.localCopy(modelData.reference)
+                    onLocalCopyRequested: root.queueLocalCopy(modelData.reference)
+                    downloadEnabled: root.canDownload(modelData.reference.source)
+                    onDownloadRequested: root.download({tracks: [modelData.reference], catalog_revision: root.snapshot.catalog.revision})
                     playlistEditable: root.playlistWritable
                     width: tracks.width
                     onSelectionRequested: modifiers => { trackSelection.choose(index, modifiers); root.playlistSeed = modelData; }

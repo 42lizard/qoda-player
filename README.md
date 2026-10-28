@@ -20,7 +20,7 @@ The Tracks tab supports checkboxes, Ctrl/Shift selection and atomic Play/Play ne
 
 [Confirmed Plex timeline reporting](docs/plex-reporting.md) is enabled after scoped owned-server validation of pause/resume/stop and duplicate handoff. It uses a bounded observer, account/source/render fences and cached capability discovery. Preparing a track never counts as playback; played-state/history synchronization is not claimed.
 
-Local music works without Plex sign-in. Configure one or more folders under **Menu → Local music folders**; the initial default follows the XDG music directory. Recursive watching, metadata browsing/search and native playback are described in [local music folders](docs/local-music.md). Local saved playlists and cover extraction remain unavailable.
+Local music works without Plex sign-in. Configure one or more folders under **Menu → Local music folders**; the initial default follows the XDG music directory. Recursive watching, metadata browsing/search and native playback are described in [local music folders](docs/local-music.md). Local saved playlists and cover extraction remain unavailable. [Plex original downloads](docs/downloads.md) import completed files into a chosen watched folder, with explicit retry/cancellation and offline local-copy queue actions.
 
 ## Agreed first-release scope
 
@@ -28,7 +28,7 @@ Local music works without Plex sign-in. Configure one or more folders under **Me
 - One Plex account, with selectable accessible servers and music libraries, including shared libraries where permissions allow.
 - Plex playlists with changes saved back to Plex.
 - A player-owned, editable queue restored across restarts with track and position, without automatic playback.
-- Server-connected playback, with local metadata and artwork caching; offline music downloads come later.
+- Server-connected playback, with local metadata and artwork caching; explicit Plex original downloads can be imported into watched local libraries.
 - Desktop audio coexistence and a dedicated fidelity mode targeting unchanged decoded samples except for optional ReplayGain. Gapless playback and the precise output guarantees require investigation.
 - Playback continues while the interface is hidden. Keyboard navigation, desktop media controls, and an Omarchy launch/toggle shortcut are included.
 - A capability-aware music-provider boundary, implemented by Plex and read-only local folder libraries.

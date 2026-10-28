@@ -17,6 +17,7 @@ ColumnLayout {
     property string rowsJson: "[]"
     property string sourcesJson: "[]"
     readonly property bool currentQuery: !!snapshot && snapshot.query === query.trim()
+    function canDownload(source) { return libraries.some(l => l.id === source && l.downloads === true); }
     signal actionRequested(string op, var fields)
     onSnapshotChanged: sync()
     Component.onCompleted: sync()
@@ -74,6 +75,7 @@ ColumnLayout {
                 RowLayout {
                     Layout.alignment: resultRow.width >= 640 ? Qt.AlignRight : Qt.AlignLeft
                     enabled: browser.connected && browser.currentQuery && modelData.actionable
+                    Button { text: I18n.t("Download original"); visible: browser.canDownload(modelData.track.reference.source); onClicked: browser.act("download_start", modelData) }
                     Button { objectName: "playSearchResult"; text: I18n.t("Play now"); onClicked: browser.act("search_play", modelData) }
                     Button { text: I18n.t("Next"); onClicked: browser.act("search_next", modelData) }
                     Button { text: I18n.t("+ Queue"); onClicked: browser.act("search_enqueue", modelData) }

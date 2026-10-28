@@ -48,6 +48,17 @@ HOOKS = """
         function capture(path: string): void { captureDone = ""; fullFrame.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function captureSettings(path: string): void { captureDone = ""; settingsSheet.contentItem.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function settingsGeometry(): string { function walk(item) { return {type: String(item), x:item.x,y:item.y,w:item.width,h:item.height,ih:item.implicitHeight,visible:item.visible,children:(item.children || []).map(walk)}; } return JSON.stringify(walk(settingsSheet.contentItem)); }
+        function downloadsFixture(): void {
+            guideSnapshot = root.snapshot;
+            const next = Object.assign({}, root.snapshot);
+            next.local_files = {available: true, defaulted: false, folders: [{id: "local-fixture", path: "/home/listener/Music", tracks: "1", message: ""}]};
+            next.downloads = {available: true, destination_revision: "9007199254740993", destination: {source: "local-fixture", path: "/home/listener/Music/Qoda Downloads"}, message: "", copies: [], jobs: [
+                {id: "download-job", track: {title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry"}, phase: "running", bytes: "1048576", total: "8388608", message: "", missing: false, local: null},
+                {id: "download-done", track: {title: "Open water", artist: "Northbound", album: "Morning light"}, phase: "completed", bytes: "4194304", total: "4194304", message: "Downloaded original; the local copy is available without Plex.", missing: false, local: {source: "local-fixture", key: "copy"}}]};
+            root.snapshot = next; root.showSettings("downloads");
+        }
+        function cancelDownloadFixture(): void { downloadsPanel.actionRequested("download_cancel", {job_id: "download-job"}); }
+        function queueDownloadFixture(): void { downloadsPanel.actionRequested("download_local", {job_id: "download-done"}); }
         function localWithPlexFixture(): void {
             localFixture();
             root.snapshot = Object.assign({}, root.snapshot, {sign_in: Object.assign({}, root.snapshot.sign_in, {connected: true})});
@@ -327,6 +338,31 @@ def check(output=None, theme_check=False, guide=False):
                                 assert child["w"] <= item["w"] + 1, (item, child)
                             assert_bounds(child)
                 assert_bounds(settings_geometry)
+                ipc("downloadsFixture")
+                time.sleep(0.15)
+                capture("downloads-small", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("resize", 340, 640)
+                time.sleep(0.15)
+                capture("downloads-narrow", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("resize", 1320, 820)
+                time.sleep(0.15)
+                capture("downloads-wide", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("cancelDownloadFixture")
+                ipc("queueDownloadFixture")
+                deadline = time.monotonic() + 3
+                while len([r for r in requests if r["op"].startswith("download_")]) < 2:
+                    assert time.monotonic() < deadline
+                    time.sleep(0.01)
+                cancel = next(r for r in requests if r["op"] == "download_cancel")
+                assert cancel["job_id"] == "download-job" and cancel["id"] != "download-job"
+                assert cancel["downloads_revision"] == "9007199254740993" and cancel["account_epoch"] == "0"
+                copy = next(r for r in requests if r["op"] == "download_local")
+                assert copy["job_id"] == "download-done" and copy["queue_session"] == "fixture"
+                ipc("restoreGuideFixture")
+                ipc("resize", 540, 760)
                 ipc("localFixture")
                 time.sleep(0.15)
                 capture("folders-small", settings=True)
@@ -397,7 +433,7 @@ def check(output=None, theme_check=False, guide=False):
                 time.sleep(0.15)
                 capture("search-small")
                 assert state["intent"] == "paused"
-                assert all(request["op"] == "hello" for request in requests), requests
+                assert all(request["op"] in ["hello", "download_cancel", "download_local"] for request in requests), requests
                 ipc("resize", 1320, 820)
                 time.sleep(0.15)
                 assert ipc("queueDragStart", "0") == "false"
@@ -466,7 +502,7 @@ def check(output=None, theme_check=False, guide=False):
                 assert [request["op"] for request in requests[before_library:]] == ["album_list"]
                 assert requests[-1]["source"] == "sameprefix-B"
                 capture("library-selected-small")
-                assert all(request["op"] in ["hello", "queue_move", "playlist_edit", "album_list"] for request in requests), requests
+                assert all(request["op"] in ["hello", "queue_move", "playlist_edit", "album_list", "download_cancel", "download_local"] for request in requests), requests
                 if theme_check:
                     before_theme = status()
                     request_count = len(requests)

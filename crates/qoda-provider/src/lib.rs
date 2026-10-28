@@ -163,6 +163,7 @@ pub enum PlaylistOutcome {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderError {
+    DownloadDenied,
     LocalProbeUnavailable,
     LocalLimit,
     LocalChanged,
@@ -187,6 +188,7 @@ pub enum ProviderError {
 impl std::fmt::Display for ProviderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::DownloadDenied => "Plex denied permission to download this original file.",
             Self::LocalProbeUnavailable => "Local metadata probing is unavailable. Install ffmpeg and rescan the folders.",
             Self::LocalLimit => "This local album exceeds the supported 500-track snapshot limit.",
             Self::LocalChanged => "Local file changed. Select it again to accept the new version.",
@@ -233,6 +235,13 @@ pub struct TranscodeRequest {
     pub targets: Vec<TranscodeCodec>,
 }
 pub trait MusicProvider: Send + Sync {
+    /// Download availability is provisional; the server must authorize each request.
+    fn downloads(&self, _source: SourceId) -> bool {
+        false
+    }
+    fn download(&self, _source: SourceId, _key: ProviderTrackKey) -> ProviderFuture<'_, Download> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
     /// False when the adapter already owns a watched, authoritative local snapshot.
     fn cache_catalog(&self, _source: SourceId) -> bool {
         true
@@ -296,6 +305,11 @@ pub trait MusicProvider: Send + Sync {
     ) -> ProviderFuture<'_, CatalogPage>;
     fn prepare(&self, source: SourceId, key: ProviderTrackKey)
     -> ProviderFuture<'_, PreparedMedia>;
+}
+pub struct Download {
+    pub expected_length: Option<u64>,
+    pub media: PreparedMedia,
+    pub extension: String,
 }
 pub struct PreparedMedia {
     pub track: Track,

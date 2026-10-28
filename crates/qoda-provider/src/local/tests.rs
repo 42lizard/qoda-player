@@ -311,3 +311,38 @@ fn missing_root_normalization_and_symlink_ancestors_preserve_identity_after_appe
         Root::new(fixture.0.join("alias/new/music/")).unwrap().id
     );
 }
+
+#[tokio::test]
+async fn download_staging_exclusion_does_not_hide_user_folders_with_the_same_basename() {
+    let fixture = Fixture::new();
+    std::fs::create_dir(fixture.0.join(DOWNLOAD_STAGING)).unwrap();
+    fixture.wave(&format!("{DOWNLOAD_STAGING}/ordinary.wav"));
+    std::fs::create_dir_all(fixture.0.join(DOWNLOAD_DIRECTORY).join(DOWNLOAD_STAGING)).unwrap();
+    fixture.wave(&format!(
+        "{DOWNLOAD_DIRECTORY}/{DOWNLOAD_STAGING}/incomplete.part"
+    ));
+    let root = Root::new(fixture.0.clone()).unwrap();
+    let provider = Local::new(vec![root.clone()]);
+    provider.scan().await.unwrap();
+    let tracks = provider
+        .tracks(root.id, 0, String::new())
+        .await
+        .unwrap()
+        .tracks;
+    assert_eq!(tracks.len(), 1);
+    assert_eq!(tracks[0].title, "ordinary");
+}
+
+#[test]
+fn stored_root_identity_remains_valid_when_the_drive_is_unavailable() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("music");
+    std::fs::create_dir(&path).unwrap();
+    let mut root = Root::new(path.clone()).unwrap();
+    assert!(root.has_valid_identity());
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::write(&path, b"unavailable mountpoint").unwrap();
+    assert!(root.has_valid_identity());
+    root.path = fixture.0.join("different");
+    assert!(!root.has_valid_identity());
+}

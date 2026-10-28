@@ -31,10 +31,10 @@ Drawer {
                 id: sectionTabs
                 Layout.fillWidth: true
                 Layout.preferredHeight: childrenRect.height
-                property int columns: width >= 500 ? 5 : 3
+                property int columns: width >= 500 ? 6 : 3
                 spacing: 6
                 Repeater {
-                    model: [{key: "account", title: I18n.t("Account")}, {key: "audio", title: I18n.t("Audio")}, {key: "cache", title: I18n.t("Cache")}, {key: "history", title: I18n.t("History")}, {key: "folders", title: I18n.t("Folders")}]
+                    model: [{key: "account", title: I18n.t("Account")}, {key: "audio", title: I18n.t("Audio")}, {key: "cache", title: I18n.t("Cache")}, {key: "history", title: I18n.t("History")}, {key: "folders", title: I18n.t("Folders")}, {key: "downloads", title: I18n.t("Downloads")}]
                     Button {
                         required property var modelData
                         text: modelData.title

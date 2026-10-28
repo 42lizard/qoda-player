@@ -80,6 +80,7 @@ pub enum Admission {
 // The same resolved operation validates a bounded trial and mutates the live
 // Queue. Neither caller nor a second string switch chooses the Queue operation.
 enum Edit {
+    Imported(crate::downloads::LocalCopy),
     Replace {
         tracks: Vec<qoda_provider::Track>,
         album: Option<(qoda_provider::AlbumRef, Vec<qoda_core::TrackRef>)>,
@@ -112,6 +113,10 @@ impl Edit {
         queue: &mut queue::Queue,
     ) -> Result<Option<qoda_provider::Track>, queue::Error> {
         match self {
+            Self::Imported(copy) => {
+                queue.enqueue_pinned(copy.track.clone(), &copy.version)?;
+                Ok(None)
+            }
             Self::Replace {
                 tracks,
                 album: Some((reference, order)),
@@ -179,6 +184,7 @@ pub struct Playback<'a> {
     pub presented: &'a mut Option<u64>,
 }
 pub struct Context<'a> {
+    pub local_copy: Result<Option<crate::downloads::LocalCopy>, String>,
     pub instance: &'a str,
     pub account: u64,
     pub connected: bool,
@@ -472,6 +478,18 @@ impl Playback<'_> {
             return self.validate(request, context);
         }
         let edit = match op.as_str() {
+            "download_local" => {
+                if request["account_epoch"].as_str() != Some(context.account.to_string().as_str()) {
+                    return Err("The account changed. Review Downloads and retry.".into());
+                }
+                let copy = context
+                    .local_copy
+                    .as_ref()
+                    .map_err(Clone::clone)?
+                    .as_ref()
+                    .ok_or("The local copy is missing or changed. Rescan its folder.")?;
+                Some(Edit::Imported(copy.clone()))
+            }
             "retry_unavailable" | "skip_unavailable" => {
                 let id = unavailable_request(self.queue, request)?;
                 if !context.connected {
@@ -837,6 +855,7 @@ mod tests {
     use crate::gapless::tests::{Provider, wait};
     use qoda_provider::MusicProvider;
     struct Fixture {
+        local_copy: Option<crate::downloads::LocalCopy>,
         queue: queue::Queue,
         player: Player,
         proxy: proxy::Proxy,
@@ -897,6 +916,7 @@ mod tests {
             };
             (
                 Self {
+                    local_copy: None,
                     queue,
                     player,
                     proxy,
@@ -954,6 +974,7 @@ mod tests {
             .admit(
                 request,
                 &mut Context {
+                    local_copy: Ok(self.local_copy.clone()),
                     instance: "fixture",
                     account: 1,
                     connected,
@@ -1362,6 +1383,32 @@ mod tests {
         assert_eq!(f.queue.snapshot().revision, before.revision);
         assert!(f.playing);
     }
+    #[tokio::test]
+    async fn verified_import_uses_normal_buffered_edit_admission_and_pins_only_the_new_occurrence()
+    {
+        let mut f = Fixture::staged().await;
+        let selected = f.queue.selected();
+        let track = f.queue.visible_track(selected.unwrap()).unwrap();
+        f.local_copy = Some(crate::downloads::LocalCopy {
+            track: track.clone(),
+            version: "verified-import".into(),
+        });
+        let mut request = f.request("download_local");
+        request["account_epoch"] = json!("0");
+        assert!(!f.admit(&mut request).await);
+        assert_eq!(f.gapless.view.phase, "staged");
+        request["account_epoch"] = json!("1");
+        assert!(f.admit(&mut request).await);
+        assert_eq!(f.queue.selected(), selected);
+        assert!(f.playing);
+        let inserted = *f.queue.pending().last().unwrap();
+        f.queue.select(inserted).unwrap();
+        assert_eq!(
+            f.queue.update_selected(track.clone(), "different-content"),
+            Err(queue::Error::Version)
+        );
+        assert!(f.queue.update_selected(track, "verified-import").is_ok());
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1385,7 +1432,9 @@ impl Effect {
             "queue_remove" => Self::Remove,
             "clear_upcoming" | "queue_move" | "enqueue" | "play_next" | "enqueue_selected"
             | "play_next_selected" | "set_shuffle" | "set_repeat" | "album_enqueue"
-            | "playlist_enqueue" | "search_next" | "search_enqueue" => Self::Edit,
+            | "playlist_enqueue" | "search_next" | "search_enqueue" | "download_local" => {
+                Self::Edit
+            }
             "set_gapless" | "set_replaygain" => Self::Preference,
             _ => Self::None,
         }

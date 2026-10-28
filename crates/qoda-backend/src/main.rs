@@ -9,6 +9,7 @@ mod buffered_reset;
 mod cache_files;
 mod catalog;
 mod continuous;
+mod downloads;
 mod gain;
 mod gapless;
 mod local_files;
@@ -68,6 +69,7 @@ impl std::fmt::Display for ConnectError {
     }
 }
 enum Event {
+    Downloads(Value, bool),
     LocalTick,
     Local(local_files::Reply),
     Unsupported(u64, bool),
@@ -418,6 +420,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(account::Plex),
     );
     let mut local = local_files::Controller::discover();
+    let mut downloads = downloads::Controller::start(downloads::path(), tx.clone());
+    state["downloads"] = json!({"available":false,"jobs":[],"message":"Loading downloads…"});
+    downloads.sync(
+        access.generation(),
+        access.provider(),
+        local.provider().roots().to_vec(),
+    );
     access.set_local(local.provider());
     state["local_files"] = local.view();
     local.scan(false, tx.clone());
@@ -519,7 +528,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             },
             _ = local_tick.tick()=>Event::LocalTick,
             _ = checkpoint_tick.tick()=>Event::Checkpoint,
-            _ = interrupts.recv() => break,
+            _ = interrupts.recv() => { downloads.invalidate(); break; },
         };
         maintenance.observe_activity(&event, &mut state);
         let command_projection = if matches!(&event, Event::Request(_) | Event::Desktop(_)) {
@@ -586,6 +595,32 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         };
         let mut command_effects = session_commands::Effects::default();
         if let Event::Request(request) = &mut event {
+            let local_copy = if request["op"] == "download_local" && request["instance"] == instance
+            {
+                if request["account_epoch"].as_str()
+                    != Some(access.generation().to_string().as_str())
+                {
+                    Err("The account changed. Review Downloads and retry.".to_owned())
+                } else if let Err(error) = check_queue(&queue, request) {
+                    Err(error.to_string())
+                } else {
+                    downloads::local_copy(&state["downloads"], request).and_then(|copy| {
+                        if local
+                            .provider()
+                            .roots()
+                            .iter()
+                            .any(|root| root.id == copy.track.reference.source)
+                        {
+                            Ok(Some(copy))
+                        } else {
+                            Err("The local copy is missing or changed. Rescan its folder."
+                                .to_owned())
+                        }
+                    })
+                }
+            } else {
+                Ok(None)
+            };
             let mut commands = session_commands::Playback {
                 queue: &mut queue,
                 player: &player,
@@ -597,6 +632,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 presented: &mut presented_generation,
             };
             let mut context = session_commands::Context {
+                local_copy,
                 instance: &instance,
                 account: access.generation(),
                 connected: access.provider().is_some(),
@@ -637,6 +673,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut force_save = command_effects.force_save;
         let seeked = command_effects.seeked;
         match event {
+            Event::Downloads(view, published) => {
+                state["downloads"] = view;
+                if published {
+                    local.scan(false, tx.clone());
+                }
+            }
             Event::LocalTick => {
                 local.scan(false, tx.clone());
             }
@@ -850,6 +892,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 state["error"] = Value::Null;
                 match v["op"].as_str().unwrap_or("") {
                     "quit" => {
+                        downloads.invalidate();
                         state["shutdown"] = json!(true);
                         revision = revision.checked_add(1).ok_or("Revision exhausted")?;
                         state["revision"] = json!(revision.to_string());
@@ -867,6 +910,52 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "retry_save" => force_save = true,
+                    "download_destination"
+                    | "download_retry"
+                    | "download_cancel"
+                    | "download_clear" => {
+                        if let Err(error) = downloads.request(v.clone(), vec![]) {
+                            state["error"] = json!(error);
+                        }
+                    }
+                    "download_start" => {
+                        let result: Result<Vec<qoda_provider::Track>, String> = (|| {
+                            if v["account_epoch"].as_str()
+                                != Some(access.generation().to_string().as_str())
+                            {
+                                return Err(
+                                    "The account changed. Review Downloads and retry.".into()
+                                );
+                            }
+                            if v["search_revision"].is_string() {
+                                return search
+                                    .resolve(&v, access.generation())
+                                    .map(|t| vec![t])
+                                    .map_err(str::to_owned);
+                            }
+                            if v["reference"].is_object() && v["track_key"].is_string() {
+                                return albums
+                                    .tracks(&v)
+                                    .map(|tracks| tracks.into_iter().take(1).collect());
+                            }
+                            catalog
+                                .selected_tracks(
+                                    &v,
+                                    access.generation(),
+                                    access.provider().is_some(),
+                                )
+                                .map_err(str::to_owned)
+                        })(
+                        );
+                        match result {
+                            Ok(tracks) => {
+                                if let Err(error) = downloads.request(v.clone(), tracks) {
+                                    state["error"] = json!(error)
+                                }
+                            }
+                            Err(error) => state["error"] = json!(error),
+                        }
+                    }
                     "set_local_folders" => {
                         if v["account_epoch"].as_str()
                             != Some(access.generation().to_string().as_str())
@@ -887,6 +976,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 .and_then(|paths| local.set(paths))
                             {
                                 Ok(()) => {
+                                    downloads.invalidate();
                                     preparation.cancel();
                                     reporting.request_stop();
                                     let problem = buffered_reset::Runtime {
@@ -973,6 +1063,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "reconnect" | "restore_signin" | "save_signin" | "auth_start"
                     | "disconnect" | "forget_signin" => {
+                        if v["op"] != "save_signin" {
+                            downloads.invalidate();
+                        }
                         access
                             .command(
                                 &v,
@@ -1267,6 +1360,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state["albums"] = json!(albums.view);
         state["artwork_cache"] = artwork.view().await;
         state["metadata_cache"] = json!(metadata.view());
+        downloads.sync(
+            access.generation(),
+            access.provider(),
+            local.provider().roots().to_vec(),
+        );
         state["local_files"] = local.view();
         access.publish(&mut state, &mut reporting);
         reporting.fence_generation(epochs.current);
@@ -1291,6 +1389,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     gapless.invalidate();
     player.send(Command::Pause(true));
     player.send(Command::Stop);
+    downloads.shutdown().await;
     if let Some(task) = desktop_task {
         task.abort();
         let _ = task.await;

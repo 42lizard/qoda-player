@@ -13,6 +13,8 @@ use std::{
 mod media;
 mod probe;
 
+pub const DOWNLOAD_DIRECTORY: &str = "Qoda Downloads";
+pub const DOWNLOAD_STAGING: &str = ".qoda-download-staging";
 const PAGE: usize = 100;
 const MAX_FILES: usize = 100_000;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,10 +55,24 @@ impl Root {
         if std::fs::metadata(&path).is_ok_and(|m| !m.is_dir()) {
             return Err(ProviderError::LocalUnavailable);
         }
-        let hash = Sha256::digest(path.as_os_str().as_encoded_bytes());
-        let id = SourceId::try_from(uuid::Uuid::from_bytes(hash[..16].try_into().unwrap()))
-            .map_err(|_| ProviderError::InvalidReply)?;
+        let id = Self::identity(&path)?;
         Ok(Self { id, path })
+    }
+    fn identity(path: &Path) -> Result<SourceId, ProviderError> {
+        let hash = Sha256::digest(path.as_os_str().as_encoded_bytes());
+        SourceId::try_from(uuid::Uuid::from_bytes(hash[..16].try_into().unwrap()))
+            .map_err(|_| ProviderError::InvalidReply)
+    }
+    /// Validate persisted identity without mistaking an unavailable drive for
+    /// damaged settings. File access still checks the live directory separately.
+    pub fn has_valid_identity(&self) -> bool {
+        self.path.is_absolute()
+            && !self
+                .path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            && self.path.components().collect::<PathBuf>().as_os_str() == self.path.as_os_str()
+            && Self::identity(&self.path).is_ok_and(|id| id == self.id)
     }
 }
 #[derive(Clone)]
@@ -294,6 +310,11 @@ fn collect(
                 let Ok(kind) = child.file_type() else {
                     continue;
                 };
+                if relative == Path::new(DOWNLOAD_DIRECTORY)
+                    && child.file_name() == DOWNLOAD_STAGING
+                {
+                    continue;
+                }
                 let relative = relative.join(child.file_name());
                 if kind.is_dir() {
                     stack.push((relative, depth + 1));

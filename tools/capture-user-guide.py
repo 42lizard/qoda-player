@@ -19,7 +19,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='qoda-guide-images-') as temporary:
         base=Path(temporary)
         layout.check(base/'captures', guide=True)
-        for source,name in [('folders-small','local-folders'),('wide','main-window'),('queue-guide','queue-drawer'),('account-guide','account'),('sign-in-small','sign-in'),('library-choices-small','libraries'),('playlist-drag-wide','playlists'),('hq-conversion-small','audio-settings'),('cache-small','cache'),('archive-small','listening-archive')]:
+        for source,name in [('downloads-small','downloads'),('folders-small','local-folders'),('wide','main-window'),('queue-guide','queue-drawer'),('account-guide','account'),('sign-in-small','sign-in'),('library-choices-small','libraries'),('playlist-drag-wide','playlists'),('hq-conversion-small','audio-settings'),('cache-small','cache'),('archive-small','listening-archive')]:
             shutil.copyfile(base/'captures'/f'{source}.png',OUTPUT/f'{name}.png')
         shutil.copytree(ROOT/'ui',base/'ui')
         snapshot=layout.fixture()

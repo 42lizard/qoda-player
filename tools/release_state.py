@@ -11,7 +11,7 @@ import time
 # alone do not prove compatible representations or migration behavior.
 STORAGE_FILES = ("Cargo.toml", "Cargo.lock", "crates/qoda-backend/Cargo.toml",
                  *["crates/qoda-backend/src/" + name for name in (
-                     "main.rs", "local_files.rs", "buffered_reset.rs", "account.rs", "maintenance.rs", "observation.rs", "session_commands.rs", "prepared_playback.rs", "catalog.rs", "storage.rs", "storage/session.rs", "queue.rs", "archive.rs", "archive/store.rs",
+                     "main.rs", "local_files.rs", "downloads.rs", "downloads/import.rs", "buffered_reset.rs", "account.rs", "maintenance.rs", "observation.rs", "session_commands.rs", "prepared_playback.rs", "catalog.rs", "storage.rs", "storage/session.rs", "queue.rs", "archive.rs", "archive/store.rs",
                      "cache_files.rs", "gain.rs", "output.rs", "offline.rs", "metadata_cache.rs", "artwork_store.rs")])
 
 
@@ -29,7 +29,7 @@ def evidence(source):
     fingerprint = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
     return {"schema": 1, "fingerprint": fingerprint, "files": files,
             "session_schemas": [1, 2, 3, 4, 5], "session_payloads": [1, 2, 3, 4, 5],
-            "archive_schemas": [1], "catalog_schemas": [1, 2],
+            "archive_schemas": [1], "catalog_schemas": [1, 2], "download_schemas": [1],
             "settings": {"local-folders.json": [1], "audio.json": [1], "output.json": [1, 2],
                          "cache-settings/artwork.json": [1], "cache-settings/catalog.json": [1]}}
 
@@ -44,7 +44,7 @@ def release_evidence(release):
     fingerprint = hashlib.sha256(json.dumps(value["files"], sort_keys=True).encode()).hexdigest()
     if value.get("fingerprint") != fingerprint or not value["files"]:
         raise ValueError("Release storage compatibility evidence is inconsistent")
-    for field in ["session_schemas", "session_payloads", "archive_schemas", "catalog_schemas"]:
+    for field in ["session_schemas", "session_payloads", "archive_schemas", "catalog_schemas", *(["download_schemas"] if "download_schemas" in value else [])]:
         if not isinstance(value.get(field), list) or not value[field] or any(type(n) is not int or n <= 0 for n in value[field]):
             raise ValueError("Release storage format evidence is invalid")
     if not isinstance(value.get("settings"), dict) or not value["settings"] or any(not isinstance(versions,list) or not versions or any(type(n) is not int or n<=0 for n in versions) for versions in value["settings"].values()):
@@ -107,6 +107,11 @@ def data_compatible(contract):
             raise ValueError("Unqualified database payload preserved: " + str(path)) from error
         finally:
             connection.close()
+    downloads = state / "downloads-v1/state.json"
+    if private(downloads, 8 * 1024 * 1024):
+        value = json.loads(downloads.read_text())
+        if not isinstance(value, dict) or type(value.get("version")) is not int or value["version"] not in contract.get("download_schemas", []):
+            raise ValueError("Unsupported download history preserved: " + str(downloads))
     directory = Path(os.environ.get("XDG_CONFIG_HOME",str(Path.home() / ".config"))) / "qoda"
     for name, versions in contract["settings"].items():
         if name not in {"local-folders.json", "audio.json", "output.json", "cache-settings/artwork.json", "cache-settings/catalog.json"}:

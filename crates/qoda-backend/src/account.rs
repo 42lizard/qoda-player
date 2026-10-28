@@ -231,6 +231,12 @@ impl Controller {
         if let Some(local) = &self.local {
             libraries.extend(local.libraries().into_iter().map(|l|json!({"id":l.id,"title":l.title,"server":l.server,"offline":false,"kind":"local","playlists":false})));
         }
+        for library in &mut libraries {
+            library["downloads"] = json!(self.provider.as_ref().is_some_and(|provider| {
+                serde_json::from_value(library["id"].clone())
+                    .is_ok_and(|source| provider.downloads(source))
+            }));
+        }
         state["libraries"] = json!(libraries);
         reporting.bind(self.generation, self.provider());
     }

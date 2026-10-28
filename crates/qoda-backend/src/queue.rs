@@ -379,6 +379,14 @@ impl Queue {
         self.revision = revision;
         Ok(id)
     }
+    pub fn enqueue_pinned(&mut self, track: Track, version: &str) -> Result<OccurrenceId, Error> {
+        if version.is_empty() || version.len() > 512 {
+            return Err(Error::Version);
+        }
+        let id = self.enqueue(track, false)?;
+        self.versions.insert(id, version.to_owned());
+        Ok(id)
+    }
     pub fn enqueue_many(&mut self, tracks: Vec<Track>) -> Result<(), Error> {
         self.insert_many(tracks, false)
     }
@@ -1616,5 +1624,25 @@ mod tests {
         q.move_before(b, None).unwrap();
         q.enqueue(track("C"), true).unwrap();
         assert_eq!(titles(&q), ["X", "A", "C", "Y", "B"]);
+    }
+    #[test]
+    fn imported_copy_keeps_its_verified_version_before_first_play_and_after_restart() {
+        let mut queue = Queue::default();
+        let track = track("downloaded");
+        let id = queue
+            .enqueue_pinned(track.clone(), "verified-local-version")
+            .unwrap();
+        let mut restored: Queue =
+            serde_json::from_value(serde_json::to_value(&queue).unwrap()).unwrap();
+        restored.select(id).unwrap();
+        assert_eq!(
+            restored.update_selected(track.clone(), "changed-file-version"),
+            Err(Error::Version)
+        );
+        assert!(
+            restored
+                .update_selected(track, "verified-local-version")
+                .is_ok()
+        );
     }
 }

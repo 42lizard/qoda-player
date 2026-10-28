@@ -22,6 +22,12 @@ impl Router {
     }
 }
 impl MusicProvider for Router {
+    fn downloads(&self, source: SourceId) -> bool {
+        self.route(source).is_ok_and(|p| p.downloads(source))
+    }
+    fn download(&self, source: SourceId, key: ProviderTrackKey) -> ProviderFuture<'_, Download> {
+        Box::pin(async move { self.route(source)?.download(source, key).await })
+    }
     fn cache_catalog(&self, source: SourceId) -> bool {
         self.route(source).is_ok_and(|p| p.cache_catalog(source))
     }
