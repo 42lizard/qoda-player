@@ -18,7 +18,7 @@ TestCase {
     }
     function test_clear_needs_dialog_and_account_change_closes_it() {
         activate("clearArchive");compare(requests.count,0);const dialog=findChild(browser,"confirmArchiveClear");tryCompare(dialog,"visible",true);browser.accountEpoch="new-account";tryCompare(dialog,"visible",false);compare(requests.count,0);
-        activate("clearArchive");tryCompare(dialog,"visible",true);dialog.accept();compare(requests.count,1);compare(requests.signalArguments[0][0],"archive_clear");
+        activate("clearArchive");tryCompare(dialog,"visible",true);activate("confirmArchiveAccept");tryCompare(dialog,"visible",false);compare(requests.count,1);compare(requests.signalArguments[0][0],"archive_clear");
     }
     function test_clock_updates_do_not_reset_a_retention_draft() {
         browser.draftDays=7;let updated=frame();updated.total=43;browser.snapshot=updated;compare(browser.draftDays,7);
