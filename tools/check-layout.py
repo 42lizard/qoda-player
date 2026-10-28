@@ -59,7 +59,7 @@ HOOKS = """
             next.sign_in = Object.assign({}, next.sign_in, {connected: false, saved: "absent"});
             next.playback_available = true;
             next.local_files = {available: true, phase: "ready", revision: "1", defaulted: true,
-                message: "Local folders ready.", paths: ["/home/listener/Music", "/mnt/albums/Collection"],
+                message: "Local folders are watched every five seconds. Removing a folder never deletes music.", paths: ["/home/listener/Music", "/mnt/albums/Collection"],
                 folders: [{path: "/home/listener/Music", tracks: "1240", message: ""},
                     {path: "/mnt/albums/Collection", tracks: "980", message: ""}]};
             next.libraries = [{id: "fixture", title: "Music", server: "Local files", kind: "local", playlists: false}];
