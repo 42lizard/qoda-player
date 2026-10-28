@@ -18,7 +18,7 @@ ColumnLayout {
     }
     onSnapshotChanged: updateModel()
     Component.onCompleted: updateModel()
-    Label { text: artists.snapshot ? artists.snapshot.message : "Choose a music library."; Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.muted; textFormat: Text.PlainText }
+    Label { text: artists.snapshot ? I18n.message(artists.snapshot.message) : I18n.t("Choose a music library."); Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.muted; textFormat: Text.PlainText }
     ListView {
         id: list
         Layout.fillWidth: true; Layout.fillHeight: true
@@ -35,8 +35,8 @@ ColumnLayout {
         }
     }
     RowLayout {
-        Label { text: artists.page ? artists.artistModel.length + " artists on this page" : "Choose a library to browse artists"; Layout.fillWidth: true; color: Theme.muted }
-        Button { text: "Previous"; enabled: !!artists.page && artists.page.offset !== "0" && !artists.busy; onClicked: artists.pageRequested("previous") }
-        Button { text: "Next"; enabled: !!artists.page && artists.page.has_more && !artists.busy; onClicked: artists.pageRequested("next") }
+        Label { text: artists.page ? I18n.count("%1 artist on this page", "%1 artists on this page", artists.artistModel.length) : I18n.t("Choose a library to browse artists"); Layout.fillWidth: true; color: Theme.muted }
+        Button { text: I18n.t("Previous"); enabled: !!artists.page && artists.page.offset !== "0" && !artists.busy; onClicked: artists.pageRequested("previous") }
+        Button { text: I18n.t("Next"); enabled: !!artists.page && artists.page.has_more && !artists.busy; onClicked: artists.pageRequested("next") }
     }
 }

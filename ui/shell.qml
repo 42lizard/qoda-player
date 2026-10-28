@@ -36,7 +36,7 @@ ShellRoot {
     }
     function hideSurface() { showSurface("hidden", false); }
     function toggleSurface() { if (form === "hidden") showSurface(lastForm, true); else hideSurface(); }
-    property var snapshot: ({albums: {page: null, selected: null, busy: false, message: "Choose a library to browse albums."}, libraries: [], status: "Connecting backend", intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
+    property var snapshot: ({albums: {page: null, selected: null, busy: false, message: I18n.t("Choose a library to browse albums.")}, libraries: [], status: I18n.t("Connecting backend"), intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
     property var libraryModel: []
     property var trackModel: []
     readonly property bool trackPageReady: (!snapshot.catalog || !snapshot.catalog.cache || snapshot.catalog.cache.origin !== "offline") && backend.connected && !!snapshot.page && !!snapshot.catalog && !snapshot.catalog.busy && snapshot.page.source === libraryId && snapshot.page.query === trackQuery && !!snapshot.sign_in && snapshot.sign_in.connected
@@ -242,13 +242,13 @@ ShellRoot {
                 width: parent.width
                 spacing: 6
                 visible: root.accountExpanded
-                Button { text: "Connect Plex"; enabled: backend.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
-                Button { text: "Disconnect"; enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes cached metadata, artwork and the saved session and listening archive. Keeps saved sign-in."; onClicked: root.send("disconnect") }
-                Button { text: "Restore saved sign-in"; enabled: backend.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
-                Button { text: "Reconnect Plex"; visible: !!root.snapshot.sign_in && !!root.snapshot.sign_in.can_reconnect; enabled: backend.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connecting && !root.snapshot.sign_in.keyring_action; onClicked: root.editQueue("reconnect", {}) }
-                Button { text: "Save sign-in"; enabled: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
-                Button { text: "Sign out & forget"; ToolTip.visible: hovered; ToolTip.text: "Stops playback and removes Qoda sign-in, cached metadata/artwork, saved queue and session backups. Keeps general preferences."; enabled: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
-                Label { text: root.snapshot.sign_in ? root.snapshot.sign_in.message || "" : ""; color: Theme.muted; width: parent.width; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+                Button { text: I18n.t("Connect Plex"); enabled: backend.connected && (!root.snapshot.sign_in || !root.snapshot.sign_in.connected); onClicked: root.send("auth_start") }
+                Button { text: I18n.t("Disconnect"); enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; ToolTip.visible: hovered; ToolTip.text: I18n.t("Stops playback and removes cached metadata, artwork and the saved session and listening archive. Keeps saved sign-in."); onClicked: root.send("disconnect") }
+                Button { text: I18n.t("Restore saved sign-in"); enabled: backend.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connected && !root.snapshot.sign_in.keyring_action; onClicked: root.send("restore_signin") }
+                Button { text: I18n.t("Reconnect Plex"); visible: !!root.snapshot.sign_in && !!root.snapshot.sign_in.can_reconnect; enabled: backend.connected && !!root.snapshot.sign_in && !root.snapshot.sign_in.connecting && !root.snapshot.sign_in.keyring_action; onClicked: root.editQueue("reconnect", {}) }
+                Button { text: I18n.t("Save sign-in"); enabled: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.can_save && !root.snapshot.sign_in.keyring_action; onClicked: root.send("save_signin") }
+                Button { text: I18n.t("Sign out & forget"); ToolTip.visible: hovered; ToolTip.text: I18n.t("Stops playback and removes Qoda sign-in, cached metadata/artwork, saved queue and session backups. Keeps general preferences."); enabled: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.keyring_action !== "forget"; onClicked: root.send("forget_signin") }
+                Label { text: root.snapshot.sign_in ? I18n.message(root.snapshot.sign_in.message) || "" : ""; color: Theme.muted; width: parent.width; wrapMode: Text.Wrap; textFormat: Text.PlainText }
             }
             AudioSettings {
                 visible: root.audioExpanded
@@ -263,27 +263,27 @@ ShellRoot {
             ColumnLayout {
                 visible: root.cacheExpanded
                 width: parent.width
-                Label { text: root.snapshot.artwork_cache ? root.snapshot.artwork_cache.message + (root.snapshot.artwork_cache.usage_known ? " · " + (root.snapshot.artwork_cache.bytes / 1048576).toFixed(1) + " MiB · " + root.snapshot.artwork_cache.entries + " covers" : "") + (root.snapshot.artwork_cache.stale ? " · Cached artwork may be stale" : "") : "Opening artwork cache…"; color: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+                Label { text: root.snapshot.artwork_cache ? (root.snapshot.artwork_cache.usage_known ? I18n.t("%1 · %2 MiB · %3", [I18n.message(root.snapshot.artwork_cache.message), I18n.number(root.snapshot.artwork_cache.bytes / 1048576, 1), I18n.count("%1 cover", "%1 covers", root.snapshot.artwork_cache.entries)]) : I18n.message(root.snapshot.artwork_cache.message)) + (root.snapshot.artwork_cache.stale ? I18n.t(" · Cached artwork may be stale") : "") : I18n.t("Opening artwork cache…"); color: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
                 Flow {
                     Layout.fillWidth: true
                     Layout.preferredHeight: childrenRect.height
                     spacing: 6
-                    Label { text: "Disk target (MiB, 0 disables)"; color: Theme.muted; padding: 6 }
+                    Label { text: I18n.t("Disk target (MiB, 0 disables)"); color: Theme.muted; padding: 6 }
                     SpinBox { from: 0; to: 4096; editable: true; value: root.cacheBudgetDraft; onValueModified: root.cacheBudgetDraft = value }
-                    Button { text: "Apply"; enabled: backend.connected && !root.snapshot.cache_action && !!root.snapshot.artwork_cache && !root.snapshot.artwork_cache.cleanup_pending; onClicked: root.send("set_artwork_budget", {mib: root.cacheBudgetDraft}) }
-                    Button { text: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? "Retry cleanup" : "Clear artwork"; enabled: backend.connected && !root.snapshot.cache_action; ToolTip.visible: hovered; ToolTip.text: "Keeps your queue, sign-in and cache target. Visible covers are fetched again."; onClicked: root.send("clear_artwork_cache") }
-                    Label { visible: !!root.snapshot.cache_action; text: "Updating artwork cache…"; color: Theme.muted; padding: 6 }
+                    Button { text: I18n.t("Apply"); enabled: backend.connected && !root.snapshot.cache_action && !!root.snapshot.artwork_cache && !root.snapshot.artwork_cache.cleanup_pending; onClicked: root.send("set_artwork_budget", {mib: root.cacheBudgetDraft}) }
+                    Button { text: root.snapshot.artwork_cache && root.snapshot.artwork_cache.cleanup_pending ? I18n.t("Retry cleanup") : I18n.t("Clear artwork"); enabled: backend.connected && !root.snapshot.cache_action; ToolTip.visible: hovered; ToolTip.text: I18n.t("Keeps your queue, sign-in and cache target. Visible covers are fetched again."); onClicked: root.send("clear_artwork_cache") }
+                    Label { visible: !!root.snapshot.cache_action; text: I18n.t("Updating artwork cache…"); color: Theme.muted; padding: 6 }
                 }
-                Label { text: root.snapshot.metadata_cache ? "Metadata · " + root.snapshot.metadata_cache.message + (root.snapshot.metadata_cache.usage_known ? " · " + (root.snapshot.metadata_cache.bytes / 1048576).toFixed(1) + " MiB · " + root.snapshot.metadata_cache.pages + " pages · " + root.snapshot.metadata_cache.tracks + " indexed tracks" : "") : "Opening metadata cache…"; color: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+                Label { text: root.snapshot.metadata_cache ? I18n.t("Metadata · %1", [root.snapshot.metadata_cache.usage_known ? I18n.t("%1 · %2 MiB · %3 · %4", [I18n.message(root.snapshot.metadata_cache.message), I18n.number(root.snapshot.metadata_cache.bytes / 1048576, 1), I18n.count("%1 page", "%1 pages", root.snapshot.metadata_cache.pages), I18n.count("%1 indexed track", "%1 indexed tracks", root.snapshot.metadata_cache.tracks)]) : I18n.message(root.snapshot.metadata_cache.message)]) : I18n.t("Opening metadata cache…"); color: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
                 Flow {
                     Layout.fillWidth: true
                     Layout.preferredHeight: childrenRect.height
                     spacing: 6
-                    Label { text: "Metadata target (MiB, 0 disables)"; color: Theme.muted; padding: 6 }
+                    Label { text: I18n.t("Metadata target (MiB, 0 disables)"); color: Theme.muted; padding: 6 }
                     SpinBox { from: 0; to: 1024; editable: true; value: root.metadataBudgetDraft; onValueModified: root.metadataBudgetDraft = value }
-                    Button { text: "Apply metadata target"; enabled: backend.connected && !root.snapshot.metadata_cache_action && !!root.snapshot.metadata_cache && !root.snapshot.metadata_cache.cleanup_pending && root.snapshot.metadata_cache.state !== "opening"; onClicked: root.send("set_metadata_budget", {mib: root.metadataBudgetDraft}) }
-                    Button { text: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? "Retry metadata cleanup" : "Clear metadata"; enabled: backend.connected && !root.snapshot.metadata_cache_action; ToolTip.visible: hovered; ToolTip.text: "Resets loaded browser views and cached metadata. Keeps your queue, sign-in, artwork and cache targets."; onClicked: root.send("clear_metadata_cache") }
-                    Label { visible: !!root.snapshot.metadata_cache_action; text: "Updating metadata cache…"; color: Theme.muted; padding: 6 }
+                    Button { text: I18n.t("Apply metadata target"); enabled: backend.connected && !root.snapshot.metadata_cache_action && !!root.snapshot.metadata_cache && !root.snapshot.metadata_cache.cleanup_pending && root.snapshot.metadata_cache.state !== "opening"; onClicked: root.send("set_metadata_budget", {mib: root.metadataBudgetDraft}) }
+                    Button { text: root.snapshot.metadata_cache && root.snapshot.metadata_cache.cleanup_pending ? I18n.t("Retry metadata cleanup") : I18n.t("Clear metadata"); enabled: backend.connected && !root.snapshot.metadata_cache_action; ToolTip.visible: hovered; ToolTip.text: I18n.t("Resets loaded browser views and cached metadata. Keeps your queue, sign-in, artwork and cache targets."); onClicked: root.send("clear_metadata_cache") }
+                    Label { visible: !!root.snapshot.metadata_cache_action; text: I18n.t("Updating metadata cache…"); color: Theme.muted; padding: 6 }
                 }
             }
             ArchiveBrowser {
@@ -299,7 +299,7 @@ ShellRoot {
             RowLayout {
                 width: parent.width
                 visible: root.accountExpanded && !!root.snapshot.signin_url
-                Button { text: "Open Plex sign-in"; onClicked: { browser.command = ["/usr/bin/brave", root.snapshot.signin_url]; browser.running = true; } }
+                Button { text: I18n.t("Open Plex sign-in"); onClicked: { browser.command = ["/usr/bin/brave", root.snapshot.signin_url]; browser.running = true; } }
                 TextField { text: root.snapshot.signin_url || ""; readOnly: true; selectByMouse: true; Layout.fillWidth: true }
             }
         }
@@ -343,33 +343,33 @@ ShellRoot {
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: "QODA"; color: Theme.foreground; font.pixelSize: 20; font.bold: true; font.letterSpacing: 3; Layout.fillWidth: true }
-                Button { text: "Queue"; visible: window.width < 1100; onClicked: { if (root.queueRequested) root.queueRequested = false; else root.openQueue(queueTabs.currentIndex); } }
-                Button { text: "Compact"; onClicked: root.showSurface("compact", true) }
-                Button { text: "Menu"; onClicked: playerMenu.popup() }
+                Button { text: I18n.t("Queue"); visible: window.width < 1100; onClicked: { if (root.queueRequested) root.queueRequested = false; else root.openQueue(queueTabs.currentIndex); } }
+                Button { text: I18n.t("Compact"); onClicked: root.showSurface("compact", true) }
+                Button { text: I18n.t("Menu"); onClicked: playerMenu.popup() }
                 Menu {
                     id: playerMenu
                     Shortcut { sequence: "Ctrl+K"; enabled: playerMenu.visible; onActivated: root.focusSearch() }
                     onClosed: Qt.callLater(root.tryFocusSearch)
-                    MenuItem { text: "Account"; onTriggered: root.showSettings("account") }
-                    MenuItem { text: "Audio settings"; onTriggered: root.showSettings("audio") }
-                    MenuItem { text: "Cache settings"; onTriggered: root.showSettings("cache") }
-                    MenuItem { text: "Listening archive"; onTriggered: root.showSettings("history") }
-                    MenuItem { text: "Gapless"; checkable: true; checked: !!root.snapshot.gapless && root.snapshot.gapless.enabled; enabled: backend.connected && !!root.snapshot.gapless; onTriggered: root.send("set_gapless", {enabled: checked}) }
+                    MenuItem { text: I18n.t("Account"); onTriggered: root.showSettings("account") }
+                    MenuItem { text: I18n.t("Audio settings"); onTriggered: root.showSettings("audio") }
+                    MenuItem { text: I18n.t("Cache settings"); onTriggered: root.showSettings("cache") }
+                    MenuItem { text: I18n.t("Listening archive"); onTriggered: root.showSettings("history") }
+                    MenuItem { text: I18n.t("Gapless"); checkable: true; checked: !!root.snapshot.gapless && root.snapshot.gapless.enabled; enabled: backend.connected && !!root.snapshot.gapless; onTriggered: root.send("set_gapless", {enabled: checked}) }
                     MenuSeparator {}
-                    MenuItem { text: "Hide player"; onTriggered: root.hideSurface() }
-                    MenuItem { text: "Quit player"; onTriggered: quitState.begin() }
+                    MenuItem { text: I18n.t("Hide player"); onTriggered: root.hideSurface() }
+                    MenuItem { text: I18n.t("Quit player"); onTriggered: quitState.begin() }
                 }
             }
             RowLayout {
                 visible: !!root.snapshot.output && (!root.snapshot.output.available || !!root.snapshot.output.device_missing) || !!root.snapshot.replaygain && !root.snapshot.replaygain.available || !!root.snapshot.artwork_cache && ["unavailable", "cleanup_pending"].includes(root.snapshot.artwork_cache.state) || !!root.snapshot.metadata_cache && ["unavailable", "cleanup_pending"].includes(root.snapshot.metadata_cache.state)
                 Layout.fillWidth: true
-                Label { text: "Settings need attention"; color: Theme.danger; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                Button { text: "Review settings"; onClicked: root.showSettings(!!root.snapshot.output && (!root.snapshot.output.available || root.snapshot.output.device_missing) || !!root.snapshot.replaygain && !root.snapshot.replaygain.available ? "audio" : "cache") }
+                Label { text: I18n.t("Settings need attention"); color: Theme.danger; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                Button { text: I18n.t("Review settings"); onClicked: root.showSettings(!!root.snapshot.output && (!root.snapshot.output.available || root.snapshot.output.device_missing) || !!root.snapshot.replaygain && !root.snapshot.replaygain.available ? "audio" : "cache") }
             }
             RowLayout {
                 visible: !!root.snapshot.storage && ["unsaved", "blocked"].includes(root.snapshot.storage.state)
-                Label { text: root.snapshot.storage ? root.snapshot.storage.message : "Opening session storage…"; color: root.snapshot.storage && (root.snapshot.storage.state === "unsaved" || root.snapshot.storage.state === "blocked") ? Theme.danger : Theme.muted; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
-                Button { text: "Retry save"; enabled: backend.connected; onClicked: root.send("retry_save") }
+                Label { text: root.snapshot.storage ? I18n.message(root.snapshot.storage.message) : I18n.t("Opening session storage…"); color: root.snapshot.storage && (root.snapshot.storage.state === "unsaved" || root.snapshot.storage.state === "blocked") ? Theme.danger : Theme.muted; Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText }
+                Button { text: I18n.t("Retry save"); enabled: backend.connected; onClicked: root.send("retry_save") }
             }
             DesktopControls {
                 Layout.fillWidth: true
@@ -377,7 +377,7 @@ ShellRoot {
                 connected: backend.connected
                 onRetryRequested: root.send("retry_desktop")
             }
-            Label { visible: !!root.snapshot.gapless && ["review", "fallback"].includes(root.snapshot.gapless.phase); text: root.snapshot.gapless ? root.snapshot.gapless.message : ""; color: root.snapshot.gapless && root.snapshot.gapless.phase === "review" ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
+            Label { visible: !!root.snapshot.gapless && ["review", "fallback"].includes(root.snapshot.gapless.phase); text: root.snapshot.gapless ? I18n.message(root.snapshot.gapless.message) : ""; color: root.snapshot.gapless && root.snapshot.gapless.phase === "review" ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true }
             StreamRecovery {
                 Layout.fillWidth: true
                 snapshot: root.snapshot.recovery || null
@@ -386,8 +386,8 @@ ShellRoot {
                 canRetry: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
                 onActionRequested: (op, fields) => root.send(op, fields)
             }
-            Label { visible: !backend.connected || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || !!root.snapshot.error; text: backend.connected ? root.snapshot.status : "Backend disconnected — reconnecting"; color: Theme.muted; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
-            Label { visible: !!quitState.error || !!root.snapshot.error; text: quitState.error || root.snapshot.error || ""; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
+            Label { visible: !backend.connected || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || !!root.snapshot.error; text: backend.connected ? I18n.message(root.snapshot.status) : I18n.t("Backend disconnected — reconnecting"); color: Theme.muted; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
+            Label { visible: !!quitState.error || !!root.snapshot.error; text: I18n.message(quitState.error) || I18n.message(root.snapshot.error) || ""; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
                 QtObject {
                     id: libraryTabs; property int currentIndex: 2
                     onCurrentIndexChanged: {
@@ -406,7 +406,7 @@ ShellRoot {
                 spacing: 18
                 Rectangle {
                     id: libraryRail
-                    Layout.preferredWidth: window.width < 760 ? 106 : 172
+                    Layout.preferredWidth: window.width < 760 ? 122 : 172
                     Layout.fillHeight: true
                     color: Theme.surface
                     radius: 8
@@ -419,7 +419,7 @@ ShellRoot {
                         width: railScroll.availableWidth
                         height: Math.max(implicitHeight, railScroll.availableHeight)
                         spacing: 8
-                        Label { text: "LIBRARY"; color: Theme.muted; font.pixelSize: 11; font.letterSpacing: 1.5 }
+                        Label { text: I18n.t("LIBRARY"); color: Theme.muted; font.pixelSize: 11; font.letterSpacing: 1.5 }
                         LibraryPicker {
                             id: libraryPicker
                             Layout.fillWidth: true
@@ -440,19 +440,24 @@ ShellRoot {
                         }
                         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border; Layout.topMargin: 8; Layout.bottomMargin: 8 }
                         Repeater {
-                            model: [{title: "Albums", tab: 2}, {title: "Artists", tab: 3}, {title: "Tracks", tab: 0}, {title: "Playlists", tab: 1}, {title: "Search", tab: 4}]
+                            model: [{title: I18n.t("Albums"), tab: 2}, {title: I18n.t("Artists"), tab: 3}, {title: I18n.t("Tracks"), tab: 0}, {title: I18n.t("Playlists"), tab: 1}, {title: I18n.t("Search"), tab: 4}]
                             delegate: Button {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 text: modelData.title
+                                contentItem: Text {
+                                    text: parent.text; font: parent.font; color: Theme.foreground
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                    wrapMode: Text.Wrap
+                                }
                                 checked: libraryTabs.currentIndex === modelData.tab
                                 highlighted: checked
                                 onClicked: { root.pendingSearchFocus = false; root.closeSettings(); root.queueRequested = false; libraryTabs.currentIndex = modelData.tab; }
                             }
                         }
                         Item { Layout.fillHeight: true }
-                        Label { text: root.snapshot.sign_in && root.snapshot.sign_in.connected ? "Plex connected" : root.snapshot.discovery && root.snapshot.discovery.origin === "offline" ? "Offline library cache" : "Plex disconnected"; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                        Button { id: railAccount; text: root.snapshot.sign_in && root.snapshot.sign_in.connected ? "Account" : "Connect Plex"; Layout.fillWidth: true; onClicked: root.showSettings("account") }
+                        Label { text: root.snapshot.sign_in && root.snapshot.sign_in.connected ? I18n.t("Plex connected") : root.snapshot.discovery && root.snapshot.discovery.origin === "offline" ? I18n.t("Offline library cache") : I18n.t("Plex disconnected"); color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        Button { id: railAccount; text: root.snapshot.sign_in && root.snapshot.sign_in.connected ? I18n.t("Account") : I18n.t("Connect Plex"); Layout.fillWidth: true; onClicked: root.showSettings("account") }
                     }
                     }
                 }
@@ -463,8 +468,8 @@ ShellRoot {
                     spacing: 14
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { text: ["Tracks", "Playlists", "Albums", "Artists", "Search"][libraryTabs.currentIndex]; color: Theme.foreground; font.pixelSize: 26; font.bold: true; Layout.fillWidth: true }
-                        TextField { visible: libraryTabs.currentIndex !== 1; id: search; maximumLength: 512; Layout.preferredWidth: Math.min(300, browserPane.width * 0.6); Layout.minimumWidth: 80; placeholderText: libraryTabs.currentIndex === 2 ? "Search album titles" : libraryTabs.currentIndex === 3 ? "Search artist names" : libraryTabs.currentIndex === 4 ? "Search all libraries" : "Search this library"; onTextEdited: { root.rememberQuery(); searchDelay.restart(); } onAccepted: { searchDelay.stop(); root.searchCatalog(); } }
+                        Label { text: [I18n.t("Tracks"), I18n.t("Playlists"), I18n.t("Albums"), I18n.t("Artists"), I18n.t("Search")][libraryTabs.currentIndex]; color: Theme.foreground; font.pixelSize: 26; font.bold: true; Layout.fillWidth: true }
+                        TextField { visible: libraryTabs.currentIndex !== 1; id: search; maximumLength: 512; Layout.preferredWidth: Math.min(300, browserPane.width * 0.6); Layout.minimumWidth: 80; placeholderText: libraryTabs.currentIndex === 2 ? I18n.t("Search album titles") : libraryTabs.currentIndex === 3 ? I18n.t("Search artist names") : libraryTabs.currentIndex === 4 ? I18n.t("Search all libraries") : I18n.t("Search this library"); onTextEdited: { root.rememberQuery(); searchDelay.restart(); } onAccepted: { searchDelay.stop(); root.searchCatalog(); } }
                     }
                 DiscoveryNotice {
                     Layout.fillWidth: true
@@ -509,20 +514,20 @@ ShellRoot {
                     visible: libraryTabs.currentIndex === 0
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-            Label { visible: !!root.snapshot.catalog && !!root.snapshot.catalog.cache && root.snapshot.catalog.cache.origin !== "live"; text: root.snapshot.catalog && root.snapshot.catalog.cache ? root.snapshot.catalog.cache.message : ""; color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
-            Label { text: "Select tracks with checkboxes or Ctrl/Shift-click titles. The last clicked track seeds a new playlist."; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { visible: !!root.snapshot.catalog && !!root.snapshot.catalog.cache && root.snapshot.catalog.cache.origin !== "live"; text: root.snapshot.catalog && root.snapshot.catalog.cache ? I18n.message(root.snapshot.catalog.cache.message) : ""; color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { text: I18n.t("Select tracks with checkboxes or Ctrl/Shift-click titles. The last clicked track seeds a new playlist."); color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Flow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: childrenRect.height
                 spacing: 6
-                Label { text: trackSelection.count + " selected on this page"; color: Theme.muted; padding: 6 }
-                Button { text: "Select page"; enabled: root.trackPageReady && root.trackModel.length > 0; onClicked: trackSelection.selectAll() }
-                Button { text: "Clear selection"; enabled: trackSelection.count > 0; onClicked: trackSelection.clear() }
-                Button { text: "Play selected"; enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_selected") }
-                Button { text: "Play selected next"; enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_next_selected") }
-                Button { text: "+ Queue selected"; enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("enqueue_selected") }
+                Label { text: I18n.t("%1 selected on this page", [I18n.number(trackSelection.count)]); color: Theme.muted; padding: 6 }
+                Button { text: I18n.t("Select page"); enabled: root.trackPageReady && root.trackModel.length > 0; onClicked: trackSelection.selectAll() }
+                Button { text: I18n.t("Clear selection"); enabled: trackSelection.count > 0; onClicked: trackSelection.clear() }
+                Button { text: I18n.t("Play selected"); enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_selected") }
+                Button { text: I18n.t("Play selected next"); enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("play_next_selected") }
+                Button { text: I18n.t("+ Queue selected"); enabled: root.trackPageReady && trackSelection.count > 0; onClicked: root.bulkTracks("enqueue_selected") }
             }
-            Label { visible: !!root.playlistView; text: { if (!root.playlistView) return ""; let library = root.libraryModel.find(item => item.id === root.playlistView.playlist.reference.source); return "+ Playlist saves to: " + root.playlistView.playlist.title + (library ? " · " + library.server : ""); } color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { visible: !!root.playlistView; text: { if (!root.playlistView) return ""; let library = root.libraryModel.find(item => item.id === root.playlistView.playlist.reference.source); return I18n.t("+ Playlist saves to: %1", [root.playlistView.playlist.title]) + (library ? " · " + library.server : ""); } color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
             ListView {
                 id: tracks
                 Layout.fillWidth: true
@@ -545,51 +550,51 @@ ShellRoot {
                 }
             }
             RowLayout {
-                Label { text: root.snapshot.page ? root.snapshot.page.tracks.length + " tracks on this page" : "Choose a library to browse"; color: Theme.muted; Layout.fillWidth: true }
-                Button { text: "Previous"; enabled: !!root.snapshot.page && root.snapshot.page.offset !== "0"; onClicked: root.browse(root.pageOffset(root.snapshot.page.offset, -100)) }
-                Button { text: "Next"; enabled: !!root.snapshot.page && root.snapshot.page.has_more; onClicked: root.browse(root.pageOffset(root.snapshot.page.offset, 100)) }
+                Label { text: root.snapshot.page ? I18n.count("%1 track on this page", "%1 tracks on this page", root.snapshot.page.tracks.length) : I18n.t("Choose a library to browse"); color: Theme.muted; Layout.fillWidth: true }
+                Button { text: I18n.t("Previous"); enabled: !!root.snapshot.page && root.snapshot.page.offset !== "0"; onClicked: root.browse(root.pageOffset(root.snapshot.page.offset, -100)) }
+                Button { text: I18n.t("Next"); enabled: !!root.snapshot.page && root.snapshot.page.has_more; onClicked: root.browse(root.pageOffset(root.snapshot.page.offset, 100)) }
             }
                 }
                 ColumnLayout {
                     visible: libraryTabs.currentIndex === 1
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Label { text: "Audio playlists on the selected library's server"; color: Theme.foreground; font.bold: true }
-                    Label { text: root.snapshot.playlists ? root.snapshot.playlists.message : "Choose a library, then refresh."; color: root.snapshot.playlists && root.snapshot.playlists.uncertain ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
+                    Label { text: I18n.t("Audio playlists on the selected library's server"); color: Theme.foreground; font.bold: true }
+                    Label { text: root.snapshot.playlists ? I18n.message(root.snapshot.playlists.message) : I18n.t("Choose a library, then refresh."); color: root.snapshot.playlists && root.snapshot.playlists.uncertain ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
                     RowLayout {
-                        Button { text: "Refresh from Plex"; enabled: !!root.libraryId && !!root.snapshot.playlists && !root.snapshot.playlists.busy; onClicked: root.refreshPlaylists() }
-                        Button { text: "Previous lists"; enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.offset !== "0" && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, -100)}) }
-                        Button { text: "More lists"; enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.has_more && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, 100)}) }
+                        Button { text: I18n.t("Refresh from Plex"); enabled: !!root.libraryId && !!root.snapshot.playlists && !root.snapshot.playlists.busy; onClicked: root.refreshPlaylists() }
+                        Button { text: I18n.t("Previous lists"); enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.offset !== "0" && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, -100)}) }
+                        Button { text: I18n.t("More lists"); enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.has_more && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, 100)}) }
                     }
                     ComboBox {
                         id: savedLists
                         Layout.fillWidth: true
                         model: root.playlistModel
                         textRole: "title"
-                        displayText: root.playlistView ? root.playlistView.playlist.title : "Choose a saved playlist"
+                        displayText: root.playlistView ? root.playlistView.playlist.title : I18n.t("Choose a saved playlist")
                         enabled: !!root.snapshot.playlists && !root.snapshot.playlists.busy
                         contentItem: Text { text: savedLists.displayText; textFormat: Text.PlainText; color: Theme.foreground; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
                         delegate: ItemDelegate {
                             id: playlistDelegate
                             required property var modelData
                             width: savedLists.width
-                            text: modelData.title + (modelData.smart ? " · Smart / read-only" : "")
+                            text: modelData.title + (modelData.smart ? I18n.t(" · Smart / read-only") : "")
                             contentItem: Text { text: playlistDelegate.text; textFormat: Text.PlainText; color: Theme.foreground; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
                         }
                         onActivated: index => root.send("playlist_open", {reference: model[index].reference})
                     }
                     RowLayout {
-                        TextField { id: playlistName; placeholderText: "New playlist title / rename to…"; maximumLength: 512; Layout.fillWidth: true }
-                        Button { text: "Create from selected track"; enabled: !!root.libraryId && !!root.playlistSeed && playlistName.text.trim().length > 0 && !!root.snapshot.playlists && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.send("playlist_create", {source: root.libraryId, title: playlistName.text, seed: root.playlistSeed.reference}) }
+                        TextField { id: playlistName; placeholderText: I18n.t("New playlist title / rename to…"); maximumLength: 512; Layout.fillWidth: true }
+                        Button { text: I18n.t("Create from selected track"); enabled: !!root.libraryId && !!root.playlistSeed && playlistName.text.trim().length > 0 && !!root.snapshot.playlists && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.send("playlist_create", {source: root.libraryId, title: playlistName.text, seed: root.playlistSeed.reference}) }
                     }
-                    Label { visible: !!root.playlistSeed; text: root.playlistSeed ? "New playlist starts with: " + root.playlistSeed.title : "Select a track in Library to create a playlist."; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                    Label { text: root.playlistView ? root.playlistView.playlist.title + (root.playlistView.playlist.can_edit && !root.playlistView.playlist.smart ? " · Edits are saved to Plex" : " · Read-only") : "Open a playlist"; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { visible: !!root.playlistSeed; text: root.playlistSeed ? I18n.t("New playlist starts with: %1", [root.playlistSeed.title]) : I18n.t("Select a track in Library to create a playlist."); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: root.playlistView ? root.playlistView.playlist.title + (root.playlistView.playlist.can_edit && !root.playlistView.playlist.smart ? I18n.t(" · Edits are saved to Plex") : I18n.t(" · Read-only")) : I18n.t("Open a playlist"); color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Flow {
                         Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height; spacing: 6
-                        Button { text: "Play playlist"; enabled: !!root.playlistView && root.playlistEntries.length > 0 && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_play", null) }
-                        Button { text: "+ Queue"; enabled: !!root.playlistView && root.playlistEntries.length > 0 && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_enqueue", null) }
-                        Button { text: "Rename"; enabled: root.playlistWritable && playlistName.text.trim().length > 0; onClicked: root.playlistEdit({action: "rename", title: playlistName.text}) }
-                        Button { text: "Delete from Plex"; ToolTip.visible: hovered; ToolTip.text: "Deletes this saved playlist from Plex. The local queue is kept."; enabled: root.playlistWritable; onClicked: root.playlistEdit({action: "delete"}) }
+                        Button { text: I18n.t("Play playlist"); enabled: !!root.playlistView && root.playlistEntries.length > 0 && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_play", null) }
+                        Button { text: I18n.t("+ Queue"); enabled: !!root.playlistView && root.playlistEntries.length > 0 && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_enqueue", null) }
+                        Button { text: I18n.t("Rename"); enabled: root.playlistWritable && playlistName.text.trim().length > 0; onClicked: root.playlistEdit({action: "rename", title: playlistName.text}) }
+                        Button { text: I18n.t("Delete from Plex"); ToolTip.visible: hovered; ToolTip.text: I18n.t("Deletes this saved playlist from Plex. The local queue is kept."); enabled: root.playlistWritable; onClicked: root.playlistEdit({action: "delete"}) }
                     }
                     ListView {
                         id: playlistTracks
@@ -603,7 +608,7 @@ ShellRoot {
                         ScrollBar.vertical: ScrollBar {}
                         footer: Item {
                             width: playlistTracks.width; height: playlistReorder.active ? 30 : 0
-                            Label { anchors.centerIn: parent; text: "Move to end"; color: Theme.muted; visible: playlistReorder.active }
+                            Label { anchors.centerIn: parent; text: I18n.t("Move to end"); color: Theme.muted; visible: playlistReorder.active }
                             ReorderDrop { anchors.fill: parent; controller: playlistReorder; targetId: ""; append: true }
                         }
                         delegate: Rectangle {
@@ -621,14 +626,14 @@ ShellRoot {
                                     ColumnLayout {
                                         Layout.fillWidth: true
                                         Label { text: modelData.title; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                                        Label { text: modelData.track ? modelData.artist : "Source unavailable or unresolved"; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                                        Label { text: modelData.track ? modelData.artist : I18n.t("Source unavailable or unresolved"); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                                     }
                                 }
                                 RowLayout {
-                                    Button { text: "Play from here"; enabled: !!root.playlistView && !!modelData.track && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_play", modelData.id) }
+                                    Button { text: I18n.t("Play from here"); enabled: !!root.playlistView && !!modelData.track && !root.snapshot.playlists.busy; onClicked: root.playlistQueue("playlist_play", modelData.id) }
                                     Button { text: "↑"; implicitWidth: 32; leftPadding: 6; rightPadding: 6; enabled: root.playlistWritable && index > 0; onClicked: root.playlistEdit({action: "move", item_id: modelData.id, after: index > 1 ? root.playlistEntries[index - 2].id : null}) }
                                     Button { text: "↓"; implicitWidth: 32; leftPadding: 6; rightPadding: 6; enabled: root.playlistWritable && index + 1 < root.playlistEntries.length; onClicked: root.playlistEdit({action: "move", item_id: modelData.id, after: root.playlistEntries[index + 1].id}) }
-                                    Button { text: "Remove"; enabled: root.playlistWritable; onClicked: root.playlistEdit({action: "remove", item_id: modelData.id}) }
+                                    Button { text: I18n.t("Remove"); enabled: root.playlistWritable; onClicked: root.playlistEdit({action: "remove", item_id: modelData.id}) }
                                 }
                             }
                             ReorderDrop { anchors.fill: parent; controller: playlistReorder; targetId: modelData.id }
@@ -649,21 +654,21 @@ ShellRoot {
                     anchors.margins: window.width >= 1100 ? 0 : 16
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { text: "Queue · " + root.queueModel.length; color: Theme.foreground; font.pixelSize: 20; font.bold: true; Layout.fillWidth: true }
-                        Button { text: "Close"; visible: window.width < 1100; onClicked: root.queueRequested = false }
+                        Label { text: I18n.t("Queue · %1", [I18n.number(root.queueModel.length)]); color: Theme.foreground; font.pixelSize: 20; font.bold: true; Layout.fillWidth: true }
+                        Button { text: I18n.t("Close"); visible: window.width < 1100; onClicked: root.queueRequested = false }
                     }
                     RowLayout {
-                Button { text: "Shuffle: " + (root.snapshot.queue && root.snapshot.queue.shuffled ? "On" : "Off"); enabled: !!root.snapshot.queue; onClicked: root.editQueue("set_shuffle", {enabled: !root.snapshot.queue.shuffled}) }
-                Button { text: "Repeat: " + (root.snapshot.queue ? root.snapshot.queue.repeat : "off"); enabled: !!root.snapshot.queue; onClicked: { let modes = ["off", "one", "all"]; root.editQueue("set_repeat", {mode: modes[(modes.indexOf(root.snapshot.queue.repeat) + 1) % 3]}); } }
+                Button { text: I18n.t("Shuffle: %1", [root.snapshot.queue && root.snapshot.queue.shuffled ? I18n.t("On") : I18n.t("Off")]); enabled: !!root.snapshot.queue; onClicked: root.editQueue("set_shuffle", {enabled: !root.snapshot.queue.shuffled}) }
+                Button { text: I18n.t("Repeat: %1", [I18n.state(root.snapshot.queue ? root.snapshot.queue.repeat : "off")]); enabled: !!root.snapshot.queue; onClicked: { let modes = ["off", "one", "all"]; root.editQueue("set_repeat", {mode: modes[(modes.indexOf(root.snapshot.queue.repeat) + 1) % 3]}); } }
                     }
                     TabBar {
                         id: queueTabs
                         Layout.fillWidth: true
-                        TabButton { text: "Queue" }
-                        TabButton { text: "Previous path" }
-                        TabButton { text: "Unavailable" + (root.snapshot.queue && root.snapshot.queue.unavailable_entries && root.snapshot.queue.unavailable_entries.length ? " (" + root.snapshot.queue.unavailable_entries.length + ")" : "") }
+                        TabButton { text: I18n.t("Queue") }
+                        TabButton { text: I18n.t("Previous path") }
+                        TabButton { text: I18n.t("Unavailable") + (root.snapshot.queue && root.snapshot.queue.unavailable_entries && root.snapshot.queue.unavailable_entries.length ? " (" + root.snapshot.queue.unavailable_entries.length + ")" : "") }
                     }
-                    Label { visible: queueTabs.currentIndex === 0; text: root.snapshot.queue && root.snapshot.queue.navigating ? "Previous navigation · Next returns forward" : root.snapshot.queue && root.snapshot.queue.ended ? "End of selection · Play pending or Replay" : "Selected and upcoming"; color: Theme.muted; textFormat: Text.PlainText }
+                    Label { visible: queueTabs.currentIndex === 0; text: root.snapshot.queue && root.snapshot.queue.navigating ? I18n.t("Previous navigation · Next returns forward") : root.snapshot.queue && root.snapshot.queue.ended ? I18n.t("End of selection · Play pending or Replay") : I18n.t("Selected and upcoming"); color: Theme.muted; textFormat: Text.PlainText }
                     ListView {
                         id: queueView
                         highlightFollowsCurrentItem: false
@@ -677,7 +682,7 @@ ShellRoot {
                         ScrollBar.vertical: ScrollBar {}
                         footer: Item {
                             width: queueView.width; height: queueReorder.active ? 30 : 0
-                            Label { anchors.centerIn: parent; text: "Move to end"; color: Theme.muted; visible: queueReorder.active }
+                            Label { anchors.centerIn: parent; text: I18n.t("Move to end"); color: Theme.muted; visible: queueReorder.active }
                             ReorderDrop { anchors.fill: parent; controller: queueReorder; targetId: ""; append: true }
                         }
                         delegate: Rectangle {
@@ -697,15 +702,15 @@ ShellRoot {
                                     Layout.fillWidth: true
                                     ReorderHandle { controller: queueReorder; itemId: modelData.id; viewport: queueView; movable: !!modelData.can_move }
                                     Label { text: modelData.track.title; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                                    Label { visible: modelData.selected; text: "Selected"; color: Theme.accent; font.pixelSize: 10 }
+                                    Label { visible: modelData.selected; text: I18n.t("Selected"); color: Theme.accent; font.pixelSize: 10 }
                                 }
                                 Label { text: modelData.track.artist + (modelData.track.album ? " · " + modelData.track.album : ""); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                                Label { visible: !!modelData.unavailable; text: modelData.unavailable ? "Unavailable: " + modelData.unavailable : ""; color: Theme.danger; textFormat: Text.PlainText; Layout.fillWidth: true }
+                                Label { visible: !!modelData.unavailable; text: modelData.unavailable ? I18n.t("Unavailable: %1", [I18n.state(modelData.unavailable)]) : ""; color: Theme.danger; textFormat: Text.PlainText; Layout.fillWidth: true }
                                 RowLayout {
-                                    Button { text: modelData.unavailable ? "Retry" : "Play"; enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; onClicked: root.editQueue("queue_play", {occurrence: modelData.id}) }
+                                    Button { text: modelData.unavailable ? I18n.t("Retry") : I18n.t("Play"); enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; onClicked: root.editQueue("queue_play", {occurrence: modelData.id}) }
                                     Button { text: "↑"; implicitWidth: 32; leftPadding: 6; rightPadding: 6; enabled: modelData.can_move && index > 0 && root.queueModel[index - 1].can_move; onClicked: root.moveEntry(index, -1) }
                                     Button { text: "↓"; implicitWidth: 32; leftPadding: 6; rightPadding: 6; enabled: modelData.can_move && index + 1 < root.queueModel.length && root.queueModel[index + 1].can_move; onClicked: root.moveEntry(index, 1) }
-                                    Button { text: "Remove"; onClicked: root.editQueue("queue_remove", {occurrence: modelData.id}) }
+                                    Button { text: I18n.t("Remove"); onClicked: root.editQueue("queue_remove", {occurrence: modelData.id}) }
                                 }
                             }
                             ReorderDrop { anchors.fill: parent; controller: queueReorder; targetId: modelData.id; movable: !!modelData.can_move }
@@ -730,11 +735,11 @@ ShellRoot {
                         onActionRequested: (op, fields) => root.send(op, fields)
                     }
                     RowLayout {
-                        Button { text: "Clear upcoming"; onClicked: root.editQueue("clear_upcoming") }
-                        Button { text: "Stop & clear"; onClicked: root.editQueue("stop_clear") }
+                        Button { text: I18n.t("Clear upcoming"); onClicked: root.editQueue("clear_upcoming") }
+                        Button { text: I18n.t("Stop & clear"); onClicked: root.editQueue("stop_clear") }
                     }
-                    Label { visible: !!root.snapshot.queue && root.snapshot.queue.navigation_dropped !== "0"; text: "Previous retains the latest 4096 nominal visits; earlier visits were omitted."; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    Label { text: "Your queue restores paused."; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { visible: !!root.snapshot.queue && root.snapshot.queue.navigation_dropped !== "0"; text: I18n.t("Previous retains the latest 4096 nominal visits; earlier visits were omitted."); color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: I18n.t("Your queue restores paused."); color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
                 }
             }
@@ -785,7 +790,7 @@ ShellRoot {
         function showQueue(): void { root.openQueue(0); }
         function browseArtists(): void { root.pendingSearchFocus = false; root.closeSettings(); root.queueRequested = false; libraryTabs.currentIndex = 3; root.showSurface("full", true); }
         function browsePlaylists(): void { root.pendingSearchFocus = false; root.closeSettings(); root.queueRequested = false; libraryTabs.currentIndex = 1; root.showSurface("full", true); }
-        function status(): string { return JSON.stringify({discovery: root.snapshot.discovery || null, theme: {system: Theme.system, background: String(Theme.background), foreground: String(Theme.foreground), accent: String(Theme.accent), controlText: String(fullFrame.palette.text), controlHighlight: String(fullFrame.palette.highlight)}, libraryPicker: {source: root.libraryId, label: libraryPicker.label(libraryPicker.selected), open: libraryPicker.popupVisible}, settings: {section: root.settingsSection, visible: settingsSheet.visible, scrollable: settingsSheet.scrollable}, searchFocused: search.activeFocus, reorder: {queueActive: queueReorder.active, playlistActive: playlistReorder.active, queueEnabled: queueReorder.enabled, playlistEnabled: playlistReorder.enabled}, search: root.snapshot.search || null, output: root.snapshot.output || null, replaygain: root.snapshot.replaygain || null, audioExpanded: root.audioExpanded, uiCapability: root.snapshot.ui || null, unavailable: {visible: queueTabs.currentIndex === 2, canRetry: unavailableBrowser.canRetry, entries: unavailableBrowser.rows.length}, desktopControls: root.snapshot.mpris || null, navigation: {visible: queueTabs.currentIndex === 1, entries: navigationBrowser.rows.length, viewportHeight: navigationBrowser.viewportHeight, page: root.snapshot.navigation || null}, artists: artistBrowser.artistModel.length, queueDrawerOpen: queueDrawer.opened, queueDrawerVisible: queueDrawer.visible, albums: {canQueue: albumBrowser.canQueue, cache: root.snapshot.albums ? root.snapshot.albums.cache || null : null, thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height, sidebarWidth: libraryRail.width, railHeight: railScroll.height, railContentHeight: railScroll.contentHeight, accountTop: railAccount.mapToItem(railScroll, 0, 0).y, accountBottom: railAccount.mapToItem(railScroll, 0, railAccount.height).y, browserWidth: browserPane.width, browserHeight: browserPane.height, queueVisible: queueSlot.visible || queueDrawer.opened, queueWidth: queuePane.width, queueHeight: queuePane.height, queueRowHeight: queueView.itemAtIndex(0)?.height || 0}, connected: backend.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length, order: root.playlistEntries.map(row => row.id)} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
+        function status(): string { return JSON.stringify({localization: {language: I18n.language, preferences: I18n.preferences, formatLocale: Qt.locale().name}, discovery: root.snapshot.discovery || null, theme: {system: Theme.system, background: String(Theme.background), foreground: String(Theme.foreground), accent: String(Theme.accent), controlText: String(fullFrame.palette.text), controlHighlight: String(fullFrame.palette.highlight)}, libraryPicker: {source: root.libraryId, label: libraryPicker.label(libraryPicker.selected), open: libraryPicker.popupVisible}, settings: {section: root.settingsSection, visible: settingsSheet.visible, scrollable: settingsSheet.scrollable}, searchFocused: search.activeFocus, reorder: {queueActive: queueReorder.active, playlistActive: playlistReorder.active, queueEnabled: queueReorder.enabled, playlistEnabled: playlistReorder.enabled}, search: root.snapshot.search || null, output: root.snapshot.output || null, replaygain: root.snapshot.replaygain || null, audioExpanded: root.audioExpanded, uiCapability: root.snapshot.ui || null, unavailable: {visible: queueTabs.currentIndex === 2, canRetry: unavailableBrowser.canRetry, entries: unavailableBrowser.rows.length}, desktopControls: root.snapshot.mpris || null, navigation: {visible: queueTabs.currentIndex === 1, entries: navigationBrowser.rows.length, viewportHeight: navigationBrowser.viewportHeight, page: root.snapshot.navigation || null}, artists: artistBrowser.artistModel.length, queueDrawerOpen: queueDrawer.opened, queueDrawerVisible: queueDrawer.visible, albums: {canQueue: albumBrowser.canQueue, cache: root.snapshot.albums ? root.snapshot.albums.cache || null : null, thumbnailsReady: albumBrowser.readyThumbnails, artistContext: !!albumBrowser.page && !!albumBrowser.page.artist,details: albumBrowser.showDetails, count: albumBrowser.albumModel.length, tracks: albumBrowser.trackModel.length, coverReady: albumBrowser.coverReady, trackViewport: albumBrowser.trackViewport}, geometry: {width: window.width, height: window.height, playlistHeight: playlistTracks.height, sidebarWidth: libraryRail.width, railHeight: railScroll.height, railContentHeight: railScroll.contentHeight, accountTop: railAccount.mapToItem(railScroll, 0, 0).y, accountBottom: railAccount.mapToItem(railScroll, 0, railAccount.height).y, browserWidth: browserPane.width, browserHeight: browserPane.height, queueVisible: queueSlot.visible || queueDrawer.opened, queueWidth: queuePane.width, queueHeight: queuePane.height, queueRowHeight: queueView.itemAtIndex(0)?.height || 0}, connected: backend.connected, instance: root.instance, playlists: root.snapshot.playlists ? {busy: root.snapshot.playlists.busy, uncertain: root.snapshot.playlists.uncertain, lists: root.playlistModel.length, entries: root.playlistEntries.length, order: root.playlistEntries.map(row => row.id)} : null, storage: root.snapshot.storage || null, queue: root.snapshot.queue ? {shuffled: root.snapshot.queue.shuffled, repeat: root.snapshot.queue.repeat, previousAvailable: root.snapshot.queue.previous_available, position: root.snapshot.queue.position_seconds, session: root.snapshot.queue.session, revision: root.snapshot.queue.revision, entries: root.snapshot.queue.entries.map(row => ({id: row.id, selected: row.selected, key: row.track.reference.key})), ended: root.snapshot.queue.ended} : null, signIn: root.snapshot.sign_in || null, libraries: (root.snapshot.libraries || []).length, tracks: root.snapshot.page ? root.snapshot.page.tracks.length : 0, selectedTracks: trackSelection.count, trackPageReady: root.trackPageReady, visible: window.visible || compact.visible, form: root.form, lastForm: root.lastForm, compact: {visible: compact.visible, mapped: compact.backingWindowVisible, width: compact.width, height: compact.height, screen: compact.screen ? compact.screen.name : null, keyboardMode: compact.keyboardMode}, presentation: root.snapshot.presentation || null, artworkCache: root.snapshot.artwork_cache || null, metadataCache: root.snapshot.metadata_cache || null, catalogCache: root.snapshot.catalog ? root.snapshot.catalog.cache || null : null, cacheExpanded: root.cacheExpanded, query: search.text, tab: libraryTabs.currentIndex}); }
         function quit(): void { quitState.begin(); }
     }
 }

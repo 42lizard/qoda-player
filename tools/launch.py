@@ -38,10 +38,10 @@ def integration_files(prefix, *, packaged=False):
     entry = current.parent / "entry.py" if packaged else current / "launch.py"
     backend_name, ui_name = unit_names(packaged)
     wrapper = ("#!/usr/bin/python3\nimport runpy\nrunpy.run_path(" + repr(str(entry)) + ", run_name='__main__')\n").encode()
-    desktop = ("[Desktop Entry]\nType=Application\nName=Qoda Player\nComment=Browse and play your music\n"
+    desktop = ("[Desktop Entry]\nType=Application\nName=Qoda Player\nComment=Browse and play your music\nComment[de]=Musik durchsuchen und abspielen\n"
                f"Exec=/usr/bin/python3 {quote_exec(launcher, True)} show\nIcon=qoda-player\nTerminal=false\nCategories=AudioVideo;Audio;Player;\n"
                "StartupWMClass=qoda-player\nActions=Toggle;Compact;Quit;\n" + "".join(
-                   f"\n[Desktop Action {name}]\nName={name}\nExec=/usr/bin/python3 {quote_exec(launcher, True)} {action}\n"
+                   f"\n[Desktop Action {name}]\nName={name}\nName[de]={dict(Toggle='Ein-/ausblenden', Compact='Kompakt', Quit='Beenden')[name]}\nExec=/usr/bin/python3 {quote_exec(launcher, True)} {action}\n"
                    for name, action in [("Toggle", "toggle"), ("Compact", "compact"), ("Quit", "quit")])).encode()
     def common(name, dependencies):
         return (f"[Unit]\nDescription=Qoda {name}\nPartOf={dependencies}\nRequisite={dependencies}\nAfter={dependencies}\n"

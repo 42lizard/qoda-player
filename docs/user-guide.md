@@ -339,3 +339,11 @@ contract](installation.md) and [recovery notes](audio/stream-recovery.md) provid
 technical detail when needed. The guide's screenshots can be regenerated with
 `python3 tools/capture-user-guide.py` in a development checkout; they do not use
 real accounts, media or your compositor.
+
+## Language and locale
+
+Qoda includes English and German and follows your desktop session's language
+preferences. German regional locales use German; unsupported languages fall back
+to English. Dates and numbers follow your locale's formatting. Restart the UI
+after changing the session locale; no music or account data needs to change.
+See [localization](localization.md) for locale precedence and translator details.

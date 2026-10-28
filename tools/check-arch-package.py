@@ -78,6 +78,8 @@ def check(archive):
         manifest=json.loads((release/'release.json').read_text())
         assert len(manifest['commit'])==40 and manifest['version']==version.rsplit('-',1)[0]
         assert (release/'ui/shell.qml').is_file()
+        for asset in ['I18n.qml', 'i18n/Catalog.js', 'i18n/German.js', 'i18n/de.json']:
+            assert (release/'ui'/asset).is_file(), 'Missing localization asset: '+asset
         unit=(root/'usr/lib/systemd/user/qoda-packaged-backend.service').read_text()
         command=next(line.removeprefix('ExecStart=') for line in unit.splitlines() if line.startswith('ExecStart='))
         assert shlex.split(command)==['/usr/bin/python3','/usr/lib/qoda-player/entry.py','run-backend']

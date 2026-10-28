@@ -51,14 +51,14 @@ ColumnLayout {
     Label {
         Layout.fillWidth: true
         visible: !albums.showDetails || albums.busy || !!albums.selected && (!albums.coverReady || !!snapshot.cache && snapshot.cache.origin !== "live")
-        text: snapshot ? snapshot.message : "Choose a music library."
+        text: snapshot ? I18n.message(snapshot.message) : I18n.t("Choose a music library.")
         color: Theme.muted
         wrapMode: Text.Wrap
         textFormat: Text.PlainText
     }
     RowLayout {
         visible: !!albums.page && !!albums.page.artist && !albums.showDetails
-        Button { text: "All albums"; onClicked: albums.allAlbums() }
+        Button { text: I18n.t("All albums"); onClicked: albums.allAlbums() }
         Label { text: albums.page && albums.page.artist ? albums.page.artist.title : ""; Layout.fillWidth: true; textFormat: Text.PlainText; elide: Text.ElideRight; color: Theme.foreground; font.bold: true }
     }
     RowLayout {
@@ -89,16 +89,16 @@ ColumnLayout {
                 contentItem: Text { text: albums.selected ? albums.selected.album.artist + (albums.selected.album.year ? " · " + albums.selected.album.year : "") + "  ›" : ""; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight }
                 onClicked: albums.openArtist(albums.selected.album.artist_ref)
             }
-            Label { text: albums.trackModel.length + " tracks · disc and track order"; color: Theme.muted }
+            Label { text: I18n.count("%1 track · disc and track order", "%1 tracks · disc and track order", albums.trackModel.length); color: Theme.muted }
             Flow {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 Layout.preferredHeight: childrenRect.height
                 spacing: 6
-                Button { text: "Back to albums"; onClicked: albums.showDetails = false }
-                Button { objectName: "refreshAlbum"; text: "Refresh album"; enabled: !albums.busy; onClicked: albums.openAlbum(albums.selected.album.reference) }
-                Button { objectName: "playAlbum"; text: "Play album"; enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_play", null) }
-                Button { objectName: "queueAlbum"; text: "+ Queue"; enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_enqueue", null) }
+                Button { text: I18n.t("Back to albums"); onClicked: albums.showDetails = false }
+                Button { objectName: "refreshAlbum"; text: I18n.t("Refresh album"); enabled: !albums.busy; onClicked: albums.openAlbum(albums.selected.album.reference) }
+                Button { objectName: "playAlbum"; text: I18n.t("Play album"); enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_play", null) }
+                Button { objectName: "queueAlbum"; text: I18n.t("+ Queue"); enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_enqueue", null) }
             }
         }
     }
@@ -139,7 +139,7 @@ ColumnLayout {
                     }
                     Label { text: modelData.title; font.bold: true; color: Theme.foreground; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
                     Label { text: modelData.artist; color: Theme.muted; Layout.fillWidth: true; elide: Text.ElideRight; textFormat: Text.PlainText }
-                    Label { text: (modelData.year ? modelData.year + " · " : "") + (modelData.track_count !== null ? modelData.track_count + " tracks" : "Album"); color: Theme.muted }
+                    Label { text: (modelData.year ? modelData.year + " · " : "") + (modelData.track_count !== null ? I18n.count("%1 track", "%1 tracks", modelData.track_count) : I18n.t("Album")); color: Theme.muted }
                 }
                 // A focusable control gives the same action to keyboard users.
                 Button {
@@ -147,7 +147,7 @@ ColumnLayout {
                     flat: true
                     text: ""
                     background: Item {}
-                    Accessible.name: modelData.title + " by " + modelData.artist
+                    Accessible.name: I18n.t("%1 by %2", [modelData.title, modelData.artist])
                     enabled: !albums.busy
                     onClicked: albums.openAlbum(modelData.reference)
                 }
@@ -174,16 +174,16 @@ ColumnLayout {
                     Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: modelData.track.artist; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
-                Button { objectName: "playAlbumFromHere"; text: "Play from here"; enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
-                Button { objectName: "enqueueAlbumTrack"; text: "+ Queue"; enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }
-                Button { objectName: "nextAlbumTrack"; text: "Next"; enabled: albums.canQueue; onClicked: albums.trackAction("play_next", modelData.track) }
+                Button { objectName: "playAlbumFromHere"; text: I18n.t("Play from here"); enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
+                Button { objectName: "enqueueAlbumTrack"; text: I18n.t("+ Queue"); enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }
+                Button { objectName: "nextAlbumTrack"; text: I18n.t("Next"); enabled: albums.canQueue; onClicked: albums.trackAction("play_next", modelData.track) }
             }
         }
     }
     RowLayout {
         visible: !albums.showDetails
-        Label { text: albums.page ? albums.albumModel.length + " albums on this page" : "Choose a library to browse albums"; color: Theme.muted; Layout.fillWidth: true }
-        Button { text: "Previous"; enabled: !!albums.page && albums.page.offset !== "0" && !albums.busy; onClicked: albums.pageRequested("previous") }
-        Button { text: "Next"; enabled: !!albums.page && albums.page.has_more && !albums.busy; onClicked: albums.pageRequested("next") }
+        Label { text: albums.page ? I18n.count("%1 album on this page", "%1 albums on this page", albums.albumModel.length) : I18n.t("Choose a library to browse albums"); color: Theme.muted; Layout.fillWidth: true }
+        Button { text: I18n.t("Previous"); enabled: !!albums.page && albums.page.offset !== "0" && !albums.busy; onClicked: albums.pageRequested("previous") }
+        Button { text: I18n.t("Next"); enabled: !!albums.page && albums.page.has_more && !albums.busy; onClicked: albums.pageRequested("next") }
     }
 }

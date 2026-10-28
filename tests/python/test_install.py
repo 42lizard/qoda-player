@@ -520,6 +520,9 @@ class ReleaseBuild(unittest.TestCase):
             (source / "ui").mkdir(parents=True)
             (source / "tools").mkdir()
             (source / "ui/shell.qml").write_text("// fictional UI\n")
+            (source / "ui/i18n").mkdir()
+            for asset in ["Catalog.js", "German.js", "de.json"]:
+                (source / "ui/i18n" / asset).write_text("fictional localization asset: " + asset)
             (source / "tools/launch.py").write_text("# fictional entry point\n")
             (source / "LICENSE").write_text("MIT\n")
             (source / "Cargo.toml").write_text('[workspace.package]\nversion="0.1.0"\n')
@@ -533,6 +536,12 @@ class ReleaseBuild(unittest.TestCase):
                 first = installer.stage_release(base / "release-one")
                 second = installer.stage_release(base / "release-two")
                 self.assertEqual(first, second)
+                for asset in ["Catalog.js", "German.js", "de.json"]:
+                    self.assertEqual((base / "release-one/ui/i18n" / asset).read_bytes(), (source / "ui/i18n" / asset).read_bytes())
+                (source / "ui/i18n/unreviewed.js").write_text("unexpected")
+                with self.assertRaisesRegex(ValueError, "unexpected files"):
+                    installer.stage_release(base / "rejected-ui")
+                (source / "ui/i18n/unreviewed.js").unlink()
                 build = run.call_args_list[0]
                 self.assertIn("--locked", build.args[0])
                 flags = build.kwargs["env"]["CARGO_ENCODED_RUSTFLAGS"].split("\x1f")

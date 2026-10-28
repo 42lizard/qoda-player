@@ -15,7 +15,11 @@ Rectangle {
     readonly property var gain: snapshot.replaygain && snapshot.replaygain.applied ? snapshot.replaygain.applied : null
     OutputPresentation { id: outputView; output: transport.snapshot.output || null }
     readonly property string outputText: outputView.text
-    readonly property string gainText: gain ? (known ? "" : "Prepared · ") + (gain.basis === "off" ? "ReplayGain off" : "ReplayGain " + gain.basis + " · " + gain.db.toFixed(2) + " dB") : "ReplayGain " + (snapshot.replaygain ? snapshot.replaygain.mode : "off") + " · awaiting preparation"
+    readonly property string gainText: {
+        if (!gain) return I18n.t("ReplayGain %1 · awaiting preparation", [I18n.state(snapshot.replaygain ? snapshot.replaygain.mode : "off")]);
+        const text = gain.basis === "off" ? I18n.t("ReplayGain off") : I18n.t("ReplayGain %1 · %2 dB", [I18n.state(gain.basis), I18n.number(gain.db, 2)]);
+        return known ? text : I18n.t("Prepared · %1", [text]);
+    }
     signal transportRequested(string op)
     signal queueRequested(string op)
     signal seekRequested(real seconds)
@@ -37,21 +41,21 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredWidth: 230
             spacing: 3
-            Label { text: transport.track ? transport.track.title : "Choose something to play"; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-            Label { text: transport.track ? transport.track.artist + (transport.track.album ? " · " + transport.track.album : "") : "Browse your Plex music library"; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-            Label { visible: transport.width < 800; text: transport.gainText; color: Theme.muted; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: smallGainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: smallGainHover } }
+            Label { text: transport.track ? transport.track.title : I18n.t("Choose something to play"); color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { text: transport.track ? transport.track.artist + (transport.track.album ? " · " + transport.track.album : "") : I18n.t("Browse your Plex music library"); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+            Label { visible: transport.width < 800; text: transport.gainText; color: Theme.muted; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: smallGainHover.hovered; ToolTip.text: transport.gain ? I18n.message(transport.gain.reason) : I18n.t("Effective gain is available after preparation"); HoverHandler { id: smallGainHover } }
             Label { visible: transport.width < 800 && outputView.fidelity; text: transport.outputText; color: Theme.muted; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { visible: !!transport.track && !transport.known; text: "Selected · playback unconfirmed"; color: Theme.muted; font.pixelSize: 11 }
+            Label { visible: !!transport.track && !transport.known; text: I18n.t("Selected · playback unconfirmed"); color: Theme.muted; font.pixelSize: 11 }
         }
         ColumnLayout {
             Layout.fillWidth: true
             Layout.preferredWidth: 380
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
-                Button { objectName: "previous"; text: "Previous"; enabled: transport.connected && !!transport.presentation.can_previous; onClicked: transport.queueRequested("previous") }
-                Button { objectName: "playPause"; text: transport.snapshot.intent === "playing" ? "Pause" : "Play"; highlighted: true; enabled: transport.connected && (transport.snapshot.intent === "playing" ? !!transport.presentation.can_pause : !!transport.presentation.can_play); onClicked: transport.transportRequested(transport.snapshot.intent === "playing" ? "pause" : "resume") }
-                Button { objectName: "next"; text: "Next"; enabled: transport.connected && !!transport.presentation.can_next; onClicked: transport.queueRequested("next") }
-                ToolButton { objectName: "replay"; text: "↺"; Accessible.name: "Replay selection"; ToolTip.visible: hovered; ToolTip.text: "Replay selection"; enabled: transport.connected && !!transport.snapshot.queue && transport.snapshot.queue.membership_count > 0; onClicked: transport.queueRequested("replay") }
+                Button { objectName: "previous"; text: I18n.t("Previous"); enabled: transport.connected && !!transport.presentation.can_previous; onClicked: transport.queueRequested("previous") }
+                Button { objectName: "playPause"; text: transport.snapshot.intent === "playing" ? I18n.t("Pause") : I18n.t("Play"); highlighted: true; enabled: transport.connected && (transport.snapshot.intent === "playing" ? !!transport.presentation.can_pause : !!transport.presentation.can_play); onClicked: transport.transportRequested(transport.snapshot.intent === "playing" ? "pause" : "resume") }
+                Button { objectName: "next"; text: I18n.t("Next"); enabled: transport.connected && !!transport.presentation.can_next; onClicked: transport.queueRequested("next") }
+                ToolButton { objectName: "replay"; text: "↺"; Accessible.name: I18n.t("Replay selection"); ToolTip.visible: hovered; ToolTip.text: I18n.t("Replay selection"); enabled: transport.connected && !!transport.snapshot.queue && transport.snapshot.queue.membership_count > 0; onClicked: transport.queueRequested("replay") }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -59,7 +63,7 @@ Rectangle {
                 Slider {
                     id: progress
                     objectName: "seekPosition"
-                    Accessible.name: "Playback position"
+                    Accessible.name: I18n.t("Playback position")
                     Layout.fillWidth: true
                     from: 0; to: Math.max(1, transport.duration)
                     enabled: transport.connected && !!transport.presentation.can_seek && transport.duration > 0
@@ -74,8 +78,8 @@ Rectangle {
             visible: transport.width >= 800
             Layout.fillWidth: true
             Layout.preferredWidth: 210
-            Label { text: transport.outputText; color: Theme.foreground; Layout.alignment: Qt.AlignRight; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: outputHover.hovered; ToolTip.text: transport.outputText + " · Hardware qualification pending"; HoverHandler { id: outputHover } }
-            Label { text: transport.gainText; color: Theme.muted; Layout.alignment: Qt.AlignRight; ToolTip.visible: gainHover.hovered; ToolTip.text: transport.gain ? transport.gain.reason : "Effective gain is available after preparation"; HoverHandler { id: gainHover } }
+            Label { text: transport.outputText; color: Theme.foreground; Layout.alignment: Qt.AlignRight; Layout.fillWidth: true; elide: Text.ElideRight; ToolTip.visible: outputHover.hovered; ToolTip.text: I18n.t("%1 · Hardware qualification pending", [transport.outputText]); HoverHandler { id: outputHover } }
+            Label { text: transport.gainText; color: Theme.muted; Layout.alignment: Qt.AlignRight; ToolTip.visible: gainHover.hovered; ToolTip.text: transport.gain ? I18n.message(transport.gain.reason) : I18n.t("Effective gain is available after preparation"); HoverHandler { id: gainHover } }
         }
     }
 }

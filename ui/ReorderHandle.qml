@@ -15,7 +15,7 @@ Item {
     readonly property var windowOverlay: viewport ? viewport.Overlay.overlay : null
     implicitWidth: 26; implicitHeight: 26
     enabled: movable && !!controller && controller.enabled
-    Accessible.name: "Drag to reorder; move buttons are also available"
+    Accessible.name: I18n.t("Drag to reorder; move buttons are also available")
     function unpin() {
         const view = viewport, previous = previousIndex, pinned = pinnedIndex, state = controller, epoch = pressedGeneration;
         Qt.callLater(() => {
@@ -114,5 +114,5 @@ Item {
         function onHeightChanged() { if (handle.controller && handle.pressedId) handle.controller.cancel(handle.pressedId, handle.pressedGeneration); }
     }
     ToolTip.visible: mouse.containsMouse && !mouse.pressed
-    ToolTip.text: "Drag to reorder"
+    ToolTip.text: I18n.t("Drag to reorder")
 }

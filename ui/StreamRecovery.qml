@@ -16,7 +16,7 @@ ColumnLayout {
         actionRequested(op, {queue_session: queue.session, queue_revision: queue.revision, occurrence: queue.selected});
     }
     Label {
-        text: recovery.snapshot ? recovery.snapshot.message || "" : ""
+        text: recovery.snapshot ? I18n.message(recovery.snapshot.message) || "" : ""
         textFormat: Text.PlainText
         color: recovery.exhausted ? Theme.danger : Theme.muted
         wrapMode: Text.Wrap
@@ -26,13 +26,13 @@ ColumnLayout {
         visible: recovery.exhausted
         Button {
             objectName: "retryStream"
-            text: "Retry stream"
+            text: I18n.t("Retry stream")
             enabled: recovery.connected && recovery.canRetry && !!recovery.queue && !!recovery.queue.selected
             onClicked: recovery.action("retry_stream")
         }
         Button {
             objectName: "skipStream"
-            text: "Skip"
+            text: I18n.t("Skip")
             enabled: recovery.connected && !!recovery.queue && !!recovery.queue.selected
             onClicked: recovery.action("skip_stream")
         }

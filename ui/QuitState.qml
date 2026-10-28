@@ -14,7 +14,7 @@ QtObject {
         interval: root.timeoutMs
         onTriggered: {
             root.pending = false;
-            root.error = "Quit was not acknowledged. Retry Quit or use qoda quit.";
+            root.error = I18n.t("Quit was not acknowledged. Retry Quit or use qoda quit.");
         }
     }
     function begin() {

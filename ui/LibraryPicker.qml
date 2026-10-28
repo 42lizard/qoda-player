@@ -14,8 +14,8 @@ ColumnLayout {
     signal dismissed()
     spacing: 5
     function dismiss() { if (combo && combo.popup) combo.popup.close(); }
-    function title(library) { return library && library.title.trim() ? library.title.trim() : "Untitled library"; }
-    function server(library) { return library && library.server && library.server.trim() ? library.server.trim() : "Unknown server"; }
+    function title(library) { return library && library.title.trim() ? library.title.trim() : I18n.t("Untitled library"); }
+    function server(library) { return library && library.server && library.server.trim() ? library.server.trim() : I18n.t("Unknown server"); }
     function suffix(library) {
         if (!library) return "";
         const peers = libraries.filter(other => title(other) === title(library) && server(other) === server(library) && other.id !== library.id);
@@ -25,11 +25,11 @@ ColumnLayout {
         return library.id.slice(0, length);
     }
     function caption(library) {
-        if (!library) return "Select a source to browse";
+        if (!library) return I18n.t("Select a source to browse");
         const identity = suffix(library);
-        return server(library) + (identity ? " · " + identity : "") + (library.offline ? " · cached" : "");
+        return server(library) + (identity ? " · " + identity : "") + (library.offline ? I18n.t(" · cached") : "");
     }
-    function label(library) { return library ? title(library) + " · " + caption(library) : "Choose a music library"; }
+    function label(library) { return library ? title(library) + " · " + caption(library) : I18n.t("Choose a music library"); }
     onLibrariesChanged: dismiss()
     ComboBox {
         id: combo
@@ -40,7 +40,7 @@ ColumnLayout {
         enabled: picker.libraries.length > 0
         textRole: "title"
         currentIndex: picker.libraries.findIndex(library => library.id === picker.selectedId)
-        displayText: picker.selected ? picker.title(picker.selected) : picker.libraries.length ? "Choose library" : "No libraries"
+        displayText: picker.selected ? picker.title(picker.selected) : picker.libraries.length ? I18n.t("Choose library") : I18n.t("No libraries")
         Accessible.name: picker.label(picker.selected)
         ToolTip.visible: hovered
         ToolTip.text: picker.label(picker.selected)

@@ -45,12 +45,12 @@ ColumnLayout {
     }
     Label {
         Layout.fillWidth: true
-        text: "Confirmed nominal navigation only. Selected or skipped tracks without a clock are excluded. Go here keeps paused/playing intent."
+        text: I18n.t("Confirmed nominal navigation only. Selected or skipped tracks without a clock are excluded. Go here keeps paused/playing intent.")
         wrapMode: Text.Wrap; textFormat: Text.PlainText; color: Theme.muted
     }
     Label {
         visible: navigation.rows.length === 0
-        text: "No confirmed entries in the Previous path."
+        text: I18n.t("No confirmed entries in the Previous path.")
         wrapMode: Text.Wrap; color: Theme.muted; Layout.fillWidth: true
     }
     ListView {
@@ -65,23 +65,23 @@ ColumnLayout {
             color: modelData.selected ? Theme.selected : Theme.surface; radius: 5
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 8; spacing: 3
-                Label { text: (modelData.selected ? "Selected path entry · " : "") + modelData.track.title; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { text: (modelData.selected ? I18n.t("Selected path entry · ") : "") + modelData.track.title; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 Label { text: modelData.track.artist + " · " + modelData.track.album; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                Button { objectName: "revisitNavigation"; text: "Go here"; enabled: navigation.connected; onClicked: navigation.revisit(modelData) }
+                Button { objectName: "revisitNavigation"; text: I18n.t("Go here"); enabled: navigation.connected; onClicked: navigation.revisit(modelData) }
             }
         }
     }
     Label {
         Layout.fillWidth: true
-        text: snapshot && snapshot.total !== "0" ? "Entries " + (Number(snapshot.offset) + 1) + "–" + (Number(snapshot.offset) + navigation.rows.length) + " of " + snapshot.total : "0 entries"
+        text: snapshot && snapshot.total !== "0" ? I18n.t("Entries %1–%2 of %3", [I18n.number(Number(snapshot.offset) + 1), I18n.number(Number(snapshot.offset) + navigation.rows.length), I18n.number(snapshot.total)]) : I18n.t("0 entries")
         color: Theme.muted; wrapMode: Text.Wrap
     }
     Flow {
         Layout.fillWidth: true
         Layout.preferredHeight: childrenRect.height
         spacing: 6
-        Button { objectName: "olderNavigation"; text: "Older"; enabled: navigation.connected && !!snapshot && snapshot.has_previous; onClicked: navigation.pageRequested(String(Math.max(0, Number(snapshot.offset) - 50)), navigation.fence()) }
-        Button { objectName: "newerNavigation"; text: "Newer"; enabled: navigation.connected && !!snapshot && snapshot.has_next; onClicked: navigation.pageRequested(String(Number(snapshot.offset) + 50), navigation.fence()) }
-        Button { objectName: "latestNavigation"; text: "Follow latest"; enabled: navigation.connected && !!snapshot; onClicked: navigation.pageRequested(null, navigation.fence()) }
+        Button { objectName: "olderNavigation"; text: I18n.t("Older"); enabled: navigation.connected && !!snapshot && snapshot.has_previous; onClicked: navigation.pageRequested(String(Math.max(0, Number(snapshot.offset) - 50)), navigation.fence()) }
+        Button { objectName: "newerNavigation"; text: I18n.t("Newer"); enabled: navigation.connected && !!snapshot && snapshot.has_next; onClicked: navigation.pageRequested(String(Number(snapshot.offset) + 50), navigation.fence()) }
+        Button { objectName: "latestNavigation"; text: I18n.t("Follow latest"); enabled: navigation.connected && !!snapshot; onClicked: navigation.pageRequested(null, navigation.fence()) }
     }
 }

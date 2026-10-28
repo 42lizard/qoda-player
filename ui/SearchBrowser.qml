@@ -26,7 +26,7 @@ ColumnLayout {
         actionRequested(op, {source: row.track.reference.source, key: row.track.reference.key, search_revision: snapshot.revision});
     }
     Label {
-        text: browser.currentQuery ? browser.snapshot.message : "Search query changed · waiting for results"
+        text: browser.currentQuery ? I18n.message(browser.snapshot.message) : I18n.t("Search query changed · waiting for results")
         color: Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
     }
     ScrollView {
@@ -39,7 +39,7 @@ ColumnLayout {
             delegate: Label {
                 required property var modelData
                 width: ListView.view.width
-                text: modelData.library + " · " + modelData.server + " · " + modelData.phase + (modelData.has_more ? " · more matches available" : "") + (modelData.error ? " · " + modelData.error : "") + (modelData.cache && modelData.cache.origin && modelData.cache.origin !== "live" ? " · cached metadata" : "") + (modelData.cache && modelData.cache.stale ? " · stale" : "") + (modelData.cache && modelData.cache.incomplete ? " · incomplete" : "")
+                text: modelData.library + " · " + modelData.server + " · " + I18n.state(modelData.phase) + (modelData.has_more ? I18n.t(" · more matches available") : "") + (I18n.message(modelData.error) ? " · " + I18n.message(modelData.error) : "") + (modelData.cache && modelData.cache.origin && modelData.cache.origin !== "live" ? I18n.t(" · cached metadata") : "") + (modelData.cache && modelData.cache.stale ? I18n.t(" · stale") : "") + (modelData.cache && modelData.cache.incomplete ? I18n.t(" · incomplete") : "")
                 color: ["failed", "timeout"].includes(modelData.phase) ? Theme.danger : Theme.muted
                 textFormat: Text.PlainText; wrapMode: Text.Wrap
             }
@@ -64,14 +64,14 @@ ColumnLayout {
                     Layout.fillWidth: true; spacing: 4
                     Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: modelData.track.artist + " · " + modelData.track.album; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                    Label { text: modelData.library + " · " + modelData.server + (modelData.actionable ? "" : " · awaiting fresh library data"); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.library + " · " + modelData.server + (modelData.actionable ? "" : I18n.t(" · awaiting fresh library data")); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
                 RowLayout {
                     Layout.alignment: resultRow.width >= 640 ? Qt.AlignRight : Qt.AlignLeft
                     enabled: browser.connected && browser.currentQuery && modelData.actionable
-                    Button { objectName: "playSearchResult"; text: "Play now"; onClicked: browser.act("search_play", modelData) }
-                    Button { text: "Next"; onClicked: browser.act("search_next", modelData) }
-                    Button { text: "+ Queue"; onClicked: browser.act("search_enqueue", modelData) }
+                    Button { objectName: "playSearchResult"; text: I18n.t("Play now"); onClicked: browser.act("search_play", modelData) }
+                    Button { text: I18n.t("Next"); onClicked: browser.act("search_next", modelData) }
+                    Button { text: I18n.t("+ Queue"); onClicked: browser.act("search_enqueue", modelData) }
                 }
             }
         }

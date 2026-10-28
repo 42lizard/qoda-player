@@ -44,9 +44,9 @@ TestCase {
     }
     function test_gain_label_separates_settings_and_immutable_prepared_gain() {
         transport.snapshot = {intent: "paused", replaygain: {mode: "album", applied: {mode: "track", basis: "track", db: -6, reason: "Embedded FLAC tags"}}, presentation: {known: false}};
-        verify(transport.gainText.includes("Prepared")); verify(transport.gainText.includes("track")); verify(transport.gainText.includes("-6.00"));
+        verify(transport.gainText.includes("Prepared")); verify(transport.gainText.includes("Track")); verify(transport.gainText.includes("-6.00"));
         transport.snapshot = {intent: "paused", replaygain: {mode: "off", applied: {mode: "track", basis: "track", db: 0, reason: "Measured zero tag"}}, presentation: {known: true}};
-        verify(!transport.gainText.includes("Prepared")); verify(transport.gainText.includes("track")); verify(transport.gainText.includes("0.00"));
+        verify(!transport.gainText.includes("Prepared")); verify(transport.gainText.includes("Track")); verify(transport.gainText.includes("0.00"));
     }
     function test_disconnected_controls_cannot_send_commands() {
         transport.connected = false;

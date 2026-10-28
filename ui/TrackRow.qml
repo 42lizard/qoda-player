@@ -21,7 +21,7 @@ Rectangle {
         CheckBox {
             objectName: "trackCheckbox"
             checked: row.selected
-            Accessible.name: "Select " + row.track.title
+            Accessible.name: I18n.t("Select %1", [row.track.title])
             onClicked: row.checkboxRequested()
         }
         ColumnLayout {
@@ -31,9 +31,9 @@ Rectangle {
             Label { text: row.track.title; color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
             Label { text: row.track.artist + " · " + row.track.album; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
         }
-        Button { objectName: "playNow"; text: "Play now"; onClicked: row.actionRequested("play") }
-        Button { text: "Next"; onClicked: row.actionRequested("play_next") }
-        Button { text: "+ Playlist"; enabled: row.playlistEditable; onClicked: row.playlistRequested() }
-        Button { text: "+ Queue"; onClicked: row.actionRequested("enqueue") }
+        Button { objectName: "playNow"; text: I18n.t("Play now"); onClicked: row.actionRequested("play") }
+        Button { text: I18n.t("Next"); onClicked: row.actionRequested("play_next") }
+        Button { text: I18n.t("+ Playlist"); enabled: row.playlistEditable; onClicked: row.playlistRequested() }
+        Button { text: I18n.t("+ Queue"); onClicked: row.actionRequested("enqueue") }
     }
 }

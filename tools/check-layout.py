@@ -33,7 +33,6 @@ Item {
 HOOKS = """
         function guideQueue(): void { queueTabs.currentIndex = 0; }
         function guidePrevious(): void { queueTabs.currentIndex = 1; }
-        property var guideSnapshot: null
         function signedOutFixture(): void {
             guideSnapshot = root.snapshot;
             root.snapshot = Object.assign({}, root.snapshot, {sign_in: {connected: false, saved: "absent", can_save: false, message: "Connect your Plex account", keyring_action: null}});
@@ -117,25 +116,25 @@ def fixture():
     return {
         "protocol": 1, "instance": "fixture", "revision": "1", "account_epoch": "0",
         "status": "Ready", "intent": "paused", "selection": track(0),
-        "replaygain": {"mode": "auto", "available": True, "message": "Upcoming preparations only", "metadata_scope": "Embedded FLAC tags"},
-        "output": {"selection": {"mode": "fidelity", "device": "fixture"}, "available": True, "ready": True, "fidelity_available": True, "devices": [{"id": "fixture", "name": "Fictional direct PCM"}], "message": "Changing output pauses; explicit Resume required", "qualification": "unverified"},
+        "replaygain": {"mode": "auto", "available": True, "message": "Changes apply to upcoming preparations; restart/reselect a track to apply now.", "metadata_scope": "Embedded ReplayGain; unsupported or unavailable tags use unity"},
+        "output": {"selection": {"mode": "fidelity", "device": "fixture"}, "available": True, "ready": True, "fidelity_available": True, "devices": [{"id": "fixture", "name": "Fictional direct PCM"}], "message": "Changing output pauses, releases the old route and preserves position. Explicit Resume is required.", "qualification": "unverified"},
         "libraries": [{"id": "fixture", "title": "Music", "server": "Home library"}],
         "sign_in": {"connected": True, "saved": "present", "message": "",
                     "can_save": False, "keyring_action": None},
-        "storage": {"state": "saved", "message": "Saved"},
+        "storage": {"state": "saved", "message": "Session saved locally."},
         "archive": {"available": True, "retention_days": 90, "cleanup_pending": False,
                     "total": 2, "offset": 0, "has_next": False,
-                    "message": "Nominal observations · 90 days · at most 10000 visits.",
+                    "message": "Nominal observations · 90 days · at most 10000 visits. Positions are not listening duration.",
                     "entries": [{"visit": str(index), "title": "Fictional repeated track",
                                  "artist": "Mira Vale", "album": "Soft geometry", "track": {"source": "fixture"},
                                  "first_observed_ms": 1700000000000 + index * 1000,
                                  "last_position_ms": 1200, "max_position_ms": 9000} for index in range(2)]},
-        "mpris": {"state": "available", "message": "Available"},
+        "mpris": {"state": "available", "message": "Desktop media controls available."},
         "gapless": {"enabled": True, "phase": "idle", "message": ""},
         "albums": {
             "page": {"source": "fixture", "offset": "0", "query": "", "albums": albums,
                      "has_more": False},
-            "selected": None, "busy": False, "message": "9 albums · Home library",
+            "selected": None, "busy": False, "message": "Choose an album to view its tracks and cover.",
             "covers": {str(index): (ROOT / "crates/qoda-provider/tests/fixtures/cover.jpg").as_uri()
                        for index in range(9)}},
         "queue": {
@@ -173,7 +172,7 @@ def check(output=None, theme_check=False, guide=False):
             active_theme = themes / "current"
             active_theme.symlink_to(themes / "dark", target_is_directory=True)
             shell.write_text(shell.read_text().replace("OmarchyTheme {}", "OmarchyTheme { currentPath: " + json.dumps(str(active_theme / "colors.toml")) + "; legacyPath: " + json.dumps(str(themes / "missing/colors.toml")) + " }"))
-        shell.write_text(shell.read_text().replace("        function status(): string", HOOKS + "        function status(): string"))
+        shell.write_text(shell.read_text().replace("    id: root", "    id: root\n    property var guideSnapshot: null").replace("        function status(): string", HOOKS + "        function status(): string"))
         runtime = base / "runtime"
         (runtime / "qoda").mkdir(parents=True, mode=0o700)
         state = fixture()
@@ -246,7 +245,8 @@ def check(output=None, theme_check=False, guide=False):
                         pass
                     time.sleep(0.1)
                 else:
-                    raise AssertionError("Fixture UI did not connect")
+                    log.flush(); log.seek(0)
+                    raise AssertionError("Fixture UI did not connect: " + log.read())
                 if theme_check:
                     wait_for(lambda value: value["theme"]["system"] and value["theme"]["background"] == "#202830" and value["theme"]["controlText"] == "#efe0cc", attempts=120)
                 for label, width, height in [("wide", 1320, 820), ("narrow", 760, 820), ("small", 540, 760)]:

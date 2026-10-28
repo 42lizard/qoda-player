@@ -216,8 +216,13 @@ def stage_release(destination):
     destination.mkdir()
     shutil.copyfile(target / "release/qoda-backend", destination / "qoda-backend")
     (destination / "qoda-backend").chmod(0o755)
-    for path in (ROOT / "ui").iterdir():
-        if path.is_symlink() or not path.is_file() or (path.suffix != ".qml" and path.name != "qmldir"):
+    localization = {"i18n/Catalog.js", "i18n/German.js", "i18n/de.json"}
+    for path in (ROOT / "ui").rglob("*"):
+        relative = path.relative_to(ROOT / "ui").as_posix()
+        allowed = relative in localization or path.parent == ROOT / "ui" and (path.suffix == ".qml" or path.name == "qmldir")
+        if not path.is_symlink() and path.is_dir() and relative == "i18n":
+            continue
+        if path.is_symlink() or not path.is_file() or not allowed:
             raise ValueError("UI source contains unexpected files; review before packaging")
     shutil.copytree(ROOT / "ui", destination / "ui")
     shutil.copyfile(ROOT / "tools/launch.py", destination / "launch.py")
