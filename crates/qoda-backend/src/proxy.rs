@@ -24,6 +24,13 @@ struct Grant {
     failure: Arc<Mutex<Option<ProviderError>>>,
 }
 impl Grant {
+    async fn close(&self) {
+        if self.source.close().await.is_err() {
+            eprintln!(
+                "Qoda: provider playback cleanup could not be confirmed; server resources may still be active."
+            );
+        }
+    }
     fn fail(&self, error: ProviderError) {
         let mut failure = self.failure.lock().unwrap_or_else(|e| e.into_inner());
         // Concurrent range requests must not downgrade terminal auth/missing
@@ -80,8 +87,11 @@ impl Proxy {
         for grant in grants.entries.values() {
             grant.cancel.send_replace(true);
         }
-        grants.entries.clear();
+        let retired = std::mem::take(&mut grants.entries);
         grants.current = None;
+        drop(grants);
+        let retired: Vec<_> = retired.into_values().collect();
+        futures_util::future::join_all(retired.iter().map(Grant::close)).await;
     }
     fn id<'a>(&self, url: &'a str) -> Option<&'a str> {
         url.strip_prefix(&format!("http://127.0.0.1:{}/media/", self.port))
@@ -91,11 +101,16 @@ impl Proxy {
             return;
         };
         let mut grants = self.grants.write().await;
-        if let Some(grant) = grants.entries.remove(id) {
+        let retired = grants.entries.remove(id);
+        if let Some(grant) = &retired {
             grant.cancel.send_replace(true);
         }
         if grants.current.as_deref() == Some(id) {
             grants.current = None;
+        }
+        drop(grants);
+        if let Some(grant) = retired {
+            grant.close().await;
         }
     }
     pub async fn promote(&self, url: &str) -> Result<(), &'static str> {
@@ -112,15 +127,18 @@ impl Proxy {
         {
             return Err("Current stream failed before handoff; its occurrence remains selected.");
         }
-        grants.entries.retain(|key, grant| {
-            if key == id {
-                true
-            } else {
-                grant.cancel.send_replace(true);
-                false
-            }
-        });
+        let keep = grants
+            .entries
+            .remove(id)
+            .ok_or("The prepared media grant expired")?;
+        let retired = std::mem::take(&mut grants.entries);
+        grants.entries.insert(id.to_owned(), keep);
         grants.current = Some(id.to_owned());
+        drop(grants);
+        for grant in retired.into_values() {
+            grant.cancel.send_replace(true);
+            grant.close().await;
+        }
         Ok(())
     }
     pub async fn grant(&self, source: Box<dyn MediaSource>) -> String {
@@ -440,5 +458,64 @@ mod gapless_tests {
         assert_eq!(reqwest::get(current).await.unwrap().status(), 200);
         assert!(proxy.grant_next(Box::new(Source(false))).await.is_ok());
         assert!(!proxy.failed().await);
+    }
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    struct Held {
+        started: Arc<AtomicUsize>,
+        release: Arc<tokio::sync::Notify>,
+    }
+    impl MediaSource for Held {
+        fn open(
+            &self,
+            _: Option<ByteRange>,
+            _: bool,
+        ) -> qoda_provider::ProviderFuture<'_, qoda_provider::MediaResponse> {
+            Box::pin(async { Err(ProviderError::Unsupported) })
+        }
+        fn close(&self) -> qoda_provider::ProviderFuture<'_, ()> {
+            Box::pin(async move {
+                self.started.fetch_add(1, Ordering::SeqCst);
+                self.release.notified().await;
+                Ok(())
+            })
+        }
+    }
+    #[tokio::test]
+    async fn revocation_denies_both_grants_while_retiring_provider_resources_concurrently() {
+        let proxy = Proxy::start().await.unwrap();
+        let started = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new(tokio::sync::Notify::new());
+        let first = proxy
+            .grant(Box::new(Held {
+                started: started.clone(),
+                release: release.clone(),
+            }))
+            .await;
+        let second = proxy
+            .grant_next(Box::new(Held {
+                started: started.clone(),
+                release: release.clone(),
+            }))
+            .await
+            .unwrap();
+        let owner = proxy.clone();
+        let closing = tokio::spawn(async move {
+            owner.revoke().await;
+        });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        while started.load(Ordering::SeqCst) != 2 {
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        for url in [first, second] {
+            assert_eq!(reqwest::get(url).await.unwrap().status(), 404);
+        }
+        release.notify_waiters();
+        closing.await.unwrap();
     }
 }

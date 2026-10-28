@@ -1,11 +1,41 @@
-//! Bounded, provider-neutral descriptors for the deliberately narrow fidelity scope.
+//! Decoder PCM facts and optional bounded headers for exact continuous spans.
 use futures_util::StreamExt;
 use qoda_provider::{ByteRange, MediaSource};
 use serde::{Deserialize, Serialize};
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SampleType {
+    #[default]
+    Integer,
+    Float,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Format {
     pub rate: u32,
     pub bits: u16,
+    #[serde(default)]
+    pub sample_type: SampleType,
+    #[serde(default = "stereo_channels")]
+    pub channels: u16,
+    #[serde(default = "is_stereo")]
+    pub stereo: bool,
+}
+fn stereo_channels() -> u16 {
+    2
+}
+fn is_stereo() -> bool {
+    true
+}
+impl Default for Format {
+    fn default() -> Self {
+        Self {
+            rate: 0,
+            bits: 0,
+            sample_type: SampleType::Integer,
+            channels: 2,
+            stereo: true,
+        }
+    }
 }
 impl Format {
     fn checked(rate: u32, bits: u16, channels: u16) -> Result<Self, &'static str> {
@@ -14,7 +44,11 @@ impl Format {
                 "Fidelity requires stereo integer 16/24-bit WAV/FLAC at 44.1, 48 or 96 kHz; choose Desktop or another track.",
             );
         }
-        Ok(Self { rate, bits })
+        Ok(Self {
+            rate,
+            bits,
+            ..Default::default()
+        })
     }
 }
 pub fn parse(bytes: &[u8]) -> Result<Format, &'static str> {
@@ -192,7 +226,8 @@ mod tests {
             verified.format,
             Format {
                 rate: 48000,
-                bits: 16
+                bits: 16,
+                ..Default::default()
             }
         );
         assert_eq!(
@@ -213,7 +248,8 @@ mod tests {
                 verified.format,
                 Format {
                     rate: 48000,
-                    bits: 16
+                    bits: 16,
+                    ..Default::default()
                 }
             );
             assert_eq!(verified.continuous, None);
@@ -236,7 +272,14 @@ mod tests {
     fn exact_lossless_headers_are_required_instead_of_provider_hints() {
         for rate in [44100, 48000, 96000] {
             for bits in [16, 24] {
-                assert_eq!(parse(&wave(rate, bits, 2)).unwrap(), Format { rate, bits });
+                assert_eq!(
+                    parse(&wave(rate, bits, 2)).unwrap(),
+                    Format {
+                        rate,
+                        bits,
+                        ..Default::default()
+                    }
+                );
             }
         }
         for bytes in [
@@ -266,7 +309,8 @@ mod tests {
             parse(&bytes).unwrap(),
             Format {
                 rate: 96000,
-                bits: 24
+                bits: 24,
+                ..Default::default()
             }
         );
         bytes[7] = 33;

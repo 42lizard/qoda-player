@@ -17,4 +17,13 @@ TestCase {
         output.output = {available: true, selection: {mode: "desktop"}};
         verify(!output.fidelity); compare(output.text, "Desktop · PipeWire");
     }
+    function test_float_conversion_and_server_transcoding_are_visible() {
+        output.output = {available: true, ready: true, transcoded: true, decoder_codec: "flac", selection: {mode: "fidelity_resampled"}, observed: {rate: 48000}, processing: {source: {rate: 48000, bits: 32, sample_type: "float", channels: 2, stereo: true}, target: {rate: 48000, bits: 32}}};
+        verify(output.text.includes("Plex transcoded")); verify(output.text.includes("flac"));
+        verify(output.text.includes("converted")); verify(output.text.includes("TPDF"));
+        verify(!output.text.includes("exact format"));
+        output.output = {available: true, transcoded: true, decoder_codec: "mp3", selection: {mode: "desktop"}};
+        verify(output.text.includes("Plex transcoded")); verify(output.text.includes("mp3")); verify(output.text.includes("Desktop"));
+    }
+
 }

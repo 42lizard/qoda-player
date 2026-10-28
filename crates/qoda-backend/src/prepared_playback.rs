@@ -39,6 +39,9 @@ pub struct Controller {
     active: Option<Selection>,
     automatic: Option<u64>,
     recovery: recovery::Controller,
+    loaded: Option<Selection>,
+    loaded_gain: Option<gain::Applied>,
+    fallback_attempted: Option<u64>,
 }
 pub struct Runtime<'a> {
     pub queue: &'a mut queue::Queue,
@@ -65,6 +68,8 @@ impl Controller {
         }
         self.active = None;
         self.automatic = None;
+        self.loaded = None;
+        self.loaded_gain = None;
     }
     /// Account, output and explicit selection invalidation own both lifetimes.
     pub fn cancel(&mut self) {
@@ -92,7 +97,16 @@ impl Controller {
         tx: mpsc::Sender<Event>,
         cx: &mut Runtime<'_>,
     ) -> Result<(), &'static str> {
+        let converted = cx.player.status().transcoded
+            && self.loaded.is_some_and(|key| {
+                key.account == cx.account
+                    && key.session == cx.queue.durable_stamp().0
+                    && Some(key.occurrence) == cx.queue.selected()
+            });
+        let retained_gain = converted.then(|| self.loaded_gain.clone()).flatten();
         self.cancel();
+        self.loaded_gain = retained_gain;
+        self.fallback_attempted = None;
         let Some(provider) = provider else {
             cx.state["selection"] = json!(track);
             cx.state["audio"] = Value::Null;
@@ -118,11 +132,24 @@ impl Controller {
                 .as_ref()
                 .is_some_and(output::Selection::fidelity),
         };
+        let version = cx.queue.selected_version().map(str::to_owned);
+        let position = cx.queue.position();
         self.pending = Some(tokio::spawn(async move {
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(20),
-                gain::prepare(provider.as_ref(), request),
-            )
+            let result = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                if converted {
+                    gain::convert(
+                        provider.as_ref(),
+                        request,
+                        version.ok_or(gain::PrepareError::Verification(
+                            "Missing pinned converted version",
+                        ))?,
+                        position,
+                    )
+                    .await
+                } else {
+                    gain::prepare(provider.as_ref(), request).await
+                }
+            })
             .await
             .unwrap_or(Err(gain::PrepareError::Provider(ProviderError::Network)));
             let _ = tx.send(Event::Media(next, result)).await;
@@ -185,8 +212,19 @@ impl Controller {
                     cx.state["intent"] = json!(if *cx.playing { "playing" } else { "paused" });
                 } else {
                     cx.state["selection"] = json!(media.track);
+                    let transcoded = media.stream.transcoded();
+                    let timeline_offset = media.stream.timeline_offset();
+                    let gain = if transcoded {
+                        self.loaded_gain.clone().unwrap_or(gain)
+                    } else {
+                        gain
+                    };
+                    self.loaded = Selection::capture(cx);
+                    self.loaded_gain = Some(gain.clone());
                     let url = cx.proxy.grant(media.stream).await;
                     if let Err(error) = cx.player.load_prepared(player::Load {
+                        timeline_offset,
+                        transcoded,
                         generation: g,
                         url,
                         position: cx.queue.position(),
@@ -230,7 +268,7 @@ impl Controller {
                 cx.state["status"] = json!(if automatic_next {
                     "Skipping unavailable entry"
                 } else if e.provider().is_none() {
-                    "Fidelity verification failed; review audio settings and explicitly retry"
+                    "Playback verification failed; review the message and explicitly retry"
                 } else {
                     "Playback preparation failed; review unavailable entries or retry"
                 });
@@ -243,6 +281,68 @@ impl Controller {
             automatic: automatic_next,
         }
     }
+    /// One provider fallback per explicit preparation, for a still-current pinned visit.
+    pub async fn unsupported(
+        &mut self,
+        generation: u64,
+        playing: bool,
+        provider: Option<Arc<dyn MusicProvider>>,
+        tx: mpsc::Sender<Event>,
+        cx: &mut Runtime<'_>,
+    ) -> Result<(), &'static str> {
+        if generation != cx.epochs.current || self.fallback_attempted == Some(generation) {
+            return Ok(());
+        }
+        self.fallback_attempted = Some(generation);
+        if self.loaded.is_none_or(|key| !key.matches(cx)) {
+            self.loaded_gain = cx.player.status().gain;
+        }
+        let (Some(provider), Some(version), Some(reference)) = (
+            provider,
+            cx.queue.selected_version().map(str::to_owned),
+            cx.queue
+                .selected()
+                .and_then(|id| cx.queue.visible_track(id).ok())
+                .map(|t| t.reference),
+        ) else {
+            return Ok(());
+        };
+        let _ = cx.player.barrier().await;
+        cx.gapless.invalidate();
+        cx.proxy.revoke().await;
+        cx.epochs.reset()?;
+        let next = cx.epochs.current;
+        cx.player.invalidate_load(next);
+        *cx.presented = None;
+        *cx.playing = playing;
+        self.active = Selection::capture(cx);
+        self.automatic = None;
+        let request = gain::Request {
+            reference: reference.clone(),
+            mode: cx.gain.mode,
+            album_session: cx.queue.album_gain_eligible(),
+            fidelity: cx
+                .output
+                .selection
+                .as_ref()
+                .is_some_and(output::Selection::fidelity),
+        };
+        let position = cx.queue.position();
+        self.pending = Some(tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                gain::convert(provider.as_ref(), request, version, position),
+            )
+            .await
+            .unwrap_or(Err(gain::PrepareError::Provider(ProviderError::Network)));
+            let _ = tx.send(Event::Media(next, result)).await;
+        }));
+        cx.state["audio"] = Value::Null;
+        cx.state["error"] = Value::Null;
+        cx.state["status"] =
+            json!("Local decoder does not support this media; trying Plex server conversion");
+        Ok(())
+    }
     pub async fn interrupted(
         &mut self,
         error: ProviderError,
@@ -252,7 +352,12 @@ impl Controller {
         cx: &mut Runtime<'_>,
     ) -> Result<(), &'static str> {
         *cx.playing = false;
+        let transcoded = cx.player.status().transcoded;
+        let retained_gain = self.loaded_gain.clone();
         self.cancel_selected();
+        if transcoded {
+            self.loaded_gain = retained_gain;
+        }
         let _ = cx.player.barrier().await;
         cx.gapless.invalidate();
         cx.proxy.revoke().await;
@@ -277,9 +382,11 @@ impl Controller {
             self.active = Selection::capture(cx);
             self.recovery.begin(
                 recovery::Work {
+                    position: cx.queue.position(),
                     key,
                     version,
                     playing,
+                    transcoded,
                     failure: error,
                     request: gain::Request {
                         reference: track.reference,
@@ -499,6 +606,344 @@ mod tests {
             panic!("Expected selected preparation");
         };
         (g, result)
+    }
+    struct Converted(Box<dyn qoda_provider::MediaSource>, f64);
+    impl qoda_provider::MediaSource for Converted {
+        fn timeline_offset(&self) -> f64 {
+            self.1
+        }
+        fn transcoded(&self) -> bool {
+            true
+        }
+        fn open(
+            &self,
+            range: Option<qoda_provider::ByteRange>,
+            head: bool,
+        ) -> qoda_provider::ProviderFuture<'_, qoda_provider::MediaResponse> {
+            self.0.open(range, head)
+        }
+    }
+    struct Unrecognized;
+    impl qoda_provider::MediaSource for Unrecognized {
+        fn open(
+            &self,
+            _: Option<qoda_provider::ByteRange>,
+            _: bool,
+        ) -> qoda_provider::ProviderFuture<'_, qoda_provider::MediaResponse> {
+            use futures_util::StreamExt;
+            Box::pin(async {
+                Ok(qoda_provider::MediaResponse {
+                    status: 200,
+                    content_type: Some("application/octet-stream".into()),
+                    content_length: Some(23),
+                    content_range: None,
+                    etag: None,
+                    body: futures_util::stream::once(async {
+                        Ok(bytes::Bytes::from_static(b"unrecognized audio data"))
+                    })
+                    .boxed(),
+                })
+            })
+        }
+    }
+    struct Fallback {
+        inner: Arc<Fixture>,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    impl MusicProvider for Fallback {
+        fn libraries(&self) -> Vec<qoda_provider::Library> {
+            self.inner.libraries()
+        }
+        fn tracks(
+            &self,
+            source: qoda_core::SourceId,
+            offset: u64,
+            query: String,
+        ) -> qoda_provider::ProviderFuture<'_, qoda_provider::CatalogPage> {
+            self.inner.tracks(source, offset, query)
+        }
+        fn prepare(
+            &self,
+            source: qoda_core::SourceId,
+            key: qoda_core::ProviderTrackKey,
+        ) -> qoda_provider::ProviderFuture<'_, qoda_provider::PreparedMedia> {
+            self.inner.prepare(source, key)
+        }
+        fn prepare_transcoded(
+            &self,
+            reference: qoda_core::TrackRef,
+            version: String,
+            position: f64,
+        ) -> qoda_provider::ProviderFuture<'_, qoda_provider::PreparedMedia> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async move {
+                let mut media = self.inner.prepare(reference.source, reference.key).await?;
+                assert_eq!(version, media.version);
+                media.stream = Box::new(Converted(media.stream, position));
+                Ok(media)
+            })
+        }
+    }
+    #[tokio::test]
+    #[ignore = "explicit live Plex qualification using the saved sign-in; digital null output only"]
+    async fn live_saved_plex_transcode_decodes_and_seeks_on_null_output() {
+        use qoda_provider::{Credential, PlexProvider};
+        let result = std::process::Command::new("/usr/bin/secret-tool")
+            .args([
+                "lookup",
+                "application",
+                "qoda-player",
+                "credential",
+                "plex",
+                "schema",
+                "1",
+            ])
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        let secret = zeroize::Zeroizing::new(result.stdout);
+        let credential: Credential = serde_json::from_slice(&secret).unwrap();
+        drop(secret);
+        let (provider, _) = PlexProvider::connect(
+            credential,
+            crate::identities(crate::identities_path().as_deref()).unwrap(),
+        )
+        .await
+        .unwrap();
+        let home = std::env::var_os("HOME").unwrap();
+        let state = std::env::var_os("XDG_STATE_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(home).join(".local/state"));
+        let db = rusqlite::Connection::open_with_flags(
+            state.join("qoda/session.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let saved: String = db
+            .query_row("select payload from session where slot=1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        let queue: queue::Queue = serde_json::from_value(saved["queue"].clone()).unwrap();
+        let track = queue.visible_track(queue.selected().unwrap()).unwrap();
+        let original = provider
+            .prepare(track.reference.source, track.reference.key.clone())
+            .await
+            .unwrap();
+        let media = provider
+            .prepare_transcoded(track.reference.clone(), original.version.clone(), 2.0)
+            .await
+            .unwrap();
+        assert_eq!(media.version, original.version);
+        let prepared = gain::describe(
+            media,
+            gain::Request {
+                reference: track.reference,
+                mode: gain::Mode::Off,
+                fidelity: false,
+                album_session: false,
+            },
+        )
+        .await
+        .unwrap();
+        let proxy = proxy::Proxy::start().await.unwrap();
+        let player = Player::test_options("null", &[("ao-null-untimed", "no".into())]).unwrap();
+        let url = proxy.grant(prepared.media.stream).await;
+        player
+            .load_prepared(player::Load {
+                timeline_offset: 2.0,
+                transcoded: true,
+                generation: 1,
+                url,
+                position: 2.0,
+                gain: prepared.gain,
+                source: prepared.source,
+                description: None,
+                chain: false,
+                output: Some(output::Selection::Desktop),
+                playing: true,
+            })
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        let result = loop {
+            let status = player.status();
+            if status.error.is_some() {
+                break Err(format!("{status:?}"));
+            }
+            if status.entry_ready && status.position_seconds.is_some_and(|p| p > 2.1) {
+                break if status.transcoded
+                    && status.decoder_codec.as_deref() == Some("flac")
+                    && status.source.is_some()
+                {
+                    Ok(())
+                } else {
+                    Err(format!("{status:?}"))
+                };
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break Err(format!("{status:?}"));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        player.barrier().await.unwrap();
+        proxy.revoke().await;
+        assert!(result.is_ok(), "{result:?}");
+    }
+    #[tokio::test]
+    async fn unsupported_native_input_uses_one_pinned_fallback_retains_gain_visit_and_later_pause()
+    {
+        let (mut env, inner) = Environment::new(vec![
+            Answer::Version("v1"),
+            Answer::Version("v1"),
+            Answer::Version("v1"),
+        ])
+        .await;
+        let provider = Arc::new(Fallback {
+            inner,
+            calls: Default::default(),
+        });
+        let mut owner = Controller::default();
+        let (tx, mut rx) = mpsc::channel(8);
+        let selected = env.queue.selected();
+        let visit = serde_json::to_value(&env.queue).unwrap()["visit"].clone();
+        owner
+            .start(
+                env.selected(),
+                false,
+                Some(provider.clone()),
+                tx.clone(),
+                &mut env.runtime(),
+            )
+            .await
+            .unwrap();
+        let (generation, reply) = media(&mut rx).await;
+        let mut prepared = reply.unwrap();
+        prepared.media.stream = Box::new(Unrecognized);
+        prepared.gain.db = -3.0;
+        owner
+            .complete(generation, Ok(prepared), &mut env.runtime())
+            .await;
+        let until = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if env.player.status().error.is_some() {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < until);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(env.player.status().unsupported_format);
+        assert_eq!(
+            provider.calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "direct playback must precede provider conversion"
+        );
+        owner
+            .unsupported(
+                generation,
+                true,
+                Some(provider.clone()),
+                tx.clone(),
+                &mut env.runtime(),
+            )
+            .await
+            .unwrap();
+        let (fallback, reply) = media(&mut rx).await;
+        env.command(&mut owner, "pause").await;
+        owner.complete(fallback, reply, &mut env.runtime()).await;
+        env.loaded().await;
+        let status = env.player.status();
+        assert!(status.transcoded && status.paused && !env.playing);
+        assert_eq!(status.gain.unwrap().db, -3.0);
+        assert_eq!(env.queue.selected(), selected);
+        assert_eq!(env.queue.selected_version(), Some("v1"));
+        assert_eq!(serde_json::to_value(&env.queue).unwrap()["visit"], visit);
+        env.queue.set_position(3.0).unwrap();
+        owner
+            .start(
+                env.selected(),
+                false,
+                Some(provider.clone()),
+                tx.clone(),
+                &mut env.runtime(),
+            )
+            .await
+            .unwrap();
+        let (seek, reply) = media(&mut rx).await;
+        owner.complete(seek, reply, &mut env.runtime()).await;
+        env.loaded().await;
+        env.command(&mut owner, "resume").await;
+        let until = tokio::time::Instant::now() + Duration::from_secs(4);
+        loop {
+            let status = env.player.status();
+            if status.position_seconds.is_some_and(|p| p > 3.1) {
+                break;
+            }
+            assert!(status.error.is_none(), "{status:?}");
+            assert!(tokio::time::Instant::now() < until, "{status:?}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        owner
+            .unsupported(
+                generation,
+                true,
+                Some(provider.clone()),
+                tx,
+                &mut env.runtime(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+    #[tokio::test]
+    async fn converted_completion_cannot_cross_account_or_output_cancellation() {
+        for account in [false, true] {
+            let (mut env, inner) =
+                Environment::new(vec![Answer::Version("v1"), Answer::Version("v1")]).await;
+            let root = std::env::temp_dir()
+                .join(format!("qoda-converted-cancel-{}", uuid::Uuid::new_v4()));
+            env.output = output::Settings::load(Some(root.join("output.json")));
+            env.output.selection = Some(output::Selection::Desktop);
+            let provider = Arc::new(Fallback {
+                inner,
+                calls: Default::default(),
+            });
+            let mut owner = Controller::default();
+            let (tx, mut rx) = mpsc::channel(8);
+            owner
+                .start(
+                    env.selected(),
+                    false,
+                    Some(provider.clone()),
+                    tx.clone(),
+                    &mut env.runtime(),
+                )
+                .await
+                .unwrap();
+            let (generation, reply) = media(&mut rx).await;
+            owner.complete(generation, reply, &mut env.runtime()).await;
+            env.loaded().await;
+            owner
+                .unsupported(generation, true, Some(provider), tx, &mut env.runtime())
+                .await
+                .unwrap();
+            let (fallback, reply) = media(&mut rx).await;
+            if account {
+                owner.cancel();
+                env.account += 1;
+                env.epochs.reset().unwrap();
+                env.player.invalidate_load(env.epochs.current);
+            } else {
+                env.output.selection = None;
+                env.command(&mut owner, "set_output").await;
+            }
+            owner.complete(fallback, reply, &mut env.runtime()).await;
+            assert!(env.player.status().idle || env.player.status().paused);
+            assert!(!env.player.status().transcoded);
+            assert!(!owner.preparing());
+            env.proxy.revoke().await;
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
     #[tokio::test]
     async fn paused_selected_preparation_loads_once_and_duplicate_failure_cannot_change_it() {

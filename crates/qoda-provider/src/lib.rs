@@ -203,6 +203,15 @@ impl std::fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 pub trait MusicProvider: Send + Sync {
+    /// Optional fallback for a pinned original version after local unsupported decoding.
+    fn prepare_transcoded(
+        &self,
+        _reference: TrackRef,
+        _version: String,
+        _position: f64,
+    ) -> ProviderFuture<'_, PreparedMedia> {
+        Box::pin(async { Err(ProviderError::Unsupported) })
+    }
     /// Confirmed nominal playback only. Preparation never calls this operation.
     /// Unsupported by default; implementations must not infer a scrobble.
     fn report_playback(&self, _report: playback::Report) -> ProviderFuture<'_, playback::Outcome> {
@@ -265,6 +274,18 @@ pub struct PreparedMedia {
     pub stream: Box<dyn MediaSource>,
 }
 pub trait MediaSource: Send + Sync {
+    /// Absolute source time corresponding to local decoder time zero.
+    fn timeline_offset(&self) -> f64 {
+        0.0
+    }
+    fn transcoded(&self) -> bool {
+        false
+    }
+    /// Retire any provider-owned resources before a playback grant is acknowledged as revoked.
+    fn close(&self) -> ProviderFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn open(&self, range: Option<ByteRange>, head: bool) -> ProviderFuture<'_, MediaResponse>;
 }
 pub struct MediaResponse {

@@ -370,6 +370,14 @@ impl Controller {
                 was_playing,
             ))
         } else if sample.audio.generation == cx.epochs.current
+            && sample.audio.unsupported_format
+            && !sample.audio.transcoded
+            && !sample.failed
+            && self.handled_end != Some(cx.epochs.current)
+        {
+            self.handled_end = Some(cx.epochs.current);
+            Some(Event::Unsupported(cx.epochs.current, was_playing))
+        } else if sample.audio.generation == cx.epochs.current
             && sample.audio.idle
             && sample.audio.natural_eof
             && self.handled_end != Some(cx.epochs.current)

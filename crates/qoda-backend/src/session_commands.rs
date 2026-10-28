@@ -1223,6 +1223,8 @@ mod tests {
         assert_eq!(output.selection, Some(output::Selection::Desktop));
         assert_eq!(
             f.player.load_prepared(player::Load {
+                timeline_offset: 0.0,
+                transcoded: false,
                 generation: 1,
                 url: "not-opened:stale-fixture".into(),
                 position: 0.0,

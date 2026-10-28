@@ -20,3 +20,20 @@ A separate opt-in permits conventional stereo for wholly unreported channel maps
 It does not accept reported reversed/incorrect maps and never claims the assumed
 layout is verified. This is needed for the development laptop's driver; merely
 allowing resampling does not relax channel-map verification.
+
+## Decoder support amendment (2026-10-28)
+
+The user expanded input support to every audio format decoded by installed mpv,
+with optional provider transcoding when local decoding is unsupported. The old
+WAV/FLAC header profile now qualifies continuous frame spans only. Silent decoder
+inspection supplies PCM rate, representation and channel facts before Fidelity
+opens hardware. Strict output still refuses required conversion; HQ fallback also
+allows float/integer conversion and stereo mixing, reported explicitly.
+
+A provider-produced representation retains the original media-version and visit
+identity. Original selected ReplayGain is retained and applied once; server output
+is not assumed to retain original embedded tags. Progressive Plex conversion
+prefers FLAC and can use MP3 after an explicit server target refusal. The display
+names transcoding and the actual decoded codec. No additional physical output or
+unqualified gapless guarantees follow from broader input decoding. See
+[format support](../audio/formats.md).

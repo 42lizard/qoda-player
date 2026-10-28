@@ -22,6 +22,13 @@ struct NativeEvent {
     data: *mut c_void,
 }
 #[repr(C)]
+struct LogMessage {
+    prefix: *const c_char,
+    level: *const c_char,
+    text: *const c_char,
+    log_level: c_int,
+}
+#[repr(C)]
 struct StartFile {
     entry: i64,
 }
@@ -36,6 +43,8 @@ struct EndFile {
 #[link(name = "mpv")]
 unsafe extern "C" {
     fn mpv_create() -> *mut c_void;
+    fn mpv_request_log_messages(h: *mut c_void, level: *const c_char) -> c_int;
+    fn mpv_free(data: *mut c_void);
     fn mpv_set_option_string(h: *mut c_void, k: *const c_char, v: *const c_char) -> c_int;
     fn mpv_initialize(h: *mut c_void) -> c_int;
     fn mpv_command(h: *mut c_void, args: *const *const c_char) -> c_int;
@@ -55,6 +64,8 @@ pub enum StageResult {
     Independent(&'static str),
 }
 pub struct Load {
+    pub timeline_offset: f64,
+    pub transcoded: bool,
     pub generation: u64,
     pub url: String,
     pub position: f64,
@@ -64,6 +75,19 @@ pub struct Load {
     pub chain: bool,
     pub output: Option<output::Selection>,
     pub playing: bool,
+}
+impl Load {
+    fn local_position(&self) -> Result<f64, &'static str> {
+        if !self.timeline_offset.is_finite()
+            || !self.position.is_finite()
+            || self.timeline_offset < 0.0
+            || self.position < self.timeline_offset
+            || (!self.transcoded && self.timeline_offset != 0.0)
+        {
+            return Err("Invalid source timeline offset; playback stays paused.");
+        }
+        Ok(self.position - self.timeline_offset)
+    }
 }
 pub enum Command {
     #[cfg(test)]
@@ -123,6 +147,11 @@ pub enum Removal {
 }
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
 pub struct Status {
+    pub transcoded: bool,
+    pub decoder_codec: Option<String>,
+    pub decoder_layout: Option<String>,
+    pub decoder_format: Option<String>,
+    pub unsupported_format: bool,
     #[serde(serialize_with = "decimal")]
     pub generation: u64,
     pub position_seconds: Option<f64>,
@@ -165,6 +194,57 @@ unsafe fn property<T: Default>(h: *mut c_void, name: &str, format: c_int) -> Opt
         Some(value)
     }
 }
+fn text_property(h: *mut c_void, name: &str) -> Option<String> {
+    let ptr = unsafe { property::<*mut c_char>(h, name, 1) }?;
+    if ptr.is_null() {
+        return None;
+    }
+    let value = unsafe { std::ffi::CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe {
+        mpv_free(ptr.cast());
+    }
+    Some(value)
+}
+fn decoded_format(h: *mut c_void, hint: Option<Format>) -> Option<Format> {
+    use crate::source_format::SampleType;
+    let rate = u32::try_from(unsafe { property::<i64>(h, "audio-params/samplerate", 4) }?).ok()?;
+    let channels =
+        u16::try_from(unsafe { property::<i64>(h, "audio-params/channel-count", 4) }?).ok()?;
+    let layout = text_property(h, "audio-params/channels")?;
+    let format = text_property(h, "audio-params/format")?;
+    let (sample_type, mut bits) = match format.trim_end_matches('p') {
+        "u8" => (SampleType::Integer, 8),
+        "s16" => (SampleType::Integer, 16),
+        "s32" => (SampleType::Integer, 32),
+        "s64" => (SampleType::Integer, 64),
+        "float" => (SampleType::Float, 32),
+        "double" => (SampleType::Float, 64),
+        _ => return None,
+    };
+    let stereo = channels == 2 && layout == "stereo";
+    if let Some(hint) = hint.filter(|h| {
+        h.rate == rate
+            && h.channels == channels
+            && h.stereo == stereo
+            && h.sample_type == sample_type
+            && h.bits <= bits
+    }) {
+        bits = hint.bits;
+    }
+    (rate > 0 && channels > 0).then_some(Format {
+        rate,
+        bits,
+        sample_type,
+        channels,
+        stereo,
+    })
+}
+struct PendingProbe {
+    load: Load,
+    deadline: std::time::Instant,
+}
 #[derive(Clone)]
 struct Entry {
     generation: u64,
@@ -191,6 +271,7 @@ fn create_handle(output: &str, extra: &[(String, String)]) -> Result<*mut c_void
             ("load-scripts".into(), "no".into()),
             ("ytdl".into(), "no".into()),
             ("access-references".into(), "no".into()),
+            ("network-timeout".into(), "10".into()),
             ("vo".into(), "null".into()),
             ("vid".into(), "no".into()),
             ("audio-display".into(), "no".into()),
@@ -221,6 +302,8 @@ fn create_handle(output: &str, extra: &[(String, String)]) -> Result<*mut c_void
         if unsafe { mpv_initialize(h) } < 0 {
             return Err("Audio engine could not initialize output");
         }
+        let level = CString::new("warn").unwrap();
+        let _ = unsafe { mpv_request_log_messages(h, level.as_ptr()) };
         Ok(())
     })();
     if let Err(error) = configured {
@@ -243,6 +326,10 @@ struct Native {
     route: Option<output::Selection>,
     active: Option<Active>,
     pending_start: Option<PendingStart>,
+    probe: Option<PendingProbe>,
+    unsupported_decoder: bool,
+    transcoded: bool,
+    timeline_offset: f64,
     pcm: Option<PcmActive>,
     registration: Option<continuous::input::Registration>,
     future: Option<(i64, u64)>,
@@ -255,6 +342,7 @@ fn qualified(d: Description, source: Option<Format>) -> bool {
         == Some(Format {
             rate: d.rate,
             bits: d.bits,
+            ..Default::default()
         })
         && d.frames >= u64::from(d.rate) * 2
 }
@@ -420,6 +508,7 @@ impl Native {
             self.stop();
         }
         self.current.output_selection = self.route.clone();
+        self.current.transcoded = self.transcoded;
         if !self.intent.load(Ordering::Acquire)
             && unsafe { property::<c_int>(self.h, "pause", 3) } == Some(0)
         {
@@ -464,6 +553,65 @@ impl Native {
             } else {
                 None
             };
+        if self.current.entry_ready {
+            self.current.decoder_codec = text_property(self.h, "audio-codec-name");
+            self.current.decoder_layout = text_property(self.h, "audio-params/channels");
+            self.current.decoder_format = text_property(self.h, "audio-params/format");
+            if self.current.source.is_none() {
+                self.current.source = decoded_format(self.h, None);
+            }
+        }
+        if self.probe.is_some() {
+            self.call(&["set", "pause", "yes"]);
+            let stale = self
+                .probe
+                .as_ref()
+                .is_some_and(|p| self.latest_load.load(Ordering::Acquire) != p.load.generation);
+            if stale {
+                self.stop();
+                return;
+            }
+            let facts = decoded_format(self.h, self.probe.as_ref().and_then(|p| p.load.source));
+            if let Some(facts) = facts {
+                let mut probe = self.probe.take().unwrap();
+                probe.load.source = Some(facts);
+                // A verified header span remains eligible only if decoder facts agree.
+                if probe
+                    .load
+                    .description
+                    .is_some_and(|d| !qualified(d, Some(facts)))
+                {
+                    probe.load.description = None;
+                }
+                let gain = Some(probe.load.gain.clone());
+                self.load_with_gain(probe.load, gain);
+                if self.intent.load(Ordering::Acquire)
+                    && self.current.error.is_none()
+                    && self.pending_start.is_none()
+                {
+                    self.call(&["set", "pause", "no"]);
+                }
+                return;
+            }
+            if self.current.error.is_some()
+                || self
+                    .probe
+                    .as_ref()
+                    .is_some_and(|p| std::time::Instant::now() >= p.deadline)
+            {
+                self.probe = None;
+                if self.current.error.is_none() {
+                    self.current.error = Some(
+                        "The decoder did not provide a verified audio format; playback stays paused.",
+                    );
+                }
+                self.intent.store(false, Ordering::Release);
+                self.stop();
+            }
+            self.current.entry_ready = false;
+            self.current.position_seconds = None;
+            return;
+        }
         self.current.processing = if self.current.entry_ready && self.current.error.is_none() {
             self.active.as_ref().and_then(|active| {
                 self.current.source.map(|source| output::Plan {
@@ -476,7 +624,8 @@ impl Native {
         };
         self.current.position_seconds = if self.current.entry_ready && self.pending_start.is_none()
         {
-            pts
+            pts.filter(|p| self.timeline_offset == 0.0 || *p > 0.0)
+                .map(|p| p + self.timeline_offset)
         } else {
             None
         };
@@ -548,6 +697,7 @@ impl Native {
         }
     }
     fn stop(&mut self) -> bool {
+        self.probe = None;
         self.cancel_pcm();
         self.current.continuous = false;
         self.pending_start = None;
@@ -574,6 +724,15 @@ impl Native {
             if event.id == 0 {
                 break;
             }
+            if event.id == 2 && !event.data.is_null() {
+                let message = unsafe { &*event.data.cast::<LogMessage>() };
+                if !message.text.is_null() {
+                    let text = unsafe { std::ffi::CStr::from_ptr(message.text) }.to_string_lossy();
+                    if text.contains("Cannot find codec") || text.contains("No audio decoder") {
+                        self.unsupported_decoder = true;
+                    }
+                }
+            }
             if event.id == 6 && !event.data.is_null() {
                 let id = unsafe { (*event.data.cast::<StartFile>()).entry };
                 if let Some(Entry {
@@ -583,6 +742,10 @@ impl Native {
                 }) = self.entries.get(&id).cloned()
                 {
                     let previous = self.current.generation;
+                    if generation != previous {
+                        self.transcoded = false;
+                        self.timeline_offset = 0.0;
+                    }
                     let handoff = if generation != previous {
                         if self.ended != self.entry.map(|entry| (entry, previous)) {
                             self.current.error =
@@ -627,12 +790,16 @@ impl Native {
                         self.ended = Some((end.entry, self.current.generation));
                     }
                     if end.error < 0 {
+                        self.current.unsupported_format = matches!(end.error, -17 | -18)
+                            || self.unsupported_decoder && end.error == -16;
                         self.current.error =
                             Some("Playback failed. Check server access and audio output.");
                         self.intent.store(false, Ordering::Release);
                         self.call(&["set", "pause", "yes"]);
                         let handoff = self.current.handoff_from;
+                        let gain = self.current.gain.clone();
                         self.stop();
+                        self.current.gain = gain;
                         self.current.handoff_from = handoff;
                     }
                 }
@@ -665,14 +832,52 @@ impl Native {
         }
     }
     fn load(&mut self, load: Load) {
-        let gain = Some(load.gain.clone());
-        self.load_with_gain(load, gain);
+        self.transcoded = load.transcoded;
+        if self.route.as_ref().is_some_and(output::Selection::fidelity) {
+            if let Err(error) = self.replace_handle(None) {
+                self.current.error = Some(error);
+                self.intent.store(false, Ordering::Release);
+                return;
+            }
+            self.load_file(
+                load.generation,
+                load.url.clone(),
+                0.0,
+                Some(load.gain.clone()),
+                None,
+                None,
+            );
+            self.probe = Some(PendingProbe {
+                load,
+                deadline: std::time::Instant::now() + Duration::from_secs(10),
+            });
+        } else {
+            let gain = Some(load.gain.clone());
+            self.load_with_gain(load, gain);
+        }
     }
     fn load_with_gain(&mut self, load: Load, gain: Option<Applied>) {
+        let position = match load.local_position() {
+            Ok(position) => position,
+            Err(error) => {
+                self.stop();
+                self.current = Status {
+                    generation: load.generation,
+                    error: Some(error),
+                    paused: true,
+                    idle: true,
+                    ..Default::default()
+                };
+                self.intent.store(false, Ordering::Release);
+                return;
+            }
+        };
         let Load {
+            timeline_offset,
+            transcoded: _,
             generation,
             url,
-            position,
+            position: _,
             gain: _,
             source,
             description,
@@ -680,6 +885,7 @@ impl Native {
             output: _,
             playing: _,
         } = load;
+        self.timeline_offset = timeline_offset;
         if self.route.is_none()
             || self.route.as_ref().is_some_and(output::Selection::fidelity) && source.is_none()
         {
@@ -819,6 +1025,7 @@ impl Native {
             deadline: std::time::Instant::now() + Duration::from_secs(5),
         });
         let options = file_options(position, gain.as_ref(), processing);
+        self.unsupported_decoder = false;
         self.entries.clear();
         self.entry = None;
         self.future = None;
@@ -971,6 +1178,7 @@ impl Native {
             source: Some(Format {
                 rate: description.rate,
                 bits: description.bits,
+                ..Default::default()
             }),
         });
         self.current.staged_generation = Some(next);
@@ -1068,6 +1276,8 @@ impl Drop for Native {
 #[cfg(test)]
 fn test_load(generation: u64, url: String, position: f64, gain: Applied) -> Load {
     Load {
+        timeline_offset: 0.0,
+        transcoded: false,
         generation,
         url,
         position,
@@ -1141,6 +1351,10 @@ impl Player {
                 route: Some(output::Selection::Desktop),
                 active: None,
                 pending_start: None,
+                probe: None,
+                unsupported_decoder: false,
+                transcoded: false,
+                timeline_offset: 0.0,
                 pcm: None,
                 registration: None,
             };
@@ -1156,7 +1370,8 @@ impl Player {
                     Ok(Command::Pause(p)) => {
                         let pause = p
                             || !native.intent.load(Ordering::Acquire)
-                            || native.pending_start.is_some();
+                            || native.pending_start.is_some()
+                            || native.probe.is_some();
                         if !native.h.is_null()
                             && !native.call(&["set", "pause", if pause { "yes" } else { "no" }])
                         {
@@ -1243,6 +1458,7 @@ impl Player {
                             }
                             let playing = !stale
                                 && native.pending_start.is_none()
+                                && native.probe.is_none()
                                 && native.current.error.is_none()
                                 && native.intent.load(Ordering::Acquire);
                             if !native.h.is_null() {
@@ -1301,6 +1517,7 @@ impl Player {
         self.desired_playing.store(false, Ordering::Release);
     }
     pub fn load_prepared(&self, load: Load) -> Result<(), &'static str> {
+        load.local_position()?;
         if self
             .latest_load
             .fetch_max(load.generation, Ordering::AcqRel)
@@ -1461,6 +1678,7 @@ mod tests {
             Format {
                 rate: 48000,
                 bits: 16,
+                ..Default::default()
             },
             crate::output::Sample::S16,
         )
@@ -1479,6 +1697,8 @@ mod tests {
     }
     fn prepared(generation: u64, output: Option<output::Selection>, url: &str) -> Load {
         Load {
+            timeline_offset: 0.0,
+            transcoded: false,
             generation,
             output,
             url: url.into(),
@@ -1491,6 +1711,138 @@ mod tests {
         }
     }
     #[test]
+    fn prepared_aac_uses_native_decoded_facts_instead_of_a_container_whitelist() {
+        let path = std::env::temp_dir().join(format!("qoda-format-{}.m4a", uuid::Uuid::new_v4()));
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=44100:cl=stereo",
+                    "-t",
+                    "0.5",
+                    "-c:a",
+                    "aac",
+                    "-y"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let player = Player::with_output("null").unwrap();
+        player
+            .load_prepared(prepared(
+                1,
+                Some(output::Selection::Desktop),
+                path.to_str().unwrap(),
+            ))
+            .unwrap();
+        let status = wait_for(&player, |s| {
+            (s.entry_ready && s.source.is_some()) || s.error.is_some()
+        });
+        assert_eq!(status.error, None);
+        let source = status
+            .source
+            .expect("production playback must expose decoded audio facts");
+        assert_eq!(source.rate, 44100);
+        drop(player);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn native_decoder_accepts_compressed_float_and_unusual_pcm_inputs() {
+        for (extension, codec, rate, channels) in [
+            ("mp3", "libmp3lame", "32000", "1"),
+            ("ogg", "libvorbis", "44100", "2"),
+            ("opus", "libopus", "48000", "2"),
+            ("m4a", "alac", "88200", "2"),
+            ("flac", "flac", "192000", "2"),
+            ("wav", "pcm_f32le", "88200", "6"),
+            ("wav", "pcm_f64le", "192000", "1"),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "qoda-format-{}.{}",
+                uuid::Uuid::new_v4(),
+                extension
+            ));
+            assert!(
+                std::process::Command::new("ffmpeg")
+                    .args([
+                        "-v", "error", "-f", "lavfi", "-i", "anullsrc", "-t", "0.5", "-ar", rate,
+                        "-ac", channels, "-c:a", codec, "-y"
+                    ])
+                    .arg(&path)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let player = Player::with_output("null").unwrap();
+            let mut load = prepared(1, Some(output::Selection::Desktop), path.to_str().unwrap());
+            load.playing = false;
+            player.load_prepared(load).unwrap();
+            let status = wait_for(&player, |s| {
+                (s.entry_ready && s.source.is_some()) || s.error.is_some()
+            });
+            assert_eq!(status.error, None, "{codec}: {status:?}");
+            let source = status.source.expect(codec);
+            assert_eq!(source.rate, rate.parse::<u32>().unwrap(), "{codec}");
+            assert_eq!(source.channels, channels.parse::<u16>().unwrap(), "{codec}");
+            assert_eq!(
+                source.sample_type == crate::source_format::SampleType::Float,
+                codec.contains("f32")
+                    || codec.contains("f64")
+                    || matches!(codec, "libmp3lame" | "libvorbis" | "libopus"),
+                "{codec}: {source:?}"
+            );
+            assert!(status.paused);
+            drop(player);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    #[test]
+    fn fidelity_inspects_unknown_input_silently_before_resolving_hardware() {
+        let _serial = crate::alsa_guard::TEST_SERIAL.lock().unwrap();
+        let path = silent_file(1);
+        let player = Player::with_output("null").unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let route = Some(output::Selection::FidelityResampled {
+            device: "0".repeat(64),
+            assume_stereo: true,
+        });
+        runtime.block_on(player.configure(route.clone())).unwrap();
+        player
+            .load_prepared(prepared(1, route, path.to_str().unwrap()))
+            .unwrap();
+        let status = wait_for(&player, |s| s.generation == 1 && s.error.is_some());
+        assert_eq!(status.source.unwrap().rate, 48000);
+        assert!(status.paused && status.idle);
+        assert!(status.error.unwrap().contains("device"), "{status:?}");
+        assert_eq!(status.position_seconds, None);
+        assert!(status.output.is_none());
+        drop(player);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn invalid_source_timeline_is_rejected_before_native_load() {
+        let player = Player::with_output("null").unwrap();
+        let mut load = prepared(1, Some(output::Selection::Desktop), "/must-not-be-opened");
+        load.timeline_offset = 1.0;
+        load.position = 2.0;
+        assert!(
+            player
+                .load_prepared(load)
+                .unwrap_err()
+                .contains("source timeline")
+        );
+        assert_eq!(player.status().generation, 0);
+        let mut load = prepared(2, Some(output::Selection::Desktop), "/must-not-be-opened");
+        load.timeline_offset = f64::NAN;
+        assert!(player.load_prepared(load).is_err());
+    }
+    #[test]
     fn fidelity_placeholder_never_loads_without_verified_source_or_falls_back() {
         let _serial = crate::alsa_guard::TEST_SERIAL.lock().unwrap();
         let player = Player::with_output("null").unwrap();
@@ -1501,13 +1853,13 @@ mod tests {
         runtime.block_on(player.configure(route.clone())).unwrap();
         assert!(player.status().idle && player.status().paused);
         assert_eq!(player.status().output_selection, route);
-        // No source descriptor: do not even resolve/open the fictional device.
+        // Unknown input is inspected only on null output; failed inspection must not open hardware.
         player
             .load_prepared(prepared(1, route, "/must-not-be-opened.wav"))
             .unwrap();
         let status = wait_for(&player, |s| s.generation == 1 && s.error.is_some());
         assert!(status.idle && status.paused);
-        assert!(status.error.unwrap().contains("verified"));
+        assert!(status.error.unwrap().contains("Playback failed"));
         runtime
             .block_on(player.configure(Some(output::Selection::Desktop)))
             .unwrap();
@@ -2113,10 +2465,15 @@ mod hq_conversion_tests {
             wav.extend(pcm);
             std::fs::write(&input, wav).unwrap();
             let plan = output::Plan {
-                source: Format { rate, bits },
+                source: Format {
+                    rate,
+                    bits,
+                    ..Default::default()
+                },
                 target: Format {
                     rate: 48000,
                     bits: 16,
+                    ..Default::default()
                 },
                 sample: output::Sample::S16,
             };
@@ -2335,8 +2692,13 @@ mod continuous_tests {
                 source: Format {
                     rate: self.description.rate,
                     bits: self.description.bits,
+                    ..Default::default()
                 },
-                target: Format { rate, bits: 16 },
+                target: Format {
+                    rate,
+                    bits: 16,
+                    ..Default::default()
+                },
                 sample: output::Sample::S16,
             }
         }

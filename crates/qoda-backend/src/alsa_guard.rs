@@ -580,6 +580,7 @@ mod tests {
                 Format {
                     rate: 48000,
                     bits: 16,
+                    ..Default::default()
                 },
                 Sample::S16,
             )
@@ -593,6 +594,7 @@ mod tests {
             Format {
                 rate: 48000,
                 bits: 16,
+                ..Default::default()
             },
             Sample::S16,
         )
@@ -606,6 +608,7 @@ mod tests {
         let source = Format {
             rate: 48000,
             bits: 24,
+            ..Default::default()
         };
         let good = Parameters {
             access: 3,
@@ -644,6 +647,7 @@ mod tests {
             Format {
                 rate: 48000,
                 bits: 16,
+                ..Default::default()
             },
             Sample::S16,
         )
@@ -685,6 +689,7 @@ mod tests {
             Format {
                 rate: 48000,
                 bits: 24,
+                ..Default::default()
             },
             Sample::S32,
         )

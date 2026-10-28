@@ -283,13 +283,13 @@ pub struct Prepared {
 #[derive(Clone, Copy, Debug)]
 pub enum PrepareError {
     Provider(ProviderError),
-    Fidelity(&'static str),
+    Verification(&'static str),
 }
 impl PrepareError {
     pub fn provider(self) -> Option<ProviderError> {
         match self {
             Self::Provider(error) => Some(error),
-            Self::Fidelity(_) => None,
+            Self::Verification(_) => None,
         }
     }
 }
@@ -297,7 +297,7 @@ impl std::fmt::Display for PrepareError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Provider(error) => write!(f, "{error}"),
-            Self::Fidelity(error) => f.write_str(error),
+            Self::Verification(error) => f.write_str(error),
         }
     }
 }
@@ -317,6 +317,29 @@ pub async fn prepare(
         .map_err(PrepareError::Provider)?;
     describe(media, request).await
 }
+/// Same pinned conversion contract for selected preparation, seeking and recovery.
+pub async fn convert(
+    provider: &dyn MusicProvider,
+    request: Request,
+    version: String,
+    position: f64,
+) -> Result<Prepared, PrepareError> {
+    let media = provider.prepare_transcoded(request.reference.clone(), version.clone(), position).await.map_err(|error| if error == ProviderError::Unsupported {
+        PrepareError::Verification("The original format is not recognized locally and this provider cannot supply a playable converted stream.")
+    } else { PrepareError::Provider(error) })?;
+    if media.version != version
+        || media.track.reference != request.reference
+        || !media.stream.transcoded()
+        || !position.is_finite()
+        || position < 0.0
+        || media.stream.timeline_offset() != position
+    {
+        return Err(PrepareError::Verification(
+            "Provider conversion did not retain the pinned media identity or requested source timeline.",
+        ));
+    }
+    describe(media, request).await
+}
 // Recovery verifies pinned provider identity before reading source/tag bytes.
 pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared, PrepareError> {
     let Request {
@@ -325,16 +348,14 @@ pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared
         fidelity,
         ..
     } = request;
-    let verified = if fidelity {
-        Some(
-            tokio::time::timeout(
-                Duration::from_secs(5),
-                crate::source_format::probe(media.stream.as_ref()),
-            )
-            .await
-            .unwrap_or(Err("Source verification timed out; fidelity stays paused."))
-            .map_err(PrepareError::Fidelity)?,
+    let verified = if fidelity && !media.stream.transcoded() {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::source_format::probe(media.stream.as_ref()),
         )
+        .await
+        .unwrap_or(Err("Source header unavailable"))
+        .ok()
     } else {
         None
     };
@@ -342,6 +363,11 @@ pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared
     let continuous = verified.and_then(|verified| verified.continuous);
     let gain = if mode == Mode::Off {
         Applied::off()
+    } else if media.stream.transcoded() {
+        let mut gain = Applied::off();
+        gain.mode = mode;
+        gain.reason = "Server-converted stream; original embedded gain must be retained by the playback owner";
+        gain
     } else {
         let tags = tokio::time::timeout(Duration::from_secs(5), probe(media.stream.as_ref()))
             .await

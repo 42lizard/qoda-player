@@ -17,13 +17,14 @@ select Desktop as a fallback. Device names/serial attributes are not published.
 
 ## Source and negotiation gates
 
-The initial strict source scope is native FLAC or PCM WAV, stereo integer 16/24
-bit at 44.1, 48 or 96 kHz. A bounded 64 KiB header read (five-second timeout)
-validates format before playback. WAV extensible requires a FL/FR mask and PCM
-subtype; float, mono, other rates/precisions and unknown formats pause with a
-visible error. This is a format declaration check, not a content-integrity hash.
-Unsupported Fidelity sources remain playable through an explicit Desktop choice;
-they are not marked unavailable or automatically skipped in the queue.
+Input support follows the installed mpv decoder, including compressed, floating-point,
+mono and multichannel audio. Fidelity first inspects the decoder on silent null
+output, then opens the selected hardware under the guard. Strict output currently
+requires stereo integer PCM that the hardware can represent without conversion;
+HQ fallback permits explicit stereo mixing and float/integer, rate and precision
+conversion. A codec or container name alone does not disqualify input. The
+[format and server-conversion contract](formats.md) separates decoding from output
+policy and records the remaining continuity qualification scope.
 
 On explicit load/Resume, the old native handle is destroyed. Preflight opens only
 the selected `hw:CARD=...,DEV=...,SUBDEV=0` route in nonblocking mode, installs

@@ -1,5 +1,8 @@
 //! Explicit output selection, stable hardware identity and exact preflight.
-use crate::{alsa_guard, source_format::Format};
+use crate::{
+    alsa_guard,
+    source_format::{Format, SampleType},
+};
 use alsa::{
     Direction, ValueOr,
     pcm::{Access, HwParams, PCM},
@@ -362,7 +365,11 @@ pub struct Plan {
 }
 impl Plan {
     pub fn converted(self) -> bool {
-        self.source.rate != self.target.rate || self.source.bits > self.target.bits
+        self.source.rate != self.target.rate
+            || self.source.bits > self.target.bits
+            || self.source.sample_type != SampleType::Integer
+            || !self.source.stereo
+            || self.source.channels != 2
     }
     pub fn filter(self, gain: Option<&crate::gain::Applied>) -> String {
         if !self.converted() {
@@ -372,13 +379,16 @@ impl Plan {
             .and_then(crate::gain::Applied::filter_graph)
             .into_iter()
             .collect::<Vec<_>>();
-        graph.push(format!("aresample={}:resampler=soxr:precision=28:cheby=1:osf={}:output_sample_bits={}:dither_method=triangular:async=0", self.target.rate, self.sample.mpv(), self.target.bits));
+        graph.push(format!("aresample={}:resampler=soxr:precision=28:cheby=1:osf={}:output_sample_bits={}:dither_method=triangular:async=0:out_chlayout=stereo", self.target.rate, self.sample.mpv(), self.target.bits));
         format!("af=lavfi=[{}]", graph.join(","))
     }
     pub fn successor(self, source: Format, allow_conversion: bool) -> Option<Self> {
         // A format change is re-negotiated at EOF so exact playback can again
         // win, rather than forcing a new source onto an earlier conversion.
         if source.rate != self.source.rate
+            || source.sample_type != self.source.sample_type
+            || source.channels != self.source.channels
+            || source.stereo != self.source.stereo
             || allow_conversion && source.bits != self.source.bits
             || !allow_conversion && source.bits > self.target.bits
         {
@@ -397,9 +407,20 @@ fn negotiate(
     allow_conversion: bool,
     mut probe: impl FnMut(Format, Sample) -> Result<u16, &'static str>,
 ) -> Result<Plan, &'static str> {
+    if !allow_conversion
+        && (source.sample_type != SampleType::Integer || !source.stereo || source.channels != 2)
+    {
+        return Err(
+            "Strict Fidelity cannot convert this decoded PCM representation or channel layout; enable HQ conversion or choose Desktop.",
+        );
+    }
     let mut candidates = Vec::new();
     for sample in [Sample::S32, Sample::S16] {
-        if sample.bits() >= source.bits {
+        if source.sample_type == SampleType::Integer
+            && source.stereo
+            && source.channels == 2
+            && sample.bits() >= source.bits
+        {
             candidates.push((source, sample));
         }
     }
@@ -417,10 +438,17 @@ fn negotiate(
         );
         // Preserve source precision before considering dithered reduction.
         // Within each phase: exact rate, nearest higher, then lower rates.
-        for bits in [source.bits, 16] {
+        for bits in [source.bits.min(32), 24, 16] {
             for &rate in &rates {
                 for sample in [Sample::S32, Sample::S16] {
-                    let candidate = (Format { rate, bits }, sample);
+                    let candidate = (
+                        Format {
+                            rate,
+                            bits,
+                            ..Default::default()
+                        },
+                        sample,
+                    );
                     if sample.bits() >= bits && !candidates.contains(&candidate) {
                         candidates.push(candidate);
                     }
@@ -435,7 +463,11 @@ fn negotiate(
             Ok(bits) if bits >= target.bits && bits <= sample.bits() => {
                 return Ok(Plan {
                     source,
-                    target: Format { rate, bits },
+                    target: Format {
+                        rate,
+                        bits,
+                        ..Default::default()
+                    },
                     sample,
                 });
             }
@@ -567,6 +599,7 @@ mod tests {
         let source = Format {
             rate: 44100,
             bits: 24,
+            ..Default::default()
         };
         assert!(preflight(&device, source, false, false).is_err());
         assert!(preflight(&device, source, true, false).is_err());
@@ -575,7 +608,8 @@ mod tests {
             plan.target,
             Format {
                 rate: 48000,
-                bits: 16
+                bits: 16,
+                ..Default::default()
             }
         );
         assert!(plan.converted());
@@ -590,6 +624,7 @@ mod tests {
         let source = Format {
             rate: 44100,
             bits: 16,
+            ..Default::default()
         };
         let only_48 = |format: Format, sample| {
             if format.rate == 48000 && sample == Sample::S16 {
@@ -604,7 +639,8 @@ mod tests {
             plan.target,
             Format {
                 rate: 48000,
-                bits: 16
+                bits: 16,
+                ..Default::default()
             }
         );
         assert!(plan.converted());
@@ -623,6 +659,7 @@ mod tests {
             Format {
                 rate: 44100,
                 bits: 24,
+                ..Default::default()
             },
             true,
             |format, sample| match (format.rate, sample) {
@@ -636,7 +673,8 @@ mod tests {
             high_precision.target,
             Format {
                 rate: 48000,
-                bits: 32
+                bits: 32,
+                ..Default::default()
             }
         );
         let mut attempts = 0;
@@ -654,6 +692,7 @@ mod tests {
         let source = Format {
             rate: 96000,
             bits: 24,
+            ..Default::default()
         };
         let plan = negotiate(source, true, |format, sample| {
             if format.rate == 48000 && sample == Sample::S16 {
@@ -676,7 +715,8 @@ mod tests {
             plan.successor(
                 Format {
                     rate: 44100,
-                    bits: 24
+                    bits: 24,
+                    ..Default::default()
                 },
                 true
             )
@@ -686,7 +726,8 @@ mod tests {
             plan.successor(
                 Format {
                     rate: 96000,
-                    bits: 16
+                    bits: 16,
+                    ..Default::default()
                 },
                 true
             )
@@ -758,6 +799,7 @@ mod tests {
             Some(Format {
                 rate: 44100,
                 bits: 16,
+                ..Default::default()
             }),
             false,
         );
@@ -770,7 +812,8 @@ mod tests {
                 "Fidelity device is busy",
                 Some(Format {
                     rate: 48000,
-                    bits: 24
+                    bits: 24,
+                    ..Default::default()
                 }),
                 false
             ),
@@ -803,5 +846,46 @@ mod tests {
                 .is_err()
         );
         std::fs::remove_dir_all(settings.path.unwrap()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod decoded_tests {
+    use super::*;
+    #[test]
+    fn hq_plans_float_multichannel_and_outside_legacy_rates_but_strict_refuses_conversion() {
+        let source = Format {
+            rate: 192000,
+            bits: 64,
+            sample_type: SampleType::Float,
+            channels: 6,
+            stereo: false,
+        };
+        let mut calls = 0;
+        let strict = negotiate(source, false, |_, _| {
+            calls += 1;
+            Ok(24)
+        });
+        assert!(strict.unwrap_err().contains("Strict Fidelity"));
+        assert_eq!(calls, 0);
+        let plan = negotiate(source, true, |target, _| {
+            if target.rate == 48000 && target.bits <= 24 {
+                Ok(24)
+            } else {
+                Err("unsupported")
+            }
+        })
+        .unwrap();
+        assert_eq!(plan.target.rate, 48000);
+        assert_eq!(plan.target.bits, 24);
+        assert_eq!(plan.target.channels, 2);
+        assert!(plan.converted());
+        let graph = plan.filter(None);
+        assert!(
+            graph.contains("resampler=soxr")
+                && graph.contains("out_chlayout=stereo")
+                && graph.contains("dither_method=triangular")
+        );
+        assert_eq!(plan.source, source);
     }
 }

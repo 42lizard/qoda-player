@@ -9,8 +9,12 @@ The planner first tries exact source rate and adequate precision. If opted in,
 it tries precision-preserving alternatives before allowing precision reduction.
 Within each phase it prefers the exact rate, then the nearest higher rate, then
 lower rates. Output candidates remain 44.1/48/96 kHz, S16_LE or S32_LE stereo.
-The current verified-header source scope stays stereo integer 16/24-bit WAV or
-native FLAC at 44.1/48/96 kHz. This feature does not add other codec/header readers.
+Input support follows installed mpv decoding, rather than a container whitelist.
+Silent decoder inspection supplies rate, representation and channel facts before
+Fidelity opens hardware. HQ fallback also permits float-to-integer conversion and
+stereo mixing. The verified-header profile below remains the smaller scope for
+continuous conversion; other playable sources use explicit per-track fallback.
+See [formats and Plex fallback](formats.md).
 Busy, lost or unidentifiable devices never cause an implicit Desktop fallback.
 
 Converted files use a single libavfilter graph: optional double-precision

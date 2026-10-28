@@ -168,6 +168,8 @@ impl Drop for Controller {
     }
 }
 pub struct Work {
+    pub position: f64,
+    pub transcoded: bool,
     pub key: Key,
     pub request: gain::Request,
     pub version: String,
@@ -194,6 +196,20 @@ async fn recover(
             return;
         }
         let result = tokio::time::timeout(Duration::from_secs(6), async {
+            let request = gain::Request {
+                reference: work.request.reference.clone(),
+                mode: work.request.mode,
+                album_session: work.request.album_session,
+                fidelity: work.request.fidelity,
+            };
+            if work.transcoded {
+                return gain::convert(provider, request, work.version.clone(), work.position)
+                    .await
+                    .map_err(|error| match error {
+                        gain::PrepareError::Provider(error) => Failure::Provider(error),
+                        gain::PrepareError::Verification(error) => Failure::Verification(error),
+                    });
+            }
             let media = provider
                 .prepare(
                     work.request.reference.source,
@@ -207,20 +223,12 @@ async fn recover(
             {
                 return Err(Failure::Version);
             }
-            gain::describe(
-                media,
-                gain::Request {
-                    reference: work.request.reference.clone(),
-                    mode: work.request.mode,
-                    album_session: work.request.album_session,
-                    fidelity: work.request.fidelity,
-                },
-            )
-            .await
-            .map_err(|error| match error {
-                gain::PrepareError::Provider(error) => Failure::Provider(error),
-                gain::PrepareError::Fidelity(error) => Failure::Verification(error),
-            })
+            gain::describe(media, request)
+                .await
+                .map_err(|error| match error {
+                    gain::PrepareError::Provider(error) => Failure::Provider(error),
+                    gain::PrepareError::Verification(error) => Failure::Verification(error),
+                })
         })
         .await
         .unwrap_or(Err(Failure::Provider(ProviderError::Network)));
@@ -384,6 +392,8 @@ pub(crate) mod tests {
     }
     fn work(queue: &queue::Queue, generation: u64, playing: bool) -> Work {
         Work {
+            position: queue.position(),
+            transcoded: false,
             key: Key::capture(queue, 4, generation).unwrap(),
             version: queue.selected_version().unwrap().into(),
             playing,
@@ -529,6 +539,8 @@ pub(crate) mod tests {
         let player = crate::player::Player::test_output("null").unwrap();
         player
             .load_prepared(crate::player::Load {
+                timeline_offset: 0.0,
+                transcoded: false,
                 generation: 1,
                 url,
                 position: 1.0,

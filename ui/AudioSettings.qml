@@ -90,7 +90,7 @@ ColumnLayout {
     }
     Label {
         visible: settings.outputModeDraft === 1
-        text: settings.allowConversionDraft ? "Exact format first; otherwise SoXR VHQ resampling and dithered precision reduction. Converted output is not sample-perfect." : "Strict: refuse unsupported rates and precision."
+        text: settings.allowConversionDraft ? "Exact format first; otherwise SoXR VHQ rate conversion, dithered PCM conversion and stereo mixing as needed. Converted output is not sample-perfect." : "Strict: refuse required rate, representation, precision or channel conversion."
         color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true
     }
     Label {
@@ -100,7 +100,7 @@ ColumnLayout {
             const plan = settings.output ? settings.output.processing : null;
             if (!plan) return "";
             const resampled = plan.source.rate !== plan.target.rate;
-            const reduced = plan.source.bits > plan.target.bits;
+            const reduced = plan.source.bits > plan.target.bits || plan.source.sample_type === "float" || plan.source.stereo === false || plan.source.channels !== undefined && plan.source.channels !== 2;
             return "Processing plan · " + plan.source.rate + " → " + plan.target.rate + " Hz · " + plan.source.bits + " → " + plan.target.bits + " bit · " + (resampled ? "SoXR VHQ" : "exact rate") + (resampled || reduced ? " · TPDF dither" : "") + (resampled || reduced ? " · converted" : " · no format conversion");
         }
         color: Theme.muted; wrapMode: Text.Wrap; textFormat: Text.PlainText; Layout.fillWidth: true
@@ -113,7 +113,8 @@ ColumnLayout {
     }
     Label { text: settings.output ? settings.output.message || "" : "Output settings unavailable"; color: Theme.muted; textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true }
     Label { visible: !!settings.output && settings.outputModeDraft === 1 && !settings.output.fidelity_available; text: "Fidelity unavailable: the ALSA submission guard could not be verified."; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true }
-    Label { visible: !!settings.output && !!settings.output.source; text: settings.output && settings.output.source ? "Source header · " + settings.output.source.rate + " Hz · stereo · " + settings.output.source.bits + " bit" : ""; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { visible: !!settings.output && !!settings.output.transcoded; text: "Plex server transcoding · " + (settings.output.decoder_codec || "codec pending") + " · converted representation"; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+    Label { visible: !!settings.output && !!settings.output.source; text: settings.output && settings.output.source ? "Decoded PCM · " + settings.output.source.rate + " Hz · " + (settings.output.source.channels || 2) + " channels" + (settings.output.source_layout ? " (" + settings.output.source_layout + ")" : "") + " · " + settings.output.source.bits + " bit " + (settings.output.source.sample_type || "integer") : ""; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
     Label { visible: !!settings.output && !!settings.output.observed; text: { const observed = settings.output ? settings.output.observed : null; return observed ? "Observed ALSA · " + observed.rate + " Hz · " + observed.format + " · " + observed.valid_bits + " valid bits · " + (observed.stereo_layout ? "FL/FR reported" : observed.stereo_assumed ? "stereo assumed; unverified" : "mapping pending") : ""; } color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
     Label { visible: !!settings.output && !!settings.output.selection && ["fidelity", "fidelity_resampled"].includes(settings.output.selection.mode); text: "Configured fidelity · final PCM/device qualification pending"; color: Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
     RowLayout {

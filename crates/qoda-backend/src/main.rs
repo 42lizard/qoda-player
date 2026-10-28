@@ -67,6 +67,7 @@ impl std::fmt::Display for ConnectError {
     }
 }
 enum Event {
+    Unsupported(u64, bool),
     Request(Value),
     Desktop(mpris::Request),
     DesktopLost(uuid::Uuid),
@@ -245,6 +246,10 @@ fn output_view(
         json!(settings.selection.is_some() && settings.selection == audio.output_selection);
     if view["ready"] == true && audio.generation == generation {
         view["source"] = json!(audio.source);
+        view["transcoded"] = json!(audio.transcoded);
+        view["decoder_codec"] = json!(audio.decoder_codec);
+        view["source_layout"] = json!(audio.decoder_layout);
+        view["decoder_format"] = json!(audio.decoder_format);
         if audio.entry_ready && audio.error.is_none() {
             view["processing"] = json!(audio.processing);
             view["continuous"] = json!(audio.continuous);
@@ -624,6 +629,29 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::Search(reply) => {
                 search.accept(reply, access.generation())?;
+            }
+            Event::Unsupported(generation, playing) => {
+                preparation
+                    .unsupported(
+                        generation,
+                        playing,
+                        access.provider().map(|p| p as Arc<dyn MusicProvider>),
+                        tx.clone(),
+                        &mut prepared_playback::Runtime {
+                            queue: &mut queue,
+                            player: &player,
+                            proxy: &proxy,
+                            epochs: &mut epochs,
+                            gapless: &mut gapless,
+                            playing: &mut desired_playing,
+                            presented: &mut presented_generation,
+                            state: &mut state,
+                            output: &output_settings,
+                            gain: &gain_settings,
+                            account: access.generation(),
+                        },
+                    )
+                    .await?;
             }
             Event::StreamFailed(error, playing) => {
                 preparation
@@ -1295,6 +1323,7 @@ mod tests {
             source: Some(source_format::Format {
                 rate: 48000,
                 bits: 24,
+                ..Default::default()
             }),
             output: Some(alsa_guard::Observed {
                 rate: 48000,
@@ -1318,7 +1347,7 @@ mod tests {
         audio.output_selection = None;
         assert_eq!(output_view(&settings, &[], &audio, 7)["ready"], false);
         assert!(
-            gain::PrepareError::Fidelity("Unsupported source header")
+            gain::PrepareError::Provider(qoda_provider::ProviderError::Unsupported)
                 .provider()
                 .is_none()
         );

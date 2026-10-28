@@ -651,3 +651,49 @@ async fn bound_native_handoff_with_a_changed_queue_resets_through_tick_without_p
     assert!(env.confirmed.is_none());
     assert_eq!(reqwest::get(url).await.unwrap().status(), 404);
 }
+
+#[tokio::test]
+async fn only_local_format_failure_selects_one_provider_fallback_per_output_epoch() {
+    for (unsupported, transcoded, stream_failed) in [
+        (true, false, false),
+        (false, false, false),
+        (true, true, false),
+        (true, false, true),
+    ] {
+        let mut env = Environment::new().await;
+        let mut owner = Controller::default();
+        let now = Instant::now();
+        let mut audio = env.audio(None);
+        audio.error = Some("Synthetic decoder failure");
+        audio.unsupported_format = unsupported;
+        audio.transcoded = transcoded;
+        let tick = owner.observe(
+            Sample {
+                audio: audio.clone(),
+                failed: stream_failed,
+                at: now,
+            },
+            now,
+            &mut env.runtime(),
+        );
+        if stream_failed {
+            assert!(matches!(tick.event, Some(Event::StreamFailed(..))));
+        } else if unsupported && !transcoded {
+            assert!(
+                matches!(tick.event, Some(Event::Unsupported(g, true)) if g == env.epochs.current)
+            );
+        } else {
+            assert!(!matches!(tick.event, Some(Event::Unsupported(..))));
+        }
+        let again = owner.observe(
+            Sample {
+                audio,
+                failed: stream_failed,
+                at: now,
+            },
+            now,
+            &mut env.runtime(),
+        );
+        assert!(!matches!(again.event, Some(Event::Unsupported(..))));
+    }
+}

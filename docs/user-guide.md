@@ -252,9 +252,10 @@ settings pauses playback. Choose Play/Resume explicitly afterward.
 
 ![Audio settings showing a fictional HQ conversion plan](assets/user-guide/audio-settings.png)
 
-Strict Fidelity refuses unsupported source rates/precision. Enable **high-quality
+Input support follows the installed mpv decoder. Strict Fidelity refuses required
+rate, sample representation, precision or channel conversion. Enable **high-quality
 conversion when required** to permit SoXR VHQ conversion and dithered precision
-reduction when an exact format cannot be used. The display reports the processing
+reduction, float-to-integer conversion and stereo mixing when needed. The display reports the processing
 plan. **Assume standard stereo** is a separate compatibility choice for devices
 that do not report channel mapping; the assumed layout remains unverified.
 
@@ -279,6 +280,9 @@ files. Plex loudness fields are not treated as equivalent ReplayGain tags.
 
 Converted output is not sample-perfect. Digital tests do not certify your ALSA
 hardware, DAC or analog path; direct-output/device continuity remains experimental.
+For locally unsupported input, Qoda can try [Plex server conversion](audio/formats.md);
+the output display identifies transcoded playback.
+
 If a device refuses a source format, enable the explicit HQ fallback or choose
 Desktop. See [audio details](audio/hq-conversion.md) for the measured scope.
 

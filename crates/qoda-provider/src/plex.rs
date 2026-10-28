@@ -2,6 +2,7 @@ mod albums;
 mod artists;
 mod playlists;
 mod reporting;
+mod transcode;
 use crate::*;
 use futures_util::StreamExt;
 use reqwest::{
@@ -481,6 +482,14 @@ fn parse_track(node: Node<'_, '_>, source: SourceId) -> Result<Track, ProviderEr
     })
 }
 impl MusicProvider for PlexProvider {
+    fn prepare_transcoded(
+        &self,
+        reference: TrackRef,
+        version: String,
+        position: f64,
+    ) -> ProviderFuture<'_, PreparedMedia> {
+        Box::pin(self.transcode(reference, version, position))
+    }
     fn report_playback(&self, report: playback::Report) -> ProviderFuture<'_, playback::Outcome> {
         Box::pin(self.timeline(report))
     }

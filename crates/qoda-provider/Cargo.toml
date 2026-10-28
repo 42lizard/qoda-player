@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+tokio.workspace = true
 qoda-core = { path = "../qoda-core" }
 serde.workspace = true
 serde_json.workspace = true
