@@ -889,14 +889,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(()) => {
                                     preparation.cancel();
                                     reporting.request_stop();
-                                    if let Err(error) = player.barrier().await {
-                                        player.send(player::Command::Pause(true));
+                                    let problem = buffered_reset::Runtime {
+                                        queue: &mut queue,
+                                        player: &player,
+                                        gapless: &mut gapless,
+                                        epochs: &mut epochs,
+                                        proxy: &proxy,
+                                        confirmed: &mut presented_generation,
+                                        playing: &mut desired_playing,
+                                    }
+                                    .force_for_command()
+                                    .await?;
+                                    if let Some(error) = problem {
                                         state["error"] = json!(error);
                                     }
-                                    gapless.invalidate();
-                                    epochs.reset()?;
                                     player.invalidate_load(epochs.current);
-                                    proxy.revoke().await;
                                     desired_playing = false;
                                     presented_generation = None;
                                     affected.extend(local.provider().roots().iter().map(|r| r.id));

@@ -37,7 +37,7 @@ HOOKS = """
             guideSnapshot = root.snapshot;
             root.snapshot = Object.assign({}, root.snapshot, {sign_in: {connected: false, saved: "absent", can_save: false, message: "Connect your Plex account", keyring_action: null}});
         }
-        function restoreGuideFixture(): void { root.snapshot = guideSnapshot; }
+        function restoreGuideFixture(): void { root.snapshot = guideSnapshot; root.libraryModel = guideSnapshot.libraries; }
 
         property string captureDone: ""
         function captureStatus(): string { return captureDone; }
@@ -48,6 +48,11 @@ HOOKS = """
         function capture(path: string): void { captureDone = ""; fullFrame.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function captureSettings(path: string): void { captureDone = ""; settingsSheet.contentItem.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function settingsGeometry(): string { function walk(item) { return {type: String(item), x:item.x,y:item.y,w:item.width,h:item.height,ih:item.implicitHeight,visible:item.visible,children:(item.children || []).map(walk)}; } return JSON.stringify(walk(settingsSheet.contentItem)); }
+        function localWithPlexFixture(): void {
+            localFixture();
+            root.snapshot = Object.assign({}, root.snapshot, {sign_in: Object.assign({}, root.snapshot.sign_in, {connected: true})});
+        }
+        function localCapabilities(): string { return JSON.stringify({selected: root.localSelected, playback: root.playbackAvailable, playlist: root.playlistWritable}); }
         function localFixture(): void {
             guideSnapshot = root.snapshot;
             const next = Object.assign({}, root.snapshot);
@@ -247,19 +252,21 @@ def check(output=None, theme_check=False, guide=False):
                     log.flush(); log.seek(0)
                     raise AssertionError("Capture did not complete: " + label + "\n" + log.read())
 
+                last_status = "No status response"
                 for _ in range(80):
                     if process.poll() is not None:
                         log.flush(); log.seek(0)
                         raise AssertionError("Fixture UI exited: " + log.read())
                     try:
-                        if status()["instance"] == "fixture":
+                        last_status = status()
+                        if last_status["instance"] == "fixture":
                             break
-                    except (ValueError, json.JSONDecodeError):
-                        pass
+                    except (ValueError, json.JSONDecodeError) as error:
+                        last_status = str(error)
                     time.sleep(0.1)
                 else:
                     log.flush(); log.seek(0)
-                    raise AssertionError("Fixture UI did not connect: " + log.read())
+                    raise AssertionError("Fixture UI did not connect: " + repr(last_status) + "\n" + log.read())
                 if theme_check:
                     wait_for(lambda value: value["theme"]["system"] and value["theme"]["background"] == "#202830" and value["theme"]["controlText"] == "#efe0cc", attempts=120)
                 for label, width, height in [("wide", 1320, 820), ("narrow", 760, 820), ("small", 540, 760)]:
@@ -436,6 +443,12 @@ def check(output=None, theme_check=False, guide=False):
                 assert len([request for request in requests if request["op"] == "queue_move"]) == 1
                 assert len([request for request in requests if request["op"] == "playlist_edit"]) == 1
                 before_library = len(requests)
+                ipc("localWithPlexFixture")
+                capabilities = json.loads(ipc("localCapabilities"))
+                assert capabilities == {"selected": True, "playback": True, "playlist": False}
+                assert not status()["reorder"]["playlistEnabled"]
+                ipc("restoreGuideFixture")
+                ipc("closeSettings")
                 ipc("libraryFixture")
                 ipc("openLibraries")
                 wait_for(lambda value: value["libraryPicker"]["open"])

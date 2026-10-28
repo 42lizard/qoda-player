@@ -29,7 +29,27 @@ impl Root {
         {
             return Err(ProviderError::LocalUnavailable);
         }
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        // Normalize missing paths too, resolving their nearest existing ancestor.
+        // A drive/folder appearing later must not change the persisted source ID.
+        let path: PathBuf = path.components().collect();
+        let mut ancestor = path.clone();
+        let mut missing = Vec::new();
+        let path = loop {
+            if let Ok(mut resolved) = std::fs::canonicalize(&ancestor) {
+                for name in missing.iter().rev() {
+                    resolved.push(name);
+                }
+                break resolved;
+            }
+            if std::fs::symlink_metadata(&ancestor).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err(ProviderError::LocalUnavailable);
+            }
+            let Some(name) = ancestor.file_name().map(std::ffi::OsStr::to_owned) else {
+                break path;
+            };
+            missing.push(name);
+            ancestor.pop();
+        };
         if std::fs::metadata(&path).is_ok_and(|m| !m.is_dir()) {
             return Err(ProviderError::LocalUnavailable);
         }

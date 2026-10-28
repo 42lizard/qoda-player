@@ -54,6 +54,12 @@ impl Runtime<'_> {
         let _ = self.finish(snapshot, Trigger::Automatic).await?;
         Ok(())
     }
+    /// A configuration change always releases output, preserving the barrier's
+    /// historical nominal occurrence and clock before advancing the epoch.
+    pub async fn force_for_command(&mut self) -> Result<Option<String>, &'static str> {
+        let snapshot = self.player.barrier().await;
+        self.finish(snapshot, Trigger::Command).await
+    }
     /// Same completion entry for the coordinator and tests: classify unavailable
     /// media without resetting current output, and reset only staging failures.
     pub async fn prepared(&mut self, reply: gapless::Reply) -> Result<Preparation, &'static str> {
@@ -283,6 +289,30 @@ mod tests {
         assert_eq!(env.queue.visit(), visit);
         assert!(!env.playing);
         assert_eq!(env.gapless.view.phase, "review");
+        assert_eq!(reqwest::get(env.url).await.unwrap().status(), 404);
+    }
+    #[tokio::test]
+    async fn forced_configuration_reset_preserves_paused_clock_and_revokes_the_grant() {
+        let mut env = Environment::new().await;
+        let selected = env.queue.selected();
+        let visit = env.queue.visit();
+        env.player.send(player::Command::Pause(false));
+        wait(&env.player, |s| {
+            !s.paused && s.position_seconds.is_some_and(|p| p > 0.1)
+        })
+        .await;
+        env.player.send(player::Command::Pause(true));
+        wait(&env.player, |s| {
+            s.paused && s.position_seconds.is_some_and(|p| p > 0.1)
+        })
+        .await;
+        let position = env.player.status().position_seconds.unwrap();
+        assert!(env.runtime().force_for_command().await.unwrap().is_none());
+        assert_eq!(env.queue.selected(), selected);
+        assert_eq!(env.queue.visit(), visit);
+        assert!((env.queue.position() - position).abs() < 0.05);
+        assert!(!env.playing);
+        assert!(env.epochs.current > 1);
         assert_eq!(reqwest::get(env.url).await.unwrap().status(), 404);
     }
 }

@@ -294,3 +294,20 @@ async fn router_keeps_local_access_without_a_remote_account_and_does_not_transco
         Err(ProviderError::SignInRequired)
     ));
 }
+
+#[test]
+fn missing_root_normalization_and_symlink_ancestors_preserve_identity_after_appearance() {
+    let fixture = Fixture::new();
+    let target = fixture.0.join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&target, fixture.0.join("alias")).unwrap();
+    let before = Root::new(fixture.0.join("alias//new/./music/")).unwrap();
+    assert_eq!(before.path, target.join("new/music"));
+    std::fs::create_dir_all(&before.path).unwrap();
+    let after = Root::new(before.path.clone()).unwrap();
+    assert_eq!(before.id, after.id);
+    assert_eq!(
+        before.id,
+        Root::new(fixture.0.join("alias/new/music/")).unwrap().id
+    );
+}

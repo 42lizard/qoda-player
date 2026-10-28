@@ -124,7 +124,7 @@ ShellRoot {
     property string playlistJson: "[]"
     property string playlistEntriesJson: "[]"
     property var playlistView: snapshot.playlists ? snapshot.playlists.selected : null
-    readonly property bool playlistWritable: backend.connected && !!snapshot.sign_in && snapshot.sign_in.connected && !!playlistView && playlistView.playlist.can_edit && !playlistView.playlist.smart && !!snapshot.playlists && !snapshot.playlists.busy && !snapshot.playlists.uncertain
+    readonly property bool playlistWritable: !localSelected && backend.connected && !!snapshot.sign_in && snapshot.sign_in.connected && !!playlistView && playlistView.playlist.can_edit && !playlistView.playlist.smart && !!snapshot.playlists && !snapshot.playlists.busy && !snapshot.playlists.uncertain
     function playlistEdit(edit) {
         if (playlistView) send("playlist_edit", {reference: playlistView.playlist.reference, expected_revision: playlistView.revision, edit: edit});
     }
@@ -593,8 +593,8 @@ ShellRoot {
                     Label { text: root.snapshot.playlists ? I18n.message(root.snapshot.playlists.message) : I18n.t("Choose a library, then refresh."); color: root.snapshot.playlists && root.snapshot.playlists.uncertain ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
                     RowLayout {
                         Button { text: I18n.t("Refresh from Plex"); enabled: !root.localSelected && !!root.libraryId && !!root.snapshot.playlists && !root.snapshot.playlists.busy; onClicked: root.refreshPlaylists() }
-                        Button { text: I18n.t("Previous lists"); enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.offset !== "0" && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, -100)}) }
-                        Button { text: I18n.t("More lists"); enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.has_more && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, 100)}) }
+                        Button { text: I18n.t("Previous lists"); enabled: !root.localSelected && !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.offset !== "0" && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, -100)}) }
+                        Button { text: I18n.t("More lists"); enabled: !root.localSelected && !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.has_more && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, 100)}) }
                     }
                     ComboBox {
                         id: savedLists
@@ -615,7 +615,7 @@ ShellRoot {
                     }
                     RowLayout {
                         TextField { id: playlistName; placeholderText: I18n.t("New playlist title / rename to…"); maximumLength: 512; Layout.fillWidth: true }
-                        Button { text: I18n.t("Create from selected track"); enabled: !root.localSelected && !!root.libraryId && !!root.playlistSeed && playlistName.text.trim().length > 0 && !!root.snapshot.playlists && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.send("playlist_create", {source: root.libraryId, title: playlistName.text, seed: root.playlistSeed.reference}) }
+                        Button { text: I18n.t("Create from selected track"); enabled: !root.localSelected && !!root.libraryId && !!root.playlistSeed && root.playlistSeed.reference.source === root.libraryId && playlistName.text.trim().length > 0 && !!root.snapshot.playlists && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.send("playlist_create", {source: root.libraryId, title: playlistName.text, seed: root.playlistSeed.reference}) }
                     }
                     Label { visible: !!root.playlistSeed; text: root.playlistSeed ? I18n.t("New playlist starts with: %1", [root.playlistSeed.title]) : I18n.t("Select a track in Library to create a playlist."); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: root.playlistView ? root.playlistView.playlist.title + (root.playlistView.playlist.can_edit && !root.playlistView.playlist.smart ? I18n.t(" · Edits are saved to Plex") : I18n.t(" · Read-only")) : I18n.t("Open a playlist"); color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }

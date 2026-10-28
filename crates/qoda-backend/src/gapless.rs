@@ -623,13 +623,17 @@ pub(crate) mod tests {
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_http_handoff_commits_the_bound_occurrence_once_without_a_replacement_load() {
-        native_observation_handoff(false).await;
+        native_observation_handoff(false, false).await;
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_precommand_handoff_uses_the_same_observation_owner() {
-        native_observation_handoff(true).await;
+        native_observation_handoff(true, false).await;
     }
-    async fn native_observation_handoff(before_command: bool) {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_configuration_reset_preserves_an_unobserved_successor_handoff() {
+        native_observation_handoff(false, true).await;
+    }
+    async fn native_observation_handoff(before_command: bool, configuration_reset: bool) {
         let provider = Provider::new();
         let mut q = provider.queue();
         let first = q.selected().unwrap();
@@ -693,6 +697,27 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(controller.view.phase, "staged");
         wait(&player, |s| s.handoff_from == Some(1)).await;
+        if configuration_reset {
+            let problem = crate::buffered_reset::Runtime {
+                queue: &mut q,
+                player: &player,
+                gapless: &mut controller,
+                epochs: &mut epochs,
+                proxy: &proxy,
+                confirmed: &mut presented,
+                playing: &mut playing,
+            }
+            .force_for_command()
+            .await
+            .unwrap();
+            assert!(problem.is_none());
+            assert_eq!(q.selected(), Some(next));
+            assert_eq!(epochs.current, 3);
+            assert!(!playing);
+            assert_eq!(reqwest::get(first_url).await.unwrap().status(), 404);
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+            return;
+        }
         let mut runtime = crate::observation::Runtime {
             queue: &mut q,
             player: &player,
