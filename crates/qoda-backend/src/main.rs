@@ -11,6 +11,7 @@ mod catalog;
 mod continuous;
 mod gain;
 mod gapless;
+mod local_files;
 mod maintenance;
 mod metadata_cache;
 mod mpris;
@@ -67,6 +68,8 @@ impl std::fmt::Display for ConnectError {
     }
 }
 enum Event {
+    LocalTick,
+    Local(local_files::Reply),
     Unsupported(u64, bool),
     Request(Value),
     Desktop(mpris::Request),
@@ -414,6 +417,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         identities_path(),
         Arc::new(account::Plex),
     );
+    let mut local = local_files::Controller::discover();
+    access.set_local(local.provider());
+    state["local_files"] = local.view();
+    local.scan(false, tx.clone());
+    let mut local_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     let mut maintenance = maintenance::Controller::default();
     let permits = Arc::new(tokio::sync::Semaphore::new(16));
     let server_tx = tx.clone();
@@ -447,6 +455,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut audio_tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut observations = observation::Controller::default();
     let mut reporting = reporting::Controller::new();
+    access.publish(&mut state, &mut reporting);
     state["reporting"] = reporting.view();
     let mut checkpoint_tick = tokio::time::interval(std::time::Duration::from_secs(5));
     checkpoint_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -508,6 +517,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if let Some(event)=tick.event {event} else if tick.checkpoint {Event::Checkpoint} else {continue}
             },
+            _ = local_tick.tick()=>Event::LocalTick,
             _ = checkpoint_tick.tick()=>Event::Checkpoint,
             _ = interrupts.recv() => break,
         };
@@ -627,6 +637,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut force_save = command_effects.force_save;
         let seeked = command_effects.seeked;
         match event {
+            Event::LocalTick => {
+                local.scan(false, tx.clone());
+            }
+            Event::Local(reply) => {
+                if local.complete(reply) {
+                    let sources = local.provider().roots().iter().map(|r| r.id).collect();
+                    catalog.invalidate_sources(&sources)?;
+                    albums.invalidate_sources(&sources);
+                    search.invalidate()?;
+                }
+            }
             Event::Search(reply) => {
                 search.accept(reply, access.generation())?;
             }
@@ -846,6 +867,57 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     "retry_save" => force_save = true,
+                    "set_local_folders" => {
+                        if v["account_epoch"].as_str()
+                            != Some(access.generation().to_string().as_str())
+                        {
+                            state["error"] =
+                                json!("The account changed. Review local folders before retrying.");
+                        } else {
+                            let mut affected: HashSet<_> =
+                                local.provider().roots().iter().map(|r| r.id).collect();
+                            let paths = serde_json::from_value::<Vec<PathBuf>>(v["paths"].clone());
+                            match check_queue(&queue, &v)
+                                .map_err(
+                                    |_| "The queue changed. Review its current order and retry.",
+                                )
+                                .and_then(|_| {
+                                    paths.map_err(|_| "Enter an array of local folder paths.")
+                                })
+                                .and_then(|paths| local.set(paths))
+                            {
+                                Ok(()) => {
+                                    preparation.cancel();
+                                    reporting.request_stop();
+                                    if let Err(error) = player.barrier().await {
+                                        player.send(player::Command::Pause(true));
+                                        state["error"] = json!(error);
+                                    }
+                                    gapless.invalidate();
+                                    epochs.reset()?;
+                                    player.invalidate_load(epochs.current);
+                                    proxy.revoke().await;
+                                    desired_playing = false;
+                                    presented_generation = None;
+                                    affected.extend(local.provider().roots().iter().map(|r| r.id));
+                                    catalog.invalidate_sources(&affected)?;
+                                    albums.invalidate_sources(&affected);
+                                    search.invalidate()?;
+                                    access.set_local(local.provider());
+                                    state["intent"] = json!("paused");
+                                    state["status"] = json!(
+                                        "Local folders updated. Playback stays paused; music files were not changed."
+                                    );
+                                    local.scan(false, tx.clone());
+                                }
+                                Err(error) => state["error"] = json!(error),
+                            }
+                        }
+                    }
+                    "rescan_local_folders" => {
+                        local.scan(true, tx.clone());
+                    }
+
                     "clear_artwork_cache"
                     | "set_artwork_budget"
                     | "clear_metadata_cache"
@@ -1188,6 +1260,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         state["albums"] = json!(albums.view);
         state["artwork_cache"] = artwork.view().await;
         state["metadata_cache"] = json!(metadata.view());
+        state["local_files"] = local.view();
         access.publish(&mut state, &mut reporting);
         reporting.fence_generation(epochs.current);
         state["reporting"] = reporting.view();

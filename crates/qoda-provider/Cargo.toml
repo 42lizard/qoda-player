@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 tokio.workspace = true
+libc.workspace = true
 qoda-core = { path = "../qoda-core" }
 serde.workspace = true
 serde_json.workspace = true

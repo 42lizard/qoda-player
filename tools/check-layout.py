@@ -48,6 +48,19 @@ HOOKS = """
         function capture(path: string): void { captureDone = ""; fullFrame.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function captureSettings(path: string): void { captureDone = ""; settingsSheet.contentItem.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function settingsGeometry(): string { function walk(item) { return {type: String(item), x:item.x,y:item.y,w:item.width,h:item.height,ih:item.implicitHeight,visible:item.visible,children:(item.children || []).map(walk)}; } return JSON.stringify(walk(settingsSheet.contentItem)); }
+        function localFixture(): void {
+            guideSnapshot = root.snapshot;
+            const next = Object.assign({}, root.snapshot);
+            next.sign_in = Object.assign({}, next.sign_in, {connected: false, saved: "absent"});
+            next.playback_available = true;
+            next.local_files = {available: true, phase: "ready", revision: "1", defaulted: true,
+                message: "Local folders ready.", paths: ["/home/listener/Music", "/mnt/albums/Collection"],
+                folders: [{path: "/home/listener/Music", tracks: "1240", message: ""},
+                    {path: "/mnt/albums/Collection", tracks: "980", message: ""}]};
+            next.libraries = [{id: "fixture", title: "Music", server: "Local files", kind: "local", playlists: false}];
+            root.snapshot = next; root.libraryModel = next.libraries; root.libraryId = "fixture";
+            root.showSettings("folders");
+        }
         function showArchive(): void { root.showSettings("history"); }
         function closeSettings(): void { root.closeSettings(); }
         function captureQueue(path: string): void { captureDone = ""; queuePane.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
@@ -307,6 +320,20 @@ def check(output=None, theme_check=False, guide=False):
                                 assert child["w"] <= item["w"] + 1, (item, child)
                             assert_bounds(child)
                 assert_bounds(settings_geometry)
+                ipc("localFixture")
+                time.sleep(0.15)
+                capture("folders-small", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("resize", 340, 640)
+                time.sleep(0.15)
+                capture("folders-narrow", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("resize", 1320, 820)
+                time.sleep(0.15)
+                capture("folders-wide", settings=True)
+                assert_bounds(json.loads(ipc("settingsGeometry")))
+                ipc("restoreGuideFixture")
+                ipc("resize", 540, 760)
                 ipc("showAccount")
                 time.sleep(0.15)
                 capture("account-small", settings=True)

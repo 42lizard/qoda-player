@@ -15,7 +15,7 @@ ColumnLayout {
     spacing: 5
     function dismiss() { if (combo && combo.popup) combo.popup.close(); }
     function title(library) { return library && library.title.trim() ? library.title.trim() : I18n.t("Untitled library"); }
-    function server(library) { return library && library.server && library.server.trim() ? library.server.trim() : I18n.t("Unknown server"); }
+    function server(library) { if (library && library.kind === "local") return I18n.t("Local files"); return library && library.server && library.server.trim() ? library.server.trim() : I18n.t("Unknown server"); }
     function suffix(library) {
         if (!library) return "";
         const peers = libraries.filter(other => title(other) === title(library) && server(other) === server(library) && other.id !== library.id);

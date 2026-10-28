@@ -1317,6 +1317,17 @@ impl Cache {
             emit(Err(ProviderError::UnknownSource), Info::default()).await;
             return;
         }
+        if !provider.cache_catalog(query.source()) {
+            let result = query.fetch(provider.as_ref()).await.and_then(|page| {
+                if page.metadata_only().valid(&query) {
+                    Ok(page)
+                } else {
+                    Err(ProviderError::InvalidReply)
+                }
+            });
+            emit(result, Info::default()).await;
+            return;
+        }
         let detail = matches!(&query, Query::AlbumDetail { .. });
         let provenance = |stale, refreshing| {
             if detail {

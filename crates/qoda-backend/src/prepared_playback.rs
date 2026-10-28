@@ -1441,4 +1441,69 @@ mod tests {
         env.proxy.revoke().await;
         std::fs::remove_dir_all(root).unwrap();
     }
+    #[tokio::test]
+    async fn local_library_uses_prepared_playback_and_native_output_without_plex() {
+        use qoda_provider::local::{Local, Root};
+        let root = std::env::temp_dir().join(format!("qoda-local-native-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("local.wav");
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=48000:cl=stereo",
+                    "-t",
+                    "4"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let folder = Root::new(root.clone()).unwrap();
+        let provider = Arc::new(Local::new(vec![folder.clone()]));
+        provider.scan().await.unwrap();
+        let track = provider
+            .tracks(folder.id, 0, String::new())
+            .await
+            .unwrap()
+            .tracks
+            .remove(0);
+        let (mut env, _) = Environment::new(vec![]).await;
+        env.queue = queue::Queue::default();
+        env.queue.replace(track.clone()).unwrap();
+        env.playing = false;
+        let mut owner = Controller::default();
+        let (tx, mut rx) = mpsc::channel(8);
+        owner
+            .start(track, false, Some(provider), tx, &mut env.runtime())
+            .await
+            .unwrap();
+        let (g, reply) = media(&mut rx).await;
+        owner.complete(g, reply, &mut env.runtime()).await;
+        env.loaded().await;
+        let audio = env.player.status();
+        assert!(audio.error.is_none(), "{audio:?}");
+        assert!(audio.paused);
+        assert!(!audio.transcoded);
+        assert_eq!(env.queue.selected_version().unwrap().len(), 64);
+        env.command(&mut owner, "resume").await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let audio = env.player.status();
+            if audio.position_seconds.is_some_and(|s| s > 0.05) {
+                break;
+            }
+            assert!(audio.error.is_none(), "{audio:?}");
+            assert!(tokio::time::Instant::now() < deadline, "{audio:?}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        env.player.barrier().await.unwrap();
+        env.proxy.revoke().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

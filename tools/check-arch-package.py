@@ -69,7 +69,7 @@ def check(archive):
         for suffix in ['bin/qoda','share/applications/qoda-player.desktop','lib/systemd/user/qoda-packaged-backend.service','lib/qoda-player/entry.py','share/doc/qoda-player/docs/user-guide.md']:
             assert '/usr/'+suffix in listing,suffix
         metadata=run('bsdtar','-xOf',archive,'.PKGINFO')
-        for dependency in ['python','mpv','quickshell','alsa-lib','sqlite']:
+        for dependency in ['python','ffmpeg','mpv','quickshell','alsa-lib','sqlite']:
             assert 'depend = '+dependency+'\n' in metadata
         sentinel=root/'home/demo/.local/state/qoda/sentinel';sentinel.parent.mkdir(parents=True);sentinel.write_text('retained user data')
         pacman=['pacman','--root',root,'--dbpath',database,'--logfile',base/'pacman.log','--config',config,'--hookdir',hooks,'--noconfirm','--noscriptlet']
@@ -87,7 +87,7 @@ def check(archive):
         # Start the actual packaged backend with an empty private profile. No UI,
         # audio stream, session bus, credential, network source or user data.
         runtime=base/'runtime';runtime.mkdir(mode=0o700)
-        env=dict(os.environ, XDG_RUNTIME_DIR=str(runtime), XDG_CONFIG_HOME=str(base/'config'),XDG_STATE_HOME=str(base/'state'),XDG_CACHE_HOME=str(base/'cache'),XDG_DATA_HOME=str(base/'data'),DBUS_SESSION_BUS_ADDRESS='unix:path='+str(base/'absent-bus'),WAYLAND_DISPLAY='')
+        env=dict(os.environ, HOME=str(base/'home'), XDG_RUNTIME_DIR=str(runtime), XDG_CONFIG_HOME=str(base/'config'),XDG_STATE_HOME=str(base/'state'),XDG_CACHE_HOME=str(base/'cache'),XDG_DATA_HOME=str(base/'data'),DBUS_SESSION_BUS_ADDRESS='unix:path='+str(base/'absent-bus'),WAYLAND_DISPLAY='')
         observe_backend(['python3',str(root/'usr/lib/qoda-player/entry.py'),'run-backend'],env,base)
         # A user namespace used for local verification maps only UID 0. CI's
         # container has a full UID map and must exercise root-owned activation

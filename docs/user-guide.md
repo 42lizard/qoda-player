@@ -1,7 +1,7 @@
 # Qoda Player user guide
 
 Qoda is a music player for an Arch/Omarchy Wayland desktop. It browses your Plex
-music libraries and keeps its playback queue locally. Opening the player or
+libraries and local music folders, and keeps its playback queue locally. Opening the player or
 restoring a saved session does not start music: choose **Play** or **Resume**.
 
 All screenshots below show fictional music and accounts. The compact image uses
@@ -11,6 +11,7 @@ by your desktop. Colors follow your Omarchy theme when available.
 ## Contents
 
 - [Install, update and remove](#install-update-and-remove)
+- [Local music folders](#local-music-folders)
 - [Connect Plex](#connect-plex)
 - [Browse and search](#browse-and-search)
 - [Play music and manage the queue](#play-music-and-manage-the-queue)
@@ -38,7 +39,7 @@ by your desktop. Colors follow your Omarchy theme when available.
    /usr/bin/qoda show
    ```
 
-Pacman installs the runtime dependencies, including Quickshell, Qt, mpv and the
+Pacman installs the runtime dependencies, including Quickshell, Qt, mpv, FFmpeg and the
 icon font. You do not need Rust, Cargo or a checkout to run the package.
 `COMMIT` records its source revision. Artifacts are retained for 30 days; main
 pushes, pull requests and manual workflow runs build packages after checks pass.
@@ -95,6 +96,23 @@ systemctl --user daemon-reload
 Removal retains preferences, queue/history, cache and keyring sign-in. To forget
 credentials or clear caches, use the corresponding player controls before removal.
 Removing the application does not delete Plex music.
+
+## Local music folders
+
+No Plex account is needed for local music. Open **Menu → Local music folders**,
+enter absolute paths, choose **Add folder**, then **Apply folders**. The initial
+default follows your XDG music directory, or `~/Music` when unset. Remove every
+row and apply to disable local music. Applying changes pauses playback; removing
+a folder never deletes music.
+
+![Local music folders with fictional paths](assets/user-guide/local-folders.png)
+
+Select a **Local files** library to browse or search its tracks, artists and
+albums, then use the normal queue and playback controls. Folders are checked
+recursively every five seconds; **Rescan now** retries metadata immediately.
+Missing drives stay configured. Local saved playlists and extracted covers are
+not available. See [local music folders](local-music.md) for watch limits,
+format handling, changed-file behavior and settings storage.
 
 ## Connect Plex
 

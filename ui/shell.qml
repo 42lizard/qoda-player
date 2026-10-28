@@ -39,7 +39,10 @@ ShellRoot {
     property var snapshot: ({albums: {page: null, selected: null, busy: false, message: I18n.t("Choose a library to browse albums.")}, libraries: [], status: I18n.t("Connecting backend"), intent: "paused", playlists: {list: null, selected: null, busy: false, uncertain: false, message: ""}})
     property var libraryModel: []
     property var trackModel: []
-    readonly property bool trackPageReady: (!snapshot.catalog || !snapshot.catalog.cache || snapshot.catalog.cache.origin !== "offline") && backend.connected && !!snapshot.page && !!snapshot.catalog && !snapshot.catalog.busy && snapshot.page.source === libraryId && snapshot.page.query === trackQuery && !!snapshot.sign_in && snapshot.sign_in.connected
+    readonly property bool playbackAvailable: snapshot.playback_available !== undefined ? snapshot.playback_available : !!snapshot.sign_in && snapshot.sign_in.connected
+    readonly property bool localSelected: libraryModel.some(library => library.id === libraryId && library.kind === "local")
+    property string localRevision: ""
+    readonly property bool trackPageReady: (!snapshot.catalog || !snapshot.catalog.cache || snapshot.catalog.cache.origin !== "offline") && backend.connected && !!snapshot.page && !!snapshot.catalog && !snapshot.catalog.busy && snapshot.page.source === libraryId && snapshot.page.query === trackQuery && playbackAvailable
     onTrackPageReadyChanged: if (!trackPageReady) trackSelection.clear()
     TrackSelection {
         id: trackSelection
@@ -131,7 +134,7 @@ ShellRoot {
         if (item) fields.item_id = item;
         editQueue(op, fields);
     }
-    function refreshPlaylists() { if (libraryId) send("playlist_refresh", {source: libraryId}); }
+    function refreshPlaylists() { if (libraryId && !localSelected) send("playlist_refresh", {source: libraryId}); }
 
     property string libraryId: ""
     property string instance: ""
@@ -178,6 +181,8 @@ ShellRoot {
         role: "shell"
         onReset: { uiRequests.reset(); root.instance = ""; }
         onReceived: next => {
+            const previousAccount = root.snapshot.account_epoch;
+            const previousTrackOffset = root.snapshot.page ? root.snapshot.page.offset : "0";
             if (!root.instance && next.albums && next.albums.page) {
                 root.libraryId = next.albums.page.source;
                 root.albumQuery = next.albums.page.query;
@@ -198,8 +203,21 @@ ShellRoot {
             root.snapshot = next;
             if (raised) root.showSurface(root.lastForm, true);
             if (quitState.observe(next)) return;
+            const previousLocalRevision = root.localRevision;
+            root.localRevision = next.local_files ? next.local_files.revision : "";
             let libraries = JSON.stringify(next.libraries || []);
             if (libraries !== root.libraryJson) { root.libraryJson = libraries; root.libraryModel = next.libraries || []; }
+            if (root.libraryId && !root.libraryModel.some(library => library.id === root.libraryId)) root.libraryId = "";
+            if (previousLocalRevision && previousLocalRevision !== root.localRevision || previousAccount !== undefined && previousAccount !== next.account_epoch) {
+                Qt.callLater(() => {
+                    if (libraryTabs.currentIndex === 4 && root.globalQuery.trim()) root.searchCatalog();
+                    else if (root.localSelected) {
+                        if (libraryTabs.currentIndex === 0) root.browse(previousTrackOffset);
+                        else if (libraryTabs.currentIndex === 2) root.allAlbums();
+                        else if (libraryTabs.currentIndex === 3) root.browseArtists("0");
+                    }
+                });
+            }
             let tracks = JSON.stringify(next.page ? next.page.tracks : []);
             if (tracks !== root.trackJson) { root.trackJson = tracks; root.trackModel = next.page ? next.page.tracks : []; }
             let queue = JSON.stringify(next.queue ? next.queue.entries : []);
@@ -238,6 +256,16 @@ ShellRoot {
                 if (!settingsSheet.visible && root.form === "full" && window.visible) root.closeSettings();
                 root.tryFocusSearch();
             })
+            LocalFolders {
+                width: parent.width
+                visible: root.settingsSection === "folders"
+                Layout.fillWidth: true
+                snapshot: root.snapshot.local_files || null
+                connected: backend.connected
+                problem: root.snapshot.error || ""
+                onApplyRequested: paths => root.editQueue("set_local_folders", {paths: paths})
+                onRescanRequested: root.send("rescan_local_folders")
+            }
             Flow {
                 width: parent.width
                 spacing: 6
@@ -350,6 +378,7 @@ ShellRoot {
                     id: playerMenu
                     Shortcut { sequence: "Ctrl+K"; enabled: playerMenu.visible; onActivated: root.focusSearch() }
                     onClosed: Qt.callLater(root.tryFocusSearch)
+                    MenuItem { text: I18n.t("Local music folders"); onTriggered: root.showSettings("folders") }
                     MenuItem { text: I18n.t("Account"); onTriggered: root.showSettings("account") }
                     MenuItem { text: I18n.t("Audio settings"); onTriggered: root.showSettings("audio") }
                     MenuItem { text: I18n.t("Cache settings"); onTriggered: root.showSettings("cache") }
@@ -383,7 +412,7 @@ ShellRoot {
                 snapshot: root.snapshot.recovery || null
                 queue: root.snapshot.queue || null
                 connected: backend.connected
-                canRetry: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
+                canRetry: root.playbackAvailable
                 onActionRequested: (op, fields) => root.send(op, fields)
             }
             Label { visible: !backend.connected || !root.snapshot.sign_in || !root.snapshot.sign_in.connected || !!root.snapshot.error; text: backend.connected ? I18n.message(root.snapshot.status) : I18n.t("Backend disconnected — reconnecting"); color: Theme.muted; textFormat: Text.PlainText; Layout.fillWidth: true; elide: Text.ElideRight }
@@ -484,7 +513,7 @@ ShellRoot {
                     visible: libraryTabs.currentIndex === 2
                     Layout.fillWidth: true; Layout.fillHeight: true
                     snapshot: root.snapshot.albums || null
-                    connected: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
+                    connected: root.playbackAvailable
                     artworkEnabled: window.visible && backend.connected
                     onOpenArtist: reference => root.openArtist(reference)
                     onAllAlbums: root.allAlbums()
@@ -495,11 +524,12 @@ ShellRoot {
                 }
                 SearchBrowser {
                     id: globalSearch
+                    libraries: root.libraryModel
                     visible: libraryTabs.currentIndex === 4
                     Layout.fillWidth: true; Layout.fillHeight: true
                     snapshot: root.snapshot.search || null
                     query: root.globalQuery
-                    connected: backend.connected && !!root.snapshot.sign_in && root.snapshot.sign_in.connected
+                    connected: backend.connected && root.playbackAvailable
                     onActionRequested: (op, fields) => root.editQueue(op, fields)
                 }
                 ArtistBrowser {
@@ -559,10 +589,10 @@ ShellRoot {
                     visible: libraryTabs.currentIndex === 1
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Label { text: I18n.t("Audio playlists on the selected library's server"); color: Theme.foreground; font.bold: true }
+                    Label { text: root.localSelected ? I18n.t("Local folders support playback and the queue. Saved playlists are managed on Plex.") : I18n.t("Audio playlists on the selected library's server"); color: Theme.foreground; font.bold: true }
                     Label { text: root.snapshot.playlists ? I18n.message(root.snapshot.playlists.message) : I18n.t("Choose a library, then refresh."); color: root.snapshot.playlists && root.snapshot.playlists.uncertain ? Theme.danger : Theme.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
                     RowLayout {
-                        Button { text: I18n.t("Refresh from Plex"); enabled: !!root.libraryId && !!root.snapshot.playlists && !root.snapshot.playlists.busy; onClicked: root.refreshPlaylists() }
+                        Button { text: I18n.t("Refresh from Plex"); enabled: !root.localSelected && !!root.libraryId && !!root.snapshot.playlists && !root.snapshot.playlists.busy; onClicked: root.refreshPlaylists() }
                         Button { text: I18n.t("Previous lists"); enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.offset !== "0" && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, -100)}) }
                         Button { text: I18n.t("More lists"); enabled: !!root.snapshot.playlists && !!root.snapshot.playlists.list && root.snapshot.playlists.list.has_more && !root.snapshot.playlists.busy; onClicked: root.send("playlist_list", {source: root.libraryId, offset: root.pageOffset(root.snapshot.playlists.list.offset, 100)}) }
                     }
@@ -585,7 +615,7 @@ ShellRoot {
                     }
                     RowLayout {
                         TextField { id: playlistName; placeholderText: I18n.t("New playlist title / rename to…"); maximumLength: 512; Layout.fillWidth: true }
-                        Button { text: I18n.t("Create from selected track"); enabled: !!root.libraryId && !!root.playlistSeed && playlistName.text.trim().length > 0 && !!root.snapshot.playlists && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.send("playlist_create", {source: root.libraryId, title: playlistName.text, seed: root.playlistSeed.reference}) }
+                        Button { text: I18n.t("Create from selected track"); enabled: !root.localSelected && !!root.libraryId && !!root.playlistSeed && playlistName.text.trim().length > 0 && !!root.snapshot.playlists && !root.snapshot.playlists.busy && !root.snapshot.playlists.uncertain; onClicked: root.send("playlist_create", {source: root.libraryId, title: playlistName.text, seed: root.playlistSeed.reference}) }
                     }
                     Label { visible: !!root.playlistSeed; text: root.playlistSeed ? I18n.t("New playlist starts with: %1", [root.playlistSeed.title]) : I18n.t("Select a track in Library to create a playlist."); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: root.playlistView ? root.playlistView.playlist.title + (root.playlistView.playlist.can_edit && !root.playlistView.playlist.smart ? I18n.t(" · Edits are saved to Plex") : I18n.t(" · Read-only")) : I18n.t("Open a playlist"); color: Theme.foreground; font.bold: true; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
@@ -707,7 +737,7 @@ ShellRoot {
                                 Label { text: modelData.track.artist + (modelData.track.album ? " · " + modelData.track.album : ""); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                                 Label { visible: !!modelData.unavailable; text: modelData.unavailable ? I18n.t("Unavailable: %1", [I18n.state(modelData.unavailable)]) : ""; color: Theme.danger; textFormat: Text.PlainText; Layout.fillWidth: true }
                                 RowLayout {
-                                    Button { text: modelData.unavailable ? I18n.t("Retry") : I18n.t("Play"); enabled: !!root.snapshot.sign_in && root.snapshot.sign_in.connected; onClicked: root.editQueue("queue_play", {occurrence: modelData.id}) }
+                                    Button { text: modelData.unavailable ? I18n.t("Retry") : I18n.t("Play"); enabled: root.playbackAvailable; onClicked: root.editQueue("queue_play", {occurrence: modelData.id}) }
                                     Button { text: "↑"; implicitWidth: 32; leftPadding: 6; rightPadding: 6; enabled: modelData.can_move && index > 0 && root.queueModel[index - 1].can_move; onClicked: root.moveEntry(index, -1) }
                                     Button { text: "↓"; implicitWidth: 32; leftPadding: 6; rightPadding: 6; enabled: modelData.can_move && index + 1 < root.queueModel.length && root.queueModel[index + 1].can_move; onClicked: root.moveEntry(index, 1) }
                                     Button { text: I18n.t("Remove"); onClicked: root.editQueue("queue_remove", {occurrence: modelData.id}) }
@@ -731,7 +761,7 @@ ShellRoot {
                         Layout.fillWidth: true; Layout.fillHeight: true
                         snapshot: root.snapshot.queue || null
                         connected: backend.connected
-                        canRetry: !!root.snapshot.sign_in && root.snapshot.sign_in.connected
+                        canRetry: root.playbackAvailable
                         onActionRequested: (op, fields) => root.send(op, fields)
                     }
                     RowLayout {

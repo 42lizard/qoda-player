@@ -226,3 +226,32 @@ async fn cached_live_refresh_retains_identical_selection_and_rejects_changed_or_
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[tokio::test]
+async fn local_scan_invalidation_preserves_other_sources_and_fences_pending_local_reads() {
+    let page = page();
+    let mut catalog = Controller::new(Cache::default());
+    let (tx, mut rx) = mpsc::channel(8);
+    catalog
+        .begin(
+            &browse(&page),
+            Arc::new(Provider(page.clone())).into(),
+            tx.clone(),
+        )
+        .unwrap();
+    let pending = reply(&mut rx).await;
+    catalog
+        .invalidate_sources(&HashSet::from([SourceId::new()]))
+        .unwrap();
+    assert!(catalog.accept(pending, &mut json!({})).unwrap());
+    assert_eq!(catalog.page.as_ref().unwrap().source, page.source);
+    catalog
+        .begin(&browse(&page), Arc::new(Provider(page.clone())).into(), tx)
+        .unwrap();
+    let pending = reply(&mut rx).await;
+    catalog
+        .invalidate_sources(&HashSet::from([page.source]))
+        .unwrap();
+    assert!(!catalog.accept(pending, &mut json!({})).unwrap());
+    assert!(catalog.page.is_none() && !catalog.busy);
+}

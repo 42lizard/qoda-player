@@ -6,7 +6,7 @@ pkgdesc='Plex music player with a Quickshell interface and Rust/libmpv backend'
 arch=('x86_64')
 url='https://github.com/42lizard/qoda-player'
 license=('MIT')
-depends=('python' 'mpv' 'alsa-lib' 'sqlite' 'quickshell' 'qt6-declarative' 'qt6-svg' 'systemd' 'ttf-jetbrains-mono-nerd')
+depends=('python' 'ffmpeg' 'mpv' 'alsa-lib' 'sqlite' 'quickshell' 'qt6-declarative' 'qt6-svg' 'systemd' 'ttf-jetbrains-mono-nerd')
 makedepends=('rust' 'cargo' 'pkgconf' 'git')
 optdepends=('libsecret: save and restore Plex sign-in using Secret Service'
             'brave: open the Plex sign-in link directly from the player')

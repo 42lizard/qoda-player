@@ -1,8 +1,8 @@
 # Qoda Player
 
-**[User guide: installation, Plex setup and everyday use](docs/user-guide.md)**
+**[User guide: installation, local folders, Plex setup and everyday use](docs/user-guide.md)**
 
-A standalone music player in development for Omarchy, built with Quickshell/QML and mpv/libmpv. Plex is the first music provider; additional providers may follow.
+A standalone music player in development for Omarchy, built with Quickshell/QML and mpv/libmpv. Plex and read-only local music folders are supported music providers.
 
 ## Status
 
@@ -20,6 +20,8 @@ The Tracks tab supports checkboxes, Ctrl/Shift selection and atomic Play/Play ne
 
 [Confirmed Plex timeline reporting](docs/plex-reporting.md) is enabled after scoped owned-server validation of pause/resume/stop and duplicate handoff. It uses a bounded observer, account/source/render fences and cached capability discovery. Preparing a track never counts as playback; played-state/history synchronization is not claimed.
 
+Local music works without Plex sign-in. Configure one or more folders under **Menu → Local music folders**; the initial default follows the XDG music directory. Recursive watching, metadata browsing/search and native playback are described in [local music folders](docs/local-music.md). Local saved playlists and cover extraction remain unavailable.
+
 ## Agreed first-release scope
 
 - Full library browser, search, compact now-playing panel, playback, playlist editing, and queue management.
@@ -29,7 +31,7 @@ The Tracks tab supports checkboxes, Ctrl/Shift selection and atomic Play/Play ne
 - Server-connected playback, with local metadata and artwork caching; offline music downloads come later.
 - Desktop audio coexistence and a dedicated fidelity mode targeting unchanged decoded samples except for optional ReplayGain. Gapless playback and the precise output guarantees require investigation.
 - Playback continues while the interface is hidden. Keyboard navigation, desktop media controls, and an Omarchy launch/toggle shortcut are included.
-- A capability-aware music-provider boundary, checked against a hypothetical second provider; only Plex is implemented initially.
+- A capability-aware music-provider boundary, implemented by Plex and read-only local folder libraries.
 
 The player will use a modular music-provider layer for authentication, catalog metadata, and API access. Local storage is a separate responsibility. See [GLOSSARY.md](GLOSSARY.md) for the agreed language.
 

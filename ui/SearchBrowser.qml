@@ -9,6 +9,11 @@ ColumnLayout {
     required property bool connected
     property var rows: []
     property var sources: []
+    property var libraries: []
+    function serverName(row) {
+        const source = row.id || (row.track ? row.track.reference.source : "");
+        return libraries.some(l => l.id === source && l.kind === "local") ? I18n.t("Local files") : row.server;
+    }
     property string rowsJson: "[]"
     property string sourcesJson: "[]"
     readonly property bool currentQuery: !!snapshot && snapshot.query === query.trim()
@@ -39,7 +44,7 @@ ColumnLayout {
             delegate: Label {
                 required property var modelData
                 width: ListView.view.width
-                text: modelData.library + " · " + modelData.server + " · " + I18n.state(modelData.phase) + (modelData.has_more ? I18n.t(" · more matches available") : "") + (I18n.message(modelData.error) ? " · " + I18n.message(modelData.error) : "") + (modelData.cache && modelData.cache.origin && modelData.cache.origin !== "live" ? I18n.t(" · cached metadata") : "") + (modelData.cache && modelData.cache.stale ? I18n.t(" · stale") : "") + (modelData.cache && modelData.cache.incomplete ? I18n.t(" · incomplete") : "")
+                text: modelData.library + " · " + browser.serverName(modelData) + " · " + I18n.state(modelData.phase) + (modelData.has_more ? I18n.t(" · more matches available") : "") + (I18n.message(modelData.error) ? " · " + I18n.message(modelData.error) : "") + (modelData.cache && modelData.cache.origin && modelData.cache.origin !== "live" ? I18n.t(" · cached metadata") : "") + (modelData.cache && modelData.cache.stale ? I18n.t(" · stale") : "") + (modelData.cache && modelData.cache.incomplete ? I18n.t(" · incomplete") : "")
                 color: ["failed", "timeout"].includes(modelData.phase) ? Theme.danger : Theme.muted
                 textFormat: Text.PlainText; wrapMode: Text.Wrap
             }
@@ -64,7 +69,7 @@ ColumnLayout {
                     Layout.fillWidth: true; spacing: 4
                     Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: modelData.track.artist + " · " + modelData.track.album; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                    Label { text: modelData.library + " · " + modelData.server + (modelData.actionable ? "" : I18n.t(" · awaiting fresh library data")); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.library + " · " + browser.serverName(modelData) + (modelData.actionable ? "" : I18n.t(" · awaiting fresh library data")); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
                 RowLayout {
                     Layout.alignment: resultRow.width >= 640 ? Qt.AlignRight : Qt.AlignLeft

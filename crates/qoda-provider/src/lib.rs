@@ -1,7 +1,9 @@
 //! Provider metadata and media access. Credentials and upstream URLs never enter UI DTOs.
 pub mod artwork;
+pub mod local;
 pub mod playback;
 mod plex;
+pub mod router;
 use bytes::Bytes;
 use futures_util::stream::BoxStream;
 pub use plex::{BrowserPin, Credential, PlexProvider};
@@ -161,6 +163,10 @@ pub enum PlaylistOutcome {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderError {
+    LocalProbeUnavailable,
+    LocalLimit,
+    LocalChanged,
+    LocalUnavailable,
     Network,
     SignInRequired,
     AccessDenied,
@@ -181,6 +187,10 @@ pub enum ProviderError {
 impl std::fmt::Display for ProviderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::LocalProbeUnavailable => "Local metadata probing is unavailable. Install ffmpeg and rescan the folders.",
+            Self::LocalLimit => "This local album exceeds the supported 500-track snapshot limit.",
+            Self::LocalChanged => "Local file changed. Select it again to accept the new version.",
+            Self::LocalUnavailable => "Local folder or file is unavailable. Check its path and permissions.",
             Self::Network => "Plex could not be reached. Check the connection and retry.",
             Self::SignInRequired => "Plex sign-in is required.",
             Self::AccessDenied => "Plex denied access. Reconnect or check permissions.",
@@ -223,6 +233,10 @@ pub struct TranscodeRequest {
     pub targets: Vec<TranscodeCodec>,
 }
 pub trait MusicProvider: Send + Sync {
+    /// False when the adapter already owns a watched, authoritative local snapshot.
+    fn cache_catalog(&self, _source: SourceId) -> bool {
+        true
+    }
     /// Optional fallback for a pinned original version after local unsupported decoding.
     fn prepare_transcoded(&self, _request: TranscodeRequest) -> ProviderFuture<'_, PreparedMedia> {
         Box::pin(async { Err(ProviderError::Unsupported) })

@@ -11,7 +11,7 @@ import time
 # alone do not prove compatible representations or migration behavior.
 STORAGE_FILES = ("Cargo.toml", "Cargo.lock", "crates/qoda-backend/Cargo.toml",
                  *["crates/qoda-backend/src/" + name for name in (
-                     "main.rs", "buffered_reset.rs", "account.rs", "maintenance.rs", "observation.rs", "session_commands.rs", "prepared_playback.rs", "catalog.rs", "storage.rs", "storage/session.rs", "queue.rs", "archive.rs", "archive/store.rs",
+                     "main.rs", "local_files.rs", "buffered_reset.rs", "account.rs", "maintenance.rs", "observation.rs", "session_commands.rs", "prepared_playback.rs", "catalog.rs", "storage.rs", "storage/session.rs", "queue.rs", "archive.rs", "archive/store.rs",
                      "cache_files.rs", "gain.rs", "output.rs", "offline.rs", "metadata_cache.rs", "artwork_store.rs")])
 
 
@@ -30,7 +30,7 @@ def evidence(source):
     return {"schema": 1, "fingerprint": fingerprint, "files": files,
             "session_schemas": [1, 2, 3, 4, 5], "session_payloads": [1, 2, 3, 4, 5],
             "archive_schemas": [1], "catalog_schemas": [1, 2],
-            "settings": {"audio.json": [1], "output.json": [1, 2],
+            "settings": {"local-folders.json": [1], "audio.json": [1], "output.json": [1, 2],
                          "cache-settings/artwork.json": [1], "cache-settings/catalog.json": [1]}}
 
 
@@ -109,10 +109,10 @@ def data_compatible(contract):
             connection.close()
     directory = Path(os.environ.get("XDG_CONFIG_HOME",str(Path.home() / ".config"))) / "qoda"
     for name, versions in contract["settings"].items():
-        if name not in {"audio.json", "output.json", "cache-settings/artwork.json", "cache-settings/catalog.json"}:
+        if name not in {"local-folders.json", "audio.json", "output.json", "cache-settings/artwork.json", "cache-settings/catalog.json"}:
             raise ValueError("Unknown settings compatibility path; installation preserved")
         path = directory / name
-        if private(path, 4096):
+        if private(path, 65536 if name == "local-folders.json" else 4096):
             value = json.loads(path.read_text())
             if not isinstance(value, dict) or type(value.get("version")) is not int or value["version"] not in versions:
                 raise ValueError("Unsupported settings preserved: " + str(path))

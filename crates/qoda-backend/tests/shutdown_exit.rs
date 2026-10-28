@@ -39,6 +39,7 @@ impl Fixture {
     fn spawn(root: &std::path::Path) -> Child {
         Command::new(env!("CARGO_BIN_EXE_qoda-backend"))
             .env("XDG_RUNTIME_DIR", root.join("runtime"))
+            .env("HOME", root.join("home"))
             .env("XDG_CONFIG_HOME", root.join("config"))
             .env("XDG_STATE_HOME", root.join("state"))
             .env("XDG_CACHE_HOME", root.join("cache"))
@@ -359,5 +360,116 @@ fn archive_controls_use_account_fences_and_export_a_private_empty_snapshot() {
         serde_json::json!({"op":"quit","instance":instance})
     )
     .unwrap();
+    assert_eq!(fixture.wait(), 0);
+}
+
+#[test]
+fn local_folders_browse_and_refresh_without_plex_and_configuration_keeps_music() {
+    use serde_json::json;
+    let mut fixture = Fixture::prepared(|root| {
+        let music = root.join("home/Music");
+        fs::create_dir_all(&music).unwrap();
+        assert!(
+            Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=48000:cl=stereo",
+                    "-t",
+                    "2"
+                ])
+                .arg(music.join("first.wav"))
+                .status()
+                .unwrap()
+                .success()
+        );
+        fs::write(
+            root.join("config/user-dirs.dirs"),
+            "XDG_MUSIC_DIR=\"$HOME/Music\"\n",
+        )
+        .unwrap();
+    });
+    fn until(reader: &mut BufReader<UnixStream>, pred: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(12);
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            assert!(!line.is_empty());
+            let state: Value = serde_json::from_str(&line).unwrap();
+            if pred(&state) {
+                return state;
+            }
+            assert!(Instant::now() < deadline, "{state}");
+        }
+    }
+    let mut socket = fixture.connect();
+    let mut state = Fixture::ready(&mut socket);
+    if state["local_files"]["phase"] != "ready" {
+        state = until(&mut socket, |s| s["local_files"]["phase"] == "ready");
+    }
+    assert_eq!(state["sign_in"]["connected"], false);
+    assert_eq!(state["playback_available"], true);
+    assert_eq!(state["local_files"]["folders"][0]["tracks"], "1");
+    let source = state["libraries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["kind"] == "local")
+        .unwrap()["id"]
+        .clone();
+    writeln!(
+        socket.get_mut(),
+        "{}",
+        json!({"op":"browse","instance":state["instance"],"source":source,"offset":"0","query":""})
+    )
+    .unwrap();
+    state = until(&mut socket, |s| {
+        s["page"]["tracks"].as_array().is_some_and(|t| t.len() == 1)
+    });
+    assert_eq!(state["intent"], "paused");
+    let music = fixture.root.join("home/Music");
+    fs::copy(music.join("first.wav"), music.join("second.wav")).unwrap();
+    writeln!(
+        socket.get_mut(),
+        "{}",
+        json!({"op":"rescan_local_folders","instance":state["instance"]})
+    )
+    .unwrap();
+    state = until(&mut socket, |s| {
+        s["local_files"]["folders"][0]["tracks"] == "2"
+    });
+    writeln!(
+        socket.get_mut(),
+        "{}",
+        json!({"op":"browse","instance":state["instance"],"source":source,"offset":"0","query":""})
+    )
+    .unwrap();
+    state = until(&mut socket, |s| {
+        s["page"]["tracks"].as_array().is_some_and(|t| t.len() == 2)
+    });
+    let mut command = json!({"op":"set_local_folders","instance":state["instance"],"account_epoch":state["account_epoch"],"queue_session":state["queue"]["session"],"queue_revision":"999","paths":[]});
+    writeln!(socket.get_mut(), "{command}").unwrap();
+    state = until(&mut socket, |s| s["error"].is_string());
+    assert_eq!(state["local_files"]["paths"].as_array().unwrap().len(), 1);
+    command["queue_revision"] = state["queue"]["revision"].clone();
+    writeln!(socket.get_mut(), "{command}").unwrap();
+    state = until(&mut socket, |s| {
+        s["local_files"]["paths"]
+            .as_array()
+            .is_some_and(|p| p.is_empty())
+    });
+    assert_eq!(state["intent"], "paused");
+    assert!(music.join("first.wav").is_file());
+    assert!(music.join("second.wav").is_file());
+    let saved: Value = serde_json::from_slice(
+        &fs::read(fixture.root.join("config/qoda/local-folders.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved["version"], 1);
+    assert_eq!(saved["roots"], json!([]));
+    fixture.signal();
     assert_eq!(fixture.wait(), 0);
 }

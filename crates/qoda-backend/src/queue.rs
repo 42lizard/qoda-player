@@ -49,6 +49,7 @@ pub enum Unavailable {
 impl Unavailable {
     pub fn from_provider(error: qoda_provider::ProviderError) -> Option<Self> {
         match error {
+            qoda_provider::ProviderError::LocalChanged => Some(Self::VersionChanged),
             qoda_provider::ProviderError::MissingTrack => Some(Self::Missing),
             qoda_provider::ProviderError::UnsupportedMedia => Some(Self::Unsupported),
             _ => None,

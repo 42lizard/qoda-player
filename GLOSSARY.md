@@ -144,3 +144,6 @@ The selected loudness adjustment policy: Off, Track, Album, or Auto. Auto preser
 
 **Output verification profile**:
 Evidence for a particular output path, format, package set, and processing configuration at a named measurement boundary. It does not imply verification of unmeasured downstream hardware or other configurations.
+
+**Local folder library**:
+A read-only music-provider source rooted in one configured filesystem directory. It has stable source/track identities, a watched metadata snapshot and revocable playback grants. It is distinct from Qoda local storage (preferences, caches and session databases). Local saved playlist mutation is unsupported.

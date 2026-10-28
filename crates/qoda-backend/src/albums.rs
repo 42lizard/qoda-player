@@ -44,6 +44,11 @@ impl Controller {
             ..Self::default()
         }
     }
+    pub fn invalidate_sources(&mut self, sources: &std::collections::HashSet<SourceId>) {
+        if self.source.is_some_and(|id| sources.contains(&id)) {
+            self.invalidate();
+        }
+    }
     pub fn invalidate(&mut self) {
         if let Some(task) = self.task.take() {
             task.abort();
@@ -680,5 +685,27 @@ mod tests {
         c.source_changed(SourceId::new());
         assert!(!c.view.busy && c.source.is_none());
         assert!(c.generation > generation);
+    }
+    #[test]
+    fn local_scan_invalidation_retains_remote_detail_but_cancels_matching_pending_source() {
+        let mut owner = Controller::default();
+        let source = SourceId::new();
+        owner.source = Some(source);
+        owner.view.selected = Some(snapshot());
+        owner.invalidate_sources(&std::collections::HashSet::from([SourceId::new()]));
+        assert!(owner.view.selected.is_some());
+        let generation = owner.generation;
+        owner.view.busy = true;
+        owner.invalidate_sources(&std::collections::HashSet::from([source]));
+        owner.apply(
+            Reply {
+                info: Info::default(),
+                auth: 0,
+                generation,
+                result: Ok(Update::Open(snapshot())),
+            },
+            0,
+        );
+        assert!(owner.view.selected.is_none() && !owner.view.busy);
     }
 }

@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 use tokio::sync::mpsc;
 
@@ -90,7 +90,14 @@ impl SignIn for Plex {
         })
     }
 }
+struct Routing {
+    local: Arc<dyn MusicProvider>,
+    remote: Option<Arc<dyn MusicProvider>>,
+    provider: Arc<dyn MusicProvider>,
+}
 pub struct Controller {
+    local: Option<Arc<dyn MusicProvider>>,
+    routing: Mutex<Option<Routing>>,
     signin: Arc<dyn SignIn>,
     identities_path: Option<PathBuf>,
     generation: u64,
@@ -131,6 +138,8 @@ impl Controller {
         signin: Arc<dyn SignIn>,
     ) -> Self {
         Self {
+            local: None,
+            routing: Mutex::new(None),
             identities_path,
             signin,
             generation: 0,
@@ -148,13 +157,40 @@ impl Controller {
         self.generation
     }
     pub fn provider(&self) -> Option<Arc<dyn MusicProvider>> {
-        self.provider.clone()
+        let Some(local) = self.local.as_ref().filter(|p| !p.libraries().is_empty()) else {
+            *self.routing.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            return self.provider.clone();
+        };
+        let mut routing = self.routing.lock().unwrap_or_else(|e| e.into_inner());
+        let same = routing.as_ref().is_some_and(|r| {
+            Arc::ptr_eq(&r.local, local)
+                && match (&r.remote, &self.provider) {
+                    (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                    (None, None) => true,
+                    _ => false,
+                }
+        });
+        if !same {
+            *routing = Some(Routing {
+                local: local.clone(),
+                remote: self.provider.clone(),
+                provider: Arc::new(qoda_provider::router::Router::new(
+                    local.clone(),
+                    self.provider.clone(),
+                )),
+            });
+        }
+        routing.as_ref().map(|r| r.provider.clone())
+    }
+    pub fn set_local(&mut self, provider: Arc<dyn MusicProvider>) {
+        self.local = Some(provider);
+        *self.routing.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
     pub fn has_credential(&self) -> bool {
         self.credential.is_some()
     }
     pub fn catalog_access(&self) -> Option<offline::Access> {
-        offline::access(self.provider.clone(), self.discovery.clone())
+        offline::access(self.provider(), self.discovery.clone())
     }
     pub fn forget_cached_discovery(&mut self) {
         self.discovery = None;
@@ -189,7 +225,14 @@ impl Controller {
         state["sign_in"]["connecting"] =
             json!(self.task.as_ref().is_some_and(|task| !task.is_finished()));
         state["account_epoch"] = json!(self.generation.to_string());
-        reporting.bind(self.generation, self.provider.clone());
+        state["playback_available"] = json!(self.provider().is_some());
+        let mut libraries = state["libraries"].as_array().cloned().unwrap_or_default();
+        libraries.retain(|l| l["kind"] != "local");
+        if let Some(local) = &self.local {
+            libraries.extend(local.libraries().into_iter().map(|l|json!({"id":l.id,"title":l.title,"server":l.server,"offline":false,"kind":"local","playlists":false})));
+        }
+        state["libraries"] = json!(libraries);
+        reporting.bind(self.generation, self.provider());
     }
     fn keyring_request(
         &mut self,
@@ -1020,5 +1063,37 @@ mod tests {
             assert_eq!(env.state["libraries"], json!([]));
             assert!(env.metadata.discovery().await.is_none());
         }
+    }
+    #[tokio::test]
+    async fn local_libraries_survive_plex_disconnect_with_stable_routing_identity() {
+        let mut env = Environment::new().await;
+        let (vault, _requests) = mpsc::channel(8);
+        let mut owner = env.owner(vault);
+        let root = qoda_provider::local::Root::new(env.root.join("music")).unwrap();
+        owner.set_local(Arc::new(qoda_provider::local::Local::new(vec![
+            root.clone(),
+        ])));
+        owner.publish(&mut env.state, &mut env.reporting);
+        assert_eq!(env.state["sign_in"]["connected"], false);
+        assert_eq!(env.state["playback_available"], true);
+        let offline = owner.provider().unwrap();
+        assert!(Arc::ptr_eq(&offline, &owner.provider().unwrap()));
+        env.connected(&mut owner, vec![library("Remote")], HashSet::new())
+            .await;
+        let connected = owner.provider().unwrap();
+        assert!(!Arc::ptr_eq(&offline, &connected));
+        assert!(Arc::ptr_eq(&connected, &owner.provider().unwrap()));
+        assert_eq!(env.state["libraries"].as_array().unwrap().len(), 2);
+        env.command(&mut owner, "disconnect").await;
+        assert_eq!(env.state["sign_in"]["connected"], false);
+        assert_eq!(env.state["playback_available"], true);
+        assert_eq!(env.state["libraries"].as_array().unwrap().len(), 1);
+        assert_eq!(env.state["libraries"][0]["id"], json!(root.id));
+        assert_eq!(env.state["libraries"][0]["playlists"], false);
+        assert!(Arc::ptr_eq(
+            &owner.provider().unwrap(),
+            &owner.provider().unwrap()
+        ));
+        assert!(!env.playing);
     }
 }

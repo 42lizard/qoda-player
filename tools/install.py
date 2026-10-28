@@ -188,6 +188,8 @@ def require_stopped():
 
 
 def preflight():
+    if not shutil.which("ffprobe"):
+        raise ValueError("ffprobe is required for local music metadata; install ffmpeg")
     required = ["cargo", "rustc", "quickshell", "pkg-config", "systemctl"]
     missing = [name for name in required if shutil.which(name) is None]
     if missing:

@@ -18,6 +18,7 @@ pub struct Reply {
 #[derive(Default)]
 pub struct Controller {
     page: Option<CatalogPage>,
+    source: Option<SourceId>,
     revision: u64,
     generation: u64,
     busy: bool,
@@ -36,6 +37,12 @@ impl Controller {
         state["catalog"] = json!({"revision":self.revision.to_string(),"busy":self.busy,
             "refreshing":self.info.refreshing,"cache":self.info});
     }
+    pub fn invalidate_sources(&mut self, sources: &HashSet<SourceId>) -> Result<(), &'static str> {
+        if self.source.is_some_and(|id| sources.contains(&id)) {
+            self.invalidate()?;
+        }
+        Ok(())
+    }
     pub fn invalidate(&mut self) -> Result<(), &'static str> {
         let generation = self
             .generation
@@ -51,6 +58,7 @@ impl Controller {
         self.generation = generation;
         self.revision = revision;
         self.page = None;
+        self.source = None;
         self.busy = false;
         self.info = Info::default();
         Ok(())
@@ -72,6 +80,7 @@ impl Controller {
             .take(512)
             .collect();
         self.invalidate()?;
+        self.source = Some(source);
         self.busy = true;
         let generation = self.generation;
         let cache = self.cache.clone();

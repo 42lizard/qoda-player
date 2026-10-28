@@ -30,7 +30,7 @@ def check():
         runtime = base / "runtime"
         runtime.mkdir(mode=0o700)
         config, prefix = base / "config", base / "prefix with spaces"
-        environment = {"XDG_RUNTIME_DIR": str(runtime), "XDG_CONFIG_HOME": str(config),
+        environment = {"HOME": str(base / "home"), "XDG_RUNTIME_DIR": str(runtime), "XDG_CONFIG_HOME": str(config),
                        "XDG_DATA_HOME": str(base / "data"), "XDG_STATE_HOME": str(base / "state"),
                        "XDG_CACHE_HOME": str(base / "cache"),
                        "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + str(base / "absent-test-bus")}
