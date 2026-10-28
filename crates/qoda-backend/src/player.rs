@@ -2004,10 +2004,12 @@ mod tests {
                 }
                 player.load_prepared(load).unwrap();
                 entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                let (snapshot_tx, snapshot_rx) = mpsc::channel();
                 let (configure_tx, configure_rx) = mpsc::channel();
                 match action {
                     "replace" => {
                         player.invalidate_load(2);
+                        player.tx.try_send(Command::Barrier(snapshot_tx)).unwrap();
                         player
                             .load_prepared(prepared(
                                 2,
@@ -2032,6 +2034,14 @@ mod tests {
                 }
                 release_tx.send(()).unwrap();
                 if action == "replace" {
+                    let obsolete = snapshot_rx
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap()
+                        .unwrap();
+                    assert!(
+                        !obsolete.entry_ready && obsolete.position_seconds.is_none(),
+                        "{obsolete:?}"
+                    );
                     let s = wait_for(&player, |s| s.generation == 2 && s.entry_ready);
                     assert!(s.error.is_none(), "{s:?}");
                 } else {
