@@ -181,18 +181,19 @@ ColumnLayout {
                         Layout.fillWidth: true
                         Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                         Label { text: modelData.track.artist; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                }
+                    }
                 }
                 Flow {
                     objectName: "albumTrackActions"
                     Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height; spacing: 6
                     Button { text: "⋮"; implicitWidth: 28; visible: albums.downloadsEnabled; Accessible.name: I18n.t("More track actions"); onClicked: trackMenu.open()
                         Menu { id: trackMenu; MenuItem { text: I18n.t("Download original"); enabled: albums.canQueue && albums.downloadsEnabled; onTriggered: albums.downloadRequested({reference: albums.selected.album.reference, expected_revision: albums.selected.revision, track_key: modelData.track.reference.key}) } }
+                    }
+                    Button { objectName: "playAlbumFromHere"; text: I18n.t("Play from here"); enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
+                    Button { objectName: "enqueueAlbumTrack"; text: I18n.t("+ Queue"); enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }
+                    Button { objectName: "nextAlbumTrack"; text: I18n.t("Next"); enabled: albums.canQueue; onClicked: albums.trackAction("play_next", modelData.track) }
                 }
-                Button { objectName: "playAlbumFromHere"; text: I18n.t("Play from here"); enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
-                Button { objectName: "enqueueAlbumTrack"; text: I18n.t("+ Queue"); enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }
-                Button { objectName: "nextAlbumTrack"; text: I18n.t("Next"); enabled: albums.canQueue; onClicked: albums.trackAction("play_next", modelData.track) }
-                }            }
+            }
         }
     }
     RowLayout {

@@ -110,6 +110,7 @@ HOOKS = """
             root.libraryId = ""; libraryTabs.currentIndex = 2; root.libraryId = "fixture";
         }
         function openLibraries(): void { libraryPicker.children.find(item => item.objectName === "libraryCombo").popup.open(); }
+        function libraryPopupReady(): bool { const popup = libraryPicker.children.find(item => item.objectName === "libraryCombo").popup; return popup.opened && popup.contentItem.width > 0 && popup.contentItem.height > 0; }
         function captureLibraries(path: string): void { captureDone = ""; libraryPicker.children.find(item => item.objectName === "libraryCombo").popup.contentItem.grabToImage(result => { if (result.saveToFile(path)) captureDone = path; }); }
         function chooseLibrary(source: string): void { libraryPicker.chosen(source); }
         function scrollRail(): void { railScroll.contentItem.contentY = Math.max(0, railScroll.contentHeight - railScroll.availableHeight); }
@@ -499,8 +500,13 @@ def check(output=None, theme_check=False, guide=False):
                 ipc("restoreGuideFixture")
                 ipc("closeSettings")
                 ipc("libraryFixture")
+                time.sleep(0.15)
                 ipc("openLibraries")
                 wait_for(lambda value: value["libraryPicker"]["open"])
+                for _ in range(80):
+                    if ipc("libraryPopupReady") == "true": break
+                    time.sleep(0.05)
+                else: raise AssertionError("Library fixture popup did not acquire capture geometry")
                 capture("library-choices-small", libraries=True)
                 ipc("showSearch")
                 wait_for(lambda value: value["searchFocused"] and not value["libraryPicker"]["open"])

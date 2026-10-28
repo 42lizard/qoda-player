@@ -33,6 +33,8 @@ results and individual album tracks also offer a download action. These actions 
 source. The server checks permission on the download request; being able to
 stream a track does not guarantee download permission.
 
+![Download an entire album in one action](assets/user-guide/album-download.png)
+
 The Downloads panel shows queued, downloading, paused, completed, failed and
 cancelled jobs. Byte progress is indeterminate when the total is unknown.
 **Cancel** stops unfinished work. **Retry from zero** / **Continue from zero**
