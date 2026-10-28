@@ -628,7 +628,6 @@ var messages = {
   "Playback stopped": "Wiedergabe gestoppt",
   "Playback unconfirmed": "Wiedergabe unbestätigt",
   "Playback verification failed; review the message and explicitly retry": "Wiedergabeprüfung fehlgeschlagen; prüfe die Meldung und versuche ausdrücklich erneut",
-  "Playback {device}": "Wiedergabe {device}",
   "Player disconnected — reconnecting": "Player getrennt — erneute Verbindung",
   "Playing": "Wiedergabe läuft",
   "Playlist deleted from Plex. Local queue unchanged.": "Wiedergabeliste aus Plex gelöscht. Lokale Warteschlange unverändert.",

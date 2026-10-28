@@ -18,6 +18,9 @@ TestCase {
         compare(Qoda.I18n.t("Play"), "Abspielen");
     }
     function test_parameters_plurals_and_unknown_fallback() {
+        Qoda.I18n.preferences = ["en-US"];
+        compare(Qoda.I18n.count("%1 track", "%1 tracks", "1"), "1 track");
+        compare(Qoda.I18n.count("%1 track", "%1 tracks", "2"), "2 tracks");
         Qoda.I18n.preferences = ["de-DE"];
         compare(Qoda.I18n.t("Future message"), "Future message");
         compare(Qoda.I18n.t("%1 track", ["A {x} $1 %2 & Ä"]), "A {x} $1 %2 & Ä Titel");
@@ -28,7 +31,7 @@ TestCase {
         Qoda.I18n.preferences = ["de-DE"];
         compare(Qoda.I18n.message("Plex sign-in is required."), "Eine Plex-Anmeldung ist erforderlich.");
         compare(Qoda.I18n.message("Plex sign-in is required. Recovery stopped. Retry or Skip explicitly."), "Eine Plex-Anmeldung ist erforderlich. Wiederherstellung gestoppt. Wähle „Erneut versuchen“ oder „Überspringen“.");
-        compare(Qoda.I18n.message("Playback USB Ä / $1 %2"), "Wiedergabe USB Ä / $1 %2");
+        compare(Qoda.I18n.message("Playback USB Ä / $1 %2"), "Playback USB Ä / $1 %2");
         compare(Qoda.I18n.message("Unknown future backend failure: <Music>"), "Unknown future backend failure: <Music>");
         compare(Qoda.I18n.message(null), "");
     }

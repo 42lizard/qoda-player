@@ -340,7 +340,6 @@
   "Fidelity refuses unqualified mmap transfers.": "Fidelity lehnt ungeprüfte mmap-Übertragungen ab.",
   "Fidelity successor precision is unavailable": "Die Auflösung des Fidelity-Nachfolgers ist nicht verfügbar",
   "ALSA card": "ALSA-Karte",
-  "Playback {device}": "Wiedergabe {device}",
   "Fidelity device does not support the exact source rate": "Das Fidelity-Gerät unterstützt die exakte Quellabtastrate nicht",
   "Fidelity device has insufficient native sample precision": "Die native Sampleauflösung des Fidelity-Geräts reicht nicht aus",
   "Fidelity device does not support the exact source format.": "Das Fidelity-Gerät unterstützt das exakte Quellformat nicht.",
