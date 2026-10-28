@@ -290,4 +290,6 @@ their existing owners.
 
 The private native `InspectNext` test command routes a load through the real
 inspection implementation on null output and holds completion after native setup.
-It controls scheduling only; production has neither the command nor the gate.
+`ResumeNext` similarly holds verified resume completion. These gates exercise
+replacement, Pause, Stop and output change at both transitions. They control
+scheduling only; production has neither command nor gate.

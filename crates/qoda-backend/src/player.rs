@@ -85,6 +85,8 @@ pub enum Command {
     #[cfg(test)]
     InspectNext(mpsc::Sender<()>, mpsc::Receiver<()>),
     #[cfg(test)]
+    ResumeNext(mpsc::Sender<()>, mpsc::Receiver<()>),
+    #[cfg(test)]
     Load(u64, String, f64),
     #[cfg(test)]
     LoadGain(u64, String, f64, Applied),
@@ -346,6 +348,8 @@ struct Native {
     admitted_load: Option<u64>,
     #[cfg(test)]
     inspection_gate: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
+    #[cfg(test)]
+    resume_gate: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
     transcoded: bool,
     timeline_offset: f64,
     pcm: Option<PcmActive>,
@@ -525,10 +529,8 @@ impl Native {
             && self.probe.is_none()
             && self.pending_start.is_none()
             && self.current.error.is_none();
-        if !self.h.is_null() {
-            if !self.call(&["set", "pause", if playing { "no" } else { "yes" }]) {
-                self.current.error = Some("The audio engine rejected pause");
-            }
+        if !self.h.is_null() && !self.call(&["set", "pause", if playing { "no" } else { "yes" }]) {
+            self.current.error = Some("The audio engine rejected pause");
         }
     }
     fn sample(&mut self) {
@@ -577,6 +579,11 @@ impl Native {
                     && position <= start.target + 0.25
             }) {
                 self.pending_start = None;
+                #[cfg(test)]
+                if let Some((entered, release)) = self.resume_gate.take() {
+                    entered.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
                 self.admit_load();
             } else if std::time::Instant::now() >= start.deadline {
                 self.current.error = Some(
@@ -1397,6 +1404,8 @@ impl Player {
                 admitted_load: None,
                 #[cfg(test)]
                 inspection_gate: None,
+                #[cfg(test)]
+                resume_gate: None,
                 transcoded: false,
                 timeline_offset: 0.0,
                 pcm: None,
@@ -1413,6 +1422,10 @@ impl Player {
                     #[cfg(test)]
                     Ok(Command::InspectNext(entered, release)) => {
                         native.inspection_gate = Some((entered, release));
+                    }
+                    #[cfg(test)]
+                    Ok(Command::ResumeNext(entered, release)) => {
+                        native.resume_gate = Some((entered, release));
                     }
                     Ok(Command::FinishChain(owner)) => native.finish_chain(owner),
                     Ok(Command::Pause(_)) => {
@@ -1971,59 +1984,76 @@ mod tests {
         assert_eq!(player.status().generation, 1);
     }
     #[test]
-    fn replacement_during_silent_inspection_cannot_admit_old_audio() {
-        for pause in [false, true] {
-            let player = Player::with_output("null").unwrap();
-            let file = silent_file(4);
-            let (entered_tx, entered_rx) = mpsc::channel();
-            let (release_tx, release_rx) = mpsc::channel();
-            // Private scheduling hook: use the real inspection path with null
-            // output and hold after native setup, before final admission.
-            player.send(Command::InspectNext(entered_tx, release_rx));
-            player
-                .load_prepared(prepared(
-                    1,
-                    Some(output::Selection::Desktop),
-                    file.to_str().unwrap(),
-                ))
-                .unwrap();
-            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            player.invalidate_load(2);
-            let (snapshot_tx, snapshot_rx) = mpsc::channel();
-            player.tx.try_send(Command::Barrier(snapshot_tx)).unwrap();
-            if pause {
-                player.send(Command::Pause(true));
-            } else {
-                player
-                    .load_prepared(prepared(
-                        2,
-                        Some(output::Selection::Desktop),
-                        file.to_str().unwrap(),
-                    ))
-                    .unwrap();
+    fn inspection_and_resume_completion_obey_replacement_pause_stop_and_output_change() {
+        for resume in [false, true] {
+            for action in ["replace", "pause", "stop", "output"] {
+                let player = Player::with_output("null").unwrap();
+                let file = silent_file(4);
+                let (entered_tx, entered_rx) = mpsc::channel();
+                let (release_tx, release_rx) = mpsc::channel();
+                // Hold real completion after setup/verification, before admission.
+                player.send(if resume {
+                    Command::ResumeNext(entered_tx, release_rx)
+                } else {
+                    Command::InspectNext(entered_tx, release_rx)
+                });
+                let mut load =
+                    prepared(1, Some(output::Selection::Desktop), file.to_str().unwrap());
+                if resume {
+                    load.position = 1.0;
+                }
+                player.load_prepared(load).unwrap();
+                entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                let (configure_tx, configure_rx) = mpsc::channel();
+                match action {
+                    "replace" => {
+                        player.invalidate_load(2);
+                        player
+                            .load_prepared(prepared(
+                                2,
+                                Some(output::Selection::Desktop),
+                                file.to_str().unwrap(),
+                            ))
+                            .unwrap();
+                    }
+                    "pause" => player.send(Command::Pause(true)),
+                    "stop" => {
+                        player.invalidate_load(2);
+                        player.send(Command::Stop);
+                    }
+                    "output" => {
+                        player.invalidate_load(2);
+                        player
+                            .tx
+                            .try_send(Command::Configure(None, configure_tx))
+                            .unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                release_tx.send(()).unwrap();
+                if action == "replace" {
+                    let s = wait_for(&player, |s| s.generation == 2 && s.entry_ready);
+                    assert!(s.error.is_none(), "{s:?}");
+                } else {
+                    if action == "output" {
+                        configure_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .unwrap()
+                            .unwrap();
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    let s = player.status();
+                    assert!(s.paused, "{action}: {s:?}");
+                    if action != "pause" {
+                        assert!(
+                            !s.entry_ready && s.position_seconds.is_none(),
+                            "{action}: {s:?}"
+                        );
+                    }
+                }
+                drop(player);
+                std::fs::remove_file(file).unwrap();
             }
-            release_tx.send(()).unwrap();
-            let obsolete = snapshot_rx
-                .recv_timeout(Duration::from_secs(5))
-                .unwrap()
-                .unwrap();
-            assert!(
-                !obsolete.entry_ready && obsolete.position_seconds.is_none(),
-                "{obsolete:?}"
-            );
-            if pause {
-                std::thread::sleep(Duration::from_millis(100));
-                let s = player.status();
-                assert!(
-                    s.paused && !s.entry_ready && s.position_seconds.is_none(),
-                    "{s:?}"
-                );
-            } else {
-                let s = wait_for(&player, |s| s.generation == 2 && s.entry_ready);
-                assert!(s.error.is_none(), "{s:?}");
-            }
-            drop(player);
-            std::fs::remove_file(file).unwrap();
         }
     }
     #[test]
