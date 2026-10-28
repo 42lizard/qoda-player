@@ -238,6 +238,7 @@ impl Destination {
                 .unwrap(),
         };
         Ok(ImportedCopy {
+            cover_warning: None,
             track,
             origin: job.track.reference.clone(),
             version: version.to_owned(),
@@ -269,8 +270,6 @@ impl Destination {
             return Err("Invalid download filename.".into());
         }
         part.file.sync_all().map_err(fail)?;
-        let source = std::ffi::CString::new(part.name.as_bytes()).map_err(fail)?;
-        let target = std::ffi::CString::new(copy.filename.as_bytes()).map_err(fail)?;
         {
             let live = gate.lock().unwrap_or_else(|e| e.into_inner());
             if *live != generation {
@@ -279,24 +278,79 @@ impl Destination {
                 );
             }
             self.check()?;
-            // SAFETY: valid directory descriptors and terminated single-component
-            // names remain alive. RENAME_NOREPLACE never overwrites user files.
-            if unsafe {
-                libc::renameat2(
-                    self.staging.0.as_raw_fd(),
-                    source.as_ptr(),
-                    self.directory.0.as_raw_fd(),
-                    target.as_ptr(),
-                    libc::RENAME_NOREPLACE,
-                )
-            } != 0
-            {
-                return Err("The download target already exists or is unavailable; nothing was overwritten.".into());
-            }
+            self.rename(part, &copy.filename)?;
         }
         self.directory.0.sync_all().map_err(fail)?;
         self.staging.0.sync_all().map_err(fail)?;
         copy.fingerprint = fingerprint(&part.file)?;
+        Ok(())
+    }
+    fn rename(&self, part: &Partial, name: &str) -> Result<(), String> {
+        if !valid_name(name) {
+            return Err("Invalid download filename.".into());
+        }
+        let source = std::ffi::CString::new(part.name.as_bytes()).map_err(fail)?;
+        let target = std::ffi::CString::new(name.as_bytes()).map_err(fail)?;
+        // SAFETY: open directory descriptors and validated, terminated component names.
+        if unsafe {
+            libc::renameat2(
+                self.staging.0.as_raw_fd(),
+                source.as_ptr(),
+                self.directory.0.as_raw_fd(),
+                target.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        } != 0
+        {
+            return Err(
+                "The download target already exists or is unavailable; nothing was overwritten."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+    pub fn cover(
+        &self,
+        copy: &ImportedCopy,
+        bytes: &[u8],
+        id: &str,
+        gate: &Mutex<u64>,
+        generation: u64,
+    ) -> Result<(), String> {
+        self.verify(copy, false)?;
+        if !qoda_provider::artwork::bounded_jpeg(bytes) {
+            return Err("Invalid download cover.".into());
+        }
+        let name = qoda_provider::local::cover_sidecar(Path::new(&copy.filename));
+        let name = name.to_str().ok_or("Invalid download filename.")?;
+        if let Some(mut file) = self.directory.file(name).map_err(str::to_owned)? {
+            let mut existing = Vec::new();
+            Read::by_ref(&mut file)
+                .take(256 * 1024 + 1)
+                .read_to_end(&mut existing)
+                .map_err(fail)?;
+            return if qoda_provider::artwork::bounded_jpeg(&existing) {
+                Ok(())
+            } else {
+                Err("Invalid download cover.".into())
+            };
+        }
+        self.space(bytes.len() as u64)?;
+        let mut part = self.partial(id)?;
+        Self::write(&mut part, bytes)?;
+        part.file.sync_all().map_err(fail)?;
+        {
+            let live = gate.lock().unwrap_or_else(|e| e.into_inner());
+            if *live != generation {
+                return Err(
+                    "Download cancelled because its account or destination changed.".into(),
+                );
+            }
+            self.verify(copy, false)?;
+            self.rename(&part, name)?;
+        }
+        self.directory.0.sync_all().map_err(fail)?;
+        self.staging.0.sync_all().map_err(fail)?;
         Ok(())
     }
     pub fn verify(&self, copy: &ImportedCopy, full: bool) -> Result<ImportedCopy, String> {
@@ -443,6 +497,42 @@ mod tests {
             .publish(&part, &mut copy, &Mutex::new(1), 1)
             .unwrap();
         assert!(destination.verify(&copy, true).is_ok());
+        let cover = include_bytes!("../../../qoda-provider/tests/fixtures/cover.jpg");
+        let image = path
+            .join(MANAGED)
+            .join(qoda_provider::local::cover_sidecar(Path::new(
+                &copy.filename,
+            )));
+        assert!(
+            destination
+                .cover(&copy, cover, &job.id, &Mutex::new(2), 1)
+                .is_err()
+        );
+        assert!(!image.exists());
+        std::os::unix::fs::symlink("/does-not-exist", &image).unwrap();
+        assert!(
+            destination
+                .cover(&copy, cover, &job.id, &Mutex::new(1), 1)
+                .is_err()
+        );
+        std::fs::remove_file(&image).unwrap();
+        std::fs::write(&image, b"unrelated cover").unwrap();
+        assert!(
+            destination
+                .cover(&copy, cover, &job.id, &Mutex::new(1), 1)
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&image).unwrap(), b"unrelated cover");
+        std::fs::remove_file(&image).unwrap();
+        assert!(
+            destination
+                .cover(&copy, b"not an image", &job.id, &Mutex::new(1), 1)
+                .is_err()
+        );
+        destination
+            .cover(&copy, cover, &job.id, &Mutex::new(1), 1)
+            .unwrap();
+        assert_eq!(std::fs::read(&image).unwrap(), cover);
         assert!(
             destination
                 .publish(&part, &mut copy, &Mutex::new(1), 1)

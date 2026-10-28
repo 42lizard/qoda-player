@@ -34,6 +34,8 @@ fn import_key(reference: &TrackRef, version: &str) -> String {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ImportedCopy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cover_warning: Option<String>,
     track: Track,
     origin: TrackRef,
     version: String,
@@ -52,6 +54,7 @@ impl ImportedCopy {
         let digest =
             |value: &str| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit());
         import::valid_name(&self.filename)
+            && self.cover_warning.as_ref().is_none_or(|s| s.len() <= 256)
             && self.bytes > 0
             && self.bytes <= MAX_FILE
             && digest(&self.checksum)
@@ -589,10 +592,18 @@ impl Actor {
                     .filter(|r| self.context.roots.iter().any(|p| p.id == r.id))
                     .ok_or("Choose a watched download destination first.")?;
                 if tracks.is_empty()
-                    || tracks.len() > 100
+                    || tracks.len()
+                        > if v["reference"].is_object() {
+                            MAX_JOBS
+                        } else {
+                            100
+                        }
                     || self.store.jobs.len() + tracks.len() > MAX_JOBS
                 {
-                    return Err("Choose 1 to 100 tracks and keep at most 200 download jobs.".into());
+                    return Err(
+                        "Choose up to 100 tracks or one album, and keep at most 200 download jobs."
+                            .into(),
+                    );
                 }
                 let provider = self
                     .context
@@ -786,8 +797,9 @@ impl Actor {
                         job.bytes = copy.bytes;
                         job.total = Some(copy.bytes);
                         job.copy = Some(copy.clone());
-                        job.message =
-                            "Downloaded original; the local copy is available without Plex.".into();
+                        job.message = copy.cover_warning.clone().unwrap_or_else(|| {
+                            "Downloaded original; the local copy is available without Plex.".into()
+                        });
                         if !self.store.imports.iter().any(|c| {
                             c.root.id == copy.root.id
                                 && c.filename == copy.filename
@@ -886,8 +898,16 @@ async fn transfer(
         .iter()
         .rev()
         .find(|c| c.key == key && c.root.id == job.root.id)
-        && let Ok(copy) = destination.verify_while(copy, true, current)
+        && let Ok(mut copy) = destination.verify_while(copy, true, current)
     {
+        retain_cover(
+            &destination,
+            &mut copy,
+            download.artwork.as_deref(),
+            &job.id,
+            &gate,
+            generation,
+        );
         return Ok(copy);
     }
     if imports.len() >= MAX_IMPORTS {
@@ -998,8 +1018,31 @@ async fn transfer(
     .map_err(|_| "Downloads stopped.")?;
     ack.await.map_err(|_| "Downloads stopped.")??;
     destination.publish(&part, &mut copy, &gate, generation)?;
+    retain_cover(
+        &destination,
+        &mut copy,
+        download.artwork.as_deref(),
+        &job.id,
+        &gate,
+        generation,
+    );
     let _ = download.media.stream.close().await;
     Ok(copy)
+}
+fn retain_cover(
+    destination: &Destination,
+    copy: &mut ImportedCopy,
+    image: Option<&[u8]>,
+    id: &str,
+    gate: &Mutex<u64>,
+    generation: u64,
+) {
+    copy.cover_warning = image
+        .and_then(|bytes| destination.cover(copy, bytes, id, gate, generation).err())
+        .map(|_| {
+            "Original downloaded; its cover could not be saved. Download again to retry artwork."
+                .into()
+        });
 }
 #[derive(Clone)]
 pub struct LocalCopy {

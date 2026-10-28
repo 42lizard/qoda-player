@@ -1041,5 +1041,9 @@
   "Downloads are in use by another backend.": "Downloads werden von einem anderen Backend verwendet.",
   "Download paused because Qoda stopped.": "Download pausiert, weil Qoda beendet wurde.",
   "Local copy verification was cancelled.": "Die Überprüfung der lokalen Kopie wurde abgebrochen.",
-  "Unresolved publications were kept. Retry them to verify the local copy before clearing history.": "Ungeklärte Veröffentlichungen wurden behalten. Wiederhole sie, um die lokale Kopie vor dem Löschen des Verlaufs zu prüfen."
+  "Unresolved publications were kept. Retry them to verify the local copy before clearing history.": "Ungeklärte Veröffentlichungen wurden behalten. Wiederhole sie, um die lokale Kopie vor dem Löschen des Verlaufs zu prüfen.",
+  "Download album": "Album herunterladen",
+  "Choose up to 100 tracks or one album, and keep at most 200 download jobs.": "Wähle bis zu 100 Titel oder ein Album und behalte höchstens 200 Download-Aufträge.",
+  "Invalid download cover.": "Ungültiges Download-Cover.",
+  "Original downloaded; its cover could not be saved. Download again to retry artwork.": "Original heruntergeladen; das Cover konnte nicht gespeichert werden. Lade erneut herunter, um das Cover nochmals zu versuchen."
 }

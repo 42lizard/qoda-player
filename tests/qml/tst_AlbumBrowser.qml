@@ -19,6 +19,7 @@ TestCase {
     SignalSpy { id: queues; target: browser; signalName: "queueAlbum" }
     SignalSpy { id: tracks; target: browser; signalName: "trackAction" }
     SignalSpy { id: opens; target: browser; signalName: "openAlbum" }
+    SignalSpy { id: downloads; target: browser; signalName: "downloadRequested" }
     function frame(origin, refreshing, revision) {
         let reference = {source: "fixture", key: "album"};
         let album = {reference: reference, title: "Fictional album", artist: "Fixture artist", artist_ref: null, year: null, track_count: "1"};
@@ -34,7 +35,7 @@ TestCase {
         browser.artworkEnabled = true;
         browser.snapshot = frame("cached", true, "cached-revision");
         browser.showDetails = true;
-        queues.clear(); tracks.clear(); opens.clear();
+        queues.clear(); tracks.clear(); opens.clear(); downloads.clear(); browser.downloadsEnabled = false;
         waitForPolish(browser);
         tryVerify(() => !!findChild(browser, "playAlbumFromHere"));
     }
@@ -61,8 +62,7 @@ TestCase {
         waitForPolish(browser);
         for (let name of ["refreshAlbum", "playAlbum", "queueAlbum"]) {
             let button = findChild(browser, name);
-            verify(button.x >= 0);
-            verify(button.x + button.width <= button.parent.width + 1, name + " exceeds the available width");
+            tryVerify(() => button.x >= 0 && button.x + button.width <= button.parent.width + 1, 5000, name + " exceeds the available width");
         }
     }
     function test_background_refresh_does_not_reopen_details_after_back() {
@@ -103,5 +103,24 @@ TestCase {
         browser.snapshot = frame("cached", true, "new-live-revision");
         compare(browser.canQueue, false);
         verify(!findChild(browser, "nextAlbumTrack").enabled);
+    }
+    function test_one_keyboard_action_downloads_the_entire_current_album_without_playing() {
+        browser.downloadsEnabled = true;
+        let button = findChild(browser, "downloadAlbum");
+        verify(button);
+        compare(button.enabled, false);
+        browser.snapshot = frame("live", false, "album-v2");
+        tryCompare(button, "enabled", true);
+        button.forceActiveFocus(); keyClick(Qt.Key_Space);
+        compare(downloads.count, 1);
+        compare(downloads.signalArguments[0][0].reference.key, "album");
+        compare(downloads.signalArguments[0][0].expected_revision, "album-v2");
+        verify(downloads.signalArguments[0][0].track_key === undefined);
+        compare(queues.count, 0); compare(tracks.count, 0);
+        test.width = 540;
+        tryVerify(() => button.x + button.width <= button.parent.width + 1);
+        const actions = findChild(browser, "albumTrackActions");
+        verify(actions);
+        tryVerify(() => [...actions.children].filter(child => child.visible).every(child => child.x >= 0 && child.x + child.width <= actions.width + 1));
     }
 }

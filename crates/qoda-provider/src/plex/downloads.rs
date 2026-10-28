@@ -40,6 +40,9 @@ impl PlexProvider {
             return Err(ProviderError::UnsupportedMedia);
         }
         download.expected_length = download.expected_length.or(head.content_length);
+        if let Some(album) = &download.album {
+            download.artwork = self.album_cover(album.clone()).await.ok();
+        }
         download.media.version = format!(
             "{:x}",
             Sha256::digest(
@@ -148,11 +151,12 @@ mod tests {
         let mode = Arc::new(AtomicU8::new(0));
         let metadata_mode = mode.clone();
         let part_mode = mode.clone();
+        let cover_mode = mode.clone();
         let app=Router::new().route("/library/metadata/1",get(move||{let mode=metadata_mode.clone();async move{
             let value=mode.load(Ordering::SeqCst);
             let size=if value==6{""}else{"size='4'"};
             let extra=if value==4{"<Part id='4' key='/library/parts/4/123/file.flac'/>"}else{""};
-            format!("<MediaContainer><Track ratingKey='1' librarySectionID='7' title='Original'><Media id='2' container='flac'><Part id='3' {size} key='/library/parts/3/123/file.flac?download=0'/>{extra}</Media></Track></MediaContainer>")
+            format!("<MediaContainer><Track ratingKey='1' librarySectionID='7' parentRatingKey='10' title='Original'><Media id='2' container='flac'><Part id='3' {size} key='/library/parts/3/123/file.flac?download=0'/>{extra}</Media></Track></MediaContainer>")
         }})).route("/library/parts/3/123/file.flac",get(move|Query(query):Query<HashMap<String,String>>,headers:HeaderMap|{
             let mode=part_mode.clone();let foreign_url=foreign_url.clone();async move {
                 assert_eq!(query.len(),1);assert_eq!(query.get("download").map(String::as_str),Some("1"));
@@ -165,7 +169,12 @@ mod tests {
                 if value==6 {return response.body(Body::from_stream(futures_util::stream::once(async{Ok::<_,std::io::Error>(Bytes::from_static(b"fLaC"))}))).unwrap()}
                 response.body(Body::from("fLaC")).unwrap()
             }
-        }));
+        })).route("/library/metadata/10",get(||async{"<MediaContainer librarySectionID='7'><Directory type='album' ratingKey='10' title='Album' thumb='/library/metadata/10/thumb/1'/></MediaContainer>"}))
+        .route("/photo/{operation}/transcode",get(move|headers:HeaderMap|{let mode=cover_mode.clone();async move {
+            assert_eq!(headers.get("X-Plex-Token").unwrap(),"secret");
+            if mode.load(Ordering::SeqCst)==7 {return Response::builder().status(403).body(Body::empty()).unwrap()}
+            Response::builder().header("content-type","image/jpeg").body(Body::from(include_bytes!("../../tests/fixtures/cover.jpg").to_vec())).unwrap()
+        }}));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -197,11 +206,25 @@ mod tests {
         let key = || "1".to_owned().try_into().unwrap();
         let original = provider.download(id, key()).await.unwrap();
         assert_eq!(original.extension, "flac");
+        assert!(artwork::bounded_jpeg(original.artwork.as_ref().unwrap()));
         assert_eq!(original.expected_length, Some(4));
         let mut response = original.media.stream.open(None, false).await.unwrap();
         assert_eq!(
             response.body.next().await.unwrap().unwrap().as_ref(),
             b"fLaC"
+        );
+        mode.store(7, Ordering::SeqCst);
+        let without_art = provider.download(id, key()).await.unwrap();
+        assert!(without_art.artwork.is_none());
+        assert_eq!(
+            without_art
+                .media
+                .stream
+                .open(None, false)
+                .await
+                .unwrap()
+                .status,
+            200
         );
         mode.store(1, Ordering::SeqCst);
         assert!(matches!(

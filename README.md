@@ -20,7 +20,7 @@ The Tracks tab supports checkboxes, Ctrl/Shift selection and atomic Play/Play ne
 
 [Confirmed Plex timeline reporting](docs/plex-reporting.md) is enabled after scoped owned-server validation of pause/resume/stop and duplicate handoff. It uses a bounded observer, account/source/render fences and cached capability discovery. Preparing a track never counts as playback; played-state/history synchronization is not claimed.
 
-Local music works without Plex sign-in. Configure one or more folders under **Menu → Local music folders**; the initial default follows the XDG music directory. Recursive watching, metadata browsing/search and native playback are described in [local music folders](docs/local-music.md). Local saved playlists and cover extraction remain unavailable. [Plex original downloads](docs/downloads.md) import completed files into a chosen watched folder, with explicit retry/cancellation and offline local-copy queue actions.
+Local music works without Plex sign-in. Configure one or more folders under **Menu → Local music folders**; the initial default follows the XDG music directory. Recursive watching, metadata browsing/search and native playback are described in [local music folders](docs/local-music.md). Local saved playlists remain unavailable; local embedded and folder artwork is supported. [Plex original downloads](docs/downloads.md) import completed files into a chosen watched folder, with explicit retry/cancellation and offline local-copy queue actions.
 
 ## Agreed first-release scope
 

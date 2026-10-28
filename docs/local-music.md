@@ -4,7 +4,7 @@ Local folders are a read-only music provider alongside Plex. No Plex sign-in or
 server is needed. Choose **Menu → Local music folders** to edit the folders,
 then choose the corresponding **Local files** library in the library picker.
 Tracks, albums, artists, search, queue controls and playback use the same player.
-Local saved playlists and local cover extraction are not provided yet.
+Local saved playlists are not provided yet. Album covers load on demand from embedded pictures, per-track download sidecars, or cover/folder/front JPEG and cover/folder PNG files. Extraction is read-only, bounded, and works offline.
 
 ![Local folder controls with fictional paths](assets/user-guide/local-folders.png)
 

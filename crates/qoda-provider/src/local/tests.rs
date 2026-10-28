@@ -36,6 +36,98 @@ impl Drop for Fixture {
 }
 
 #[tokio::test]
+async fn embedded_and_folder_artwork_survive_offline_restart_without_modifying_audio() {
+    for png in [false, true] {
+        let fixture = Fixture::new();
+        let wave = fixture.wave("source.wav");
+        let cover = fixture
+            .0
+            .join(if png { "attached.png" } else { "attached.jpg" });
+        let jpeg = include_bytes!("../../tests/fixtures/cover.jpg");
+        std::fs::write(fixture.0.join("input.jpg"), jpeg).unwrap();
+        assert!(
+            tokio::process::Command::new("ffmpeg")
+                .args(["-nostdin", "-v", "error", "-i"])
+                .arg(fixture.0.join("input.jpg"))
+                .arg(&cover)
+                .status()
+                .await
+                .unwrap()
+                .success()
+        );
+        let audio = fixture.0.join("original.flac");
+        assert!(
+            tokio::process::Command::new("ffmpeg")
+                .args(["-nostdin", "-v", "error", "-i"])
+                .arg(&wave)
+                .arg("-i")
+                .arg(&cover)
+                .args([
+                    "-map",
+                    "0:a",
+                    "-map",
+                    "1:v",
+                    "-c:a",
+                    "flac",
+                    "-c:v",
+                    "copy",
+                    "-disposition:v",
+                    "attached_pic"
+                ])
+                .arg(&audio)
+                .status()
+                .await
+                .unwrap()
+                .success()
+        );
+        std::fs::remove_file(wave).unwrap();
+        std::fs::remove_file(cover).unwrap();
+        std::fs::remove_file(fixture.0.join("input.jpg")).unwrap();
+        let original = std::fs::read(&audio).unwrap();
+        let root = Root::new(fixture.0.clone()).unwrap();
+        for _ in 0..2 {
+            let local = Local::new(vec![root.clone()]);
+            local.scan().await.unwrap();
+            let album = local
+                .albums(root.id, 0, String::new())
+                .await
+                .unwrap()
+                .albums
+                .remove(0);
+            let bytes = local.cover(album.reference.clone()).await.unwrap();
+            assert!(artwork::bounded_jpeg(&bytes));
+            assert_eq!(std::fs::read(&audio).unwrap(), original);
+            std::fs::write(&audio, b"changed").unwrap();
+            assert!(local.cover(album.reference).await.is_err());
+            std::fs::write(&audio, &original).unwrap();
+        }
+    }
+    let fixture = Fixture::new();
+    fixture.wave("track.wav");
+    let root = Root::new(fixture.0.clone()).unwrap();
+    let local = Local::new(vec![root.clone()]);
+    local.scan().await.unwrap();
+    let album = local
+        .albums(root.id, 0, String::new())
+        .await
+        .unwrap()
+        .albums
+        .remove(0);
+    assert!(local.cover(album.reference.clone()).await.is_err());
+    std::os::unix::fs::symlink("/does-not-exist", fixture.0.join("cover.jpg")).unwrap();
+    assert!(local.cover(album.reference.clone()).await.is_err());
+    std::fs::remove_file(fixture.0.join("cover.jpg")).unwrap();
+    std::fs::write(
+        fixture.0.join("cover.jpg"),
+        include_bytes!("../../tests/fixtures/cover.jpg"),
+    )
+    .unwrap();
+    assert!(artwork::bounded_jpeg(
+        &local.cover(album.reference).await.unwrap()
+    ));
+}
+
+#[tokio::test]
 async fn local_catalog_and_ranges_preserve_identity_and_refuse_changed_files() {
     let fixture = Fixture::new();
     let path = fixture.wave("Untitled Ä.strange");

@@ -26,8 +26,10 @@ continuing the corresponding jobs.
 ## Download and play
 
 In **Tracks**, open a title's **⋮** menu and choose **Download original**, or select
-up to 100 tracks and choose **Download selected**. Search results and album tracks
-also offer a download action. These actions require a connected, eligible Plex
+up to 100 tracks and choose **Download selected**. Open an album and choose **Download album** to enqueue every track in disc/track
+order in one action. Album admission is atomic: if the album does not fit the
+200-job capacity, no subset is started; clear finished history first. Search
+results and individual album tracks also offer a download action. These actions require a connected, eligible Plex
 source. The server checks permission on the download request; being able to
 stream a track does not guarantee download permission.
 
@@ -51,11 +53,23 @@ selection uses the first Plex media representation, matching the existing
 original playback selection, and requires exactly one part. Multipart items
 are explicitly unsupported. There is no automatic transcode or representation
 switch on failure. Missing tags use the local provider's filename/folder
-fallbacks; local cover extraction is still unavailable.
+fallbacks. Embedded JPEG/PNG pictures and conventional folder covers are available
+through the local artwork provider. If Plex supplies its cover separately, Qoda
+saves a bounded `<audio filename>.qoda-cover.jpg` sidecar beside the original.
+Audio bytes and checksums stay unchanged. These covers work offline and remain
+when caches/sign-in are cleared. Artwork failure does not discard a downloaded
+original; a sidecar write failure appears in its job message.
+
+For older downloads with missing covers, choose **Download album** again (or
+**Download original** for a track). Verified existing originals are reused and
+missing cover sidecars are added without transferring the audio again. Existing
+images are never overwritten. Local covers are read afresh rather than borrowing
+the remote artwork cache's freshness, so restored covers become visible after
+a local rescan/reopening the album.
 
 ## Storage and interruptions
 
-The initial limits are one active transfer, 200 retained jobs, 100 tracks per
+The initial limits are one active transfer, 200 retained jobs, 100 selected tracks or one album per
 request, 8 GiB per file, 2,000 import records and 100 GiB of registered originals.
 Available filesystem space is checked as well; failed writes remain visible.
 The budget does not cause automatic music deletion. Clear finished history to

@@ -118,6 +118,16 @@ HOOKS = """
             next.output = Object.assign({}, next.output, {selection: {mode: "fidelity_resampled", device: "fixture", assume_stereo: true}, processing: {source: {rate: 44100, bits: 24}, target: {rate: 48000, bits: 16}, sample: "s16"}, source: {rate: 44100, bits: 24}, observed: {rate: 48000, format: "s16", valid_bits: 16, stereo_layout: false, stereo_assumed: true}});
             root.snapshot = next; root.showSettings("audio");
         }
+        function albumDownloadFixture(): void {
+            const next = Object.assign({}, root.snapshot);
+            next.libraries = [{id: "fixture", title: "Music", server: "Home library", downloads: true}];
+            next.downloads = Object.assign({}, next.downloads, {available: true});
+            const album = {reference: {source: "fixture", key: "0"}, title: "Soft geometry", artist: "Mira Vale", year: 2024, track_count: "3"};
+            const tracks = next.queue.entries.map((row,index) => ({track: row.track, disc: 1, number: index + 1}));
+            next.albums = {page: {source: "fixture", offset: "0", query: "", albums: [album], has_more: false}, selected: {album: album, revision: "album-v1", tracks: tracks}, covers: next.albums.covers || {}, busy: false, message: "", cache: {origin: "live"}};
+            root.closeSettings(); root.libraryId = "";
+            root.snapshot = next; root.libraryModel = next.libraries; libraryTabs.currentIndex = 2; root.libraryId = "fixture";
+        }
         function searchDownloadEligible(): bool { return globalSearch.canDownload("source-A"); }
         function searchFixture(): void {
             const next = Object.assign({}, root.snapshot);
@@ -531,6 +541,13 @@ def check(output=None, theme_check=False, guide=False):
                     wait_for(lambda value: value["theme"]["background"] == "#202830" and value["theme"]["controlHighlight"] == "#69c9ba", attempts=160)
                     assert len(requests) == request_count
                     print("Live dark/light palette, canonical aliases, atomic theme replacement, partial-file retention and unchanged queue/browser state passed")
+                ipc("albumDownloadFixture")
+                ipc("resize", 540, 760)
+                time.sleep(0.15)
+                capture("album-download-small")
+                ipc("resize", 1320, 820)
+                time.sleep(0.15)
+                capture("album-download-wide")
                 log.flush()
                 log.seek(0)
                 errors = [line for line in log.read().splitlines() if any(text in line for text in

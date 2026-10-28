@@ -101,6 +101,7 @@ ColumnLayout {
                 Button { objectName: "refreshAlbum"; text: I18n.t("Refresh album"); enabled: !albums.busy; onClicked: albums.openAlbum(albums.selected.album.reference) }
                 Button { objectName: "playAlbum"; text: I18n.t("Play album"); enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_play", null) }
                 Button { objectName: "queueAlbum"; text: I18n.t("+ Queue"); enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.queue("album_enqueue", null) }
+                Button { objectName: "downloadAlbum"; text: I18n.t("Download album"); visible: albums.downloadsEnabled; enabled: albums.canQueue && albums.trackModel.length > 0; onClicked: albums.downloadRequested({reference: albums.selected.album.reference, expected_revision: albums.selected.revision}) }
             }
         }
     }
@@ -164,25 +165,34 @@ ColumnLayout {
         clip: true; spacing: 5
         ScrollBar.vertical: ScrollBar {}
         delegate: Rectangle {
+            id: albumTrackRow
             required property var modelData
             required property int index
-            width: albumTracks.width; height: 68
+            width: albumTracks.width; height: trackLayout.implicitHeight + 16
             radius: 5; color: index % 2 ? Theme.alternate : Theme.surface
-            RowLayout {
+            GridLayout {
+                id: trackLayout
+                columns: albumTrackRow.width >= 720 ? 2 : 1
                 anchors.fill: parent; anchors.margins: 8
-                Label { text: modelData.disc + "." + modelData.number; color: Theme.muted; Layout.preferredWidth: 36 }
-                ColumnLayout {
+                RowLayout {
                     Layout.fillWidth: true
-                    Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
-                    Label { text: modelData.track.artist; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Label { text: modelData.disc + "." + modelData.number; color: Theme.muted; Layout.preferredWidth: 36 }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Label { text: modelData.track.artist; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
-                Button { text: "⋮"; implicitWidth: 28; visible: albums.downloadsEnabled; Accessible.name: I18n.t("More track actions"); onClicked: trackMenu.open()
-                    Menu { id: trackMenu; MenuItem { text: I18n.t("Download original"); enabled: albums.canQueue && albums.downloadsEnabled; onTriggered: albums.downloadRequested({reference: albums.selected.album.reference, expected_revision: albums.selected.revision, track_key: modelData.track.reference.key}) } }
+                }
+                Flow {
+                    objectName: "albumTrackActions"
+                    Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height; spacing: 6
+                    Button { text: "⋮"; implicitWidth: 28; visible: albums.downloadsEnabled; Accessible.name: I18n.t("More track actions"); onClicked: trackMenu.open()
+                        Menu { id: trackMenu; MenuItem { text: I18n.t("Download original"); enabled: albums.canQueue && albums.downloadsEnabled; onTriggered: albums.downloadRequested({reference: albums.selected.album.reference, expected_revision: albums.selected.revision, track_key: modelData.track.reference.key}) } }
                 }
                 Button { objectName: "playAlbumFromHere"; text: I18n.t("Play from here"); enabled: albums.canQueue; onClicked: albums.queue("album_play", modelData.track.reference.key) }
                 Button { objectName: "enqueueAlbumTrack"; text: I18n.t("+ Queue"); enabled: albums.canQueue; onClicked: albums.trackAction("enqueue", modelData.track) }
                 Button { objectName: "nextAlbumTrack"; text: I18n.t("Next"); enabled: albums.canQueue; onClicked: albums.trackAction("play_next", modelData.track) }
-            }
+                }            }
         }
     }
     RowLayout {

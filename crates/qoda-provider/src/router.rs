@@ -93,6 +93,10 @@ impl MusicProvider for Router {
     fn cover(&self, reference: AlbumRef) -> ProviderFuture<'_, Vec<u8>> {
         Box::pin(async move { self.route(reference.source)?.cover(reference).await })
     }
+    fn cache_covers(&self, source: SourceId) -> bool {
+        self.route(source)
+            .is_ok_and(|provider| provider.cache_covers(source))
+    }
     fn playlists(&self, source: SourceId, offset: u64) -> ProviderFuture<'_, PlaylistPage> {
         Box::pin(async move { self.route(source)?.playlists(source, offset).await })
     }

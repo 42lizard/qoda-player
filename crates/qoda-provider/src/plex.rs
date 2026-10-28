@@ -695,6 +695,11 @@ impl PlexProvider {
             format!("{}:{}", attr(media, "id"), attr(part, "id"))
         };
         Ok(Download {
+            album: node.attribute("parentRatingKey").map(|key| AlbumRef {
+                source,
+                key: key.to_owned(),
+            }),
+            artwork: None,
             expected_length: part.attribute("size").and_then(|n| n.parse().ok()),
             extension,
             media: PreparedMedia {

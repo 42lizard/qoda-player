@@ -275,6 +275,10 @@ pub trait MusicProvider: Send + Sync {
     fn cover(&self, _reference: AlbumRef) -> ProviderFuture<'_, Vec<u8>> {
         Box::pin(async { Err(ProviderError::Unsupported) })
     }
+    /// Local files can change independently of remote cache freshness.
+    fn cache_covers(&self, _source: SourceId) -> bool {
+        true
+    }
     fn albums(
         &self,
         _source: SourceId,
@@ -307,6 +311,8 @@ pub trait MusicProvider: Send + Sync {
     -> ProviderFuture<'_, PreparedMedia>;
 }
 pub struct Download {
+    pub album: Option<AlbumRef>,
+    pub artwork: Option<Vec<u8>>,
     pub expected_length: Option<u64>,
     pub media: PreparedMedia,
     pub extension: String,

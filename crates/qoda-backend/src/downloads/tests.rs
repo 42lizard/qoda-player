@@ -70,14 +70,20 @@ impl MusicProvider for Provider {
     fn download(
         &self,
         _: qoda_core::SourceId,
-        _: qoda_core::ProviderTrackKey,
+        key: qoda_core::ProviderTrackKey,
     ) -> ProviderFuture<'_, Download> {
         Box::pin(async move {
+            let mut track = self.track.clone();
+            track.reference.key = key;
             Ok(Download {
+                album: None,
+                artwork: Some(
+                    include_bytes!("../../../qoda-provider/tests/fixtures/cover.jpg").to_vec(),
+                ),
                 expected_length: None,
                 extension: "wav".into(),
                 media: PreparedMedia {
-                    track: self.track.clone(),
+                    track,
                     version: self.version.into(),
                     stream: Box::new(Stream {
                         bytes: self.bytes.clone(),
@@ -195,6 +201,26 @@ async fn completed_originals_are_idempotent_local_music_and_survive_account_and_
     local.scan().await.unwrap();
     let page = local.tracks(root.id, 0, String::new()).await.unwrap();
     assert_eq!(page.tracks.len(), 1);
+    let album = local
+        .albums(root.id, 0, String::new())
+        .await
+        .unwrap()
+        .albums
+        .remove(0);
+    assert!(qoda_provider::artwork::bounded_jpeg(
+        &local.cover(album.reference.clone()).await.unwrap()
+    ));
+    let imported = Store::load(&cache_files::Directory::open(&path.join("state")).unwrap())
+        .unwrap()
+        .imports
+        .remove(0);
+    let sidecar = root
+        .path
+        .join(import::MANAGED)
+        .join(qoda_provider::local::cover_sidecar(Path::new(
+            &imported.filename,
+        )));
+    std::fs::remove_file(&sidecar).unwrap();
     let media = local
         .prepare(root.id, page.tracks[0].reference.key.clone())
         .await
@@ -228,7 +254,11 @@ async fn completed_originals_are_idempotent_local_music_and_survive_account_and_
     })
     .await;
     assert_eq!(provider.opens.load(Ordering::SeqCst), 1);
+    assert!(sidecar.exists());
     controller.sync(2, None, vec![root.clone()]);
+    assert!(qoda_provider::artwork::bounded_jpeg(
+        &local.cover(album.reference).await.unwrap()
+    ));
     let clear = json!({"op":"download_clear","account_epoch":"2","downloads_revision":"1"});
     controller.request(clear.clone(), vec![]).unwrap();
     let cleared = until(&mut rx, |v| v["jobs"] == json!([])).await;
@@ -658,6 +688,74 @@ async fn changed_upstream_versions_require_a_new_explicit_download() {
     );
     until(&mut rx, |v| v["jobs"][0]["phase"] == "completed").await;
     assert_eq!(provider.opens.load(Ordering::SeqCst), 2);
+    controller.shutdown().await;
+    drop(controller);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+async fn album_downloads_admit_all_tracks_in_order_and_reject_capacity_without_partial_jobs() {
+    let (path, root, provider) = fixture(false, false);
+    let (tx, mut rx) = mpsc::channel(64);
+    let mut controller = Controller::start(Ok(path.join("state")), tx);
+    controller.sync(1, Some(provider.clone()), vec![root.clone()]);
+    request(
+        &controller,
+        "download_destination",
+        "0",
+        json!({"source":root.id}),
+        vec![],
+    );
+    until(&mut rx, |v| v["destination_revision"] == "1").await;
+    let tracks: Vec<_> = (1..=3)
+        .map(|n| {
+            let mut track = provider.track.clone();
+            track.reference.key = n.to_string().try_into().unwrap();
+            track
+        })
+        .collect();
+    let fields = json!({"reference":{"source":provider.track.reference.source,"key":"album"},"expected_revision":"album-v1"});
+    request(
+        &controller,
+        "download_start",
+        "1",
+        fields.clone(),
+        tracks.clone(),
+    );
+    until(&mut rx, |v| {
+        v["jobs"]
+            .as_array()
+            .is_some_and(|jobs| jobs.len() == 3 && jobs.iter().all(|j| j["phase"] == "completed"))
+    })
+    .await;
+    let store = Store::load(&cache_files::Directory::open(&path.join("state")).unwrap()).unwrap();
+    assert_eq!(
+        store
+            .jobs
+            .iter()
+            .map(|j| j.track.reference.clone())
+            .collect::<Vec<_>>(),
+        tracks
+            .iter()
+            .map(|t| t.reference.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(provider.opens.load(Ordering::SeqCst), 3);
+    request(
+        &controller,
+        "download_start",
+        "1",
+        fields,
+        vec![provider.track.clone(); MAX_JOBS],
+    );
+    let rejected = until(&mut rx, |v| {
+        v["message"]
+            .as_str()
+            .is_some_and(|s| s.contains("200 download jobs"))
+    })
+    .await;
+    assert_eq!(rejected["jobs"].as_array().unwrap().len(), 3);
+    assert_eq!(provider.opens.load(Ordering::SeqCst), 3);
     controller.shutdown().await;
     drop(controller);
     std::fs::remove_dir_all(path).unwrap();

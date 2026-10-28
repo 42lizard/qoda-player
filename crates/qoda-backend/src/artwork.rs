@@ -192,6 +192,9 @@ impl Artwork {
         }
     }
     async fn cached(&self, grant: &Grant) -> Option<Hit> {
+        if !grant.provider.cache_covers(grant.reference.source) {
+            return None;
+        }
         if let Some(hit) = self.data.lock().await.get(&grant.reference) {
             return Some(hit);
         }
@@ -337,7 +340,8 @@ async fn image(
         if *fetch_cancel.borrow() {
             return Err(StatusCode::NOT_FOUND);
         }
-        if let Some(hit) = art.data.lock().await.get(&grant.reference) {
+        let cacheable = grant.provider.cache_covers(grant.reference.source);
+        if cacheable && let Some(hit) = art.data.lock().await.get(&grant.reference) {
             return Ok(hit.image);
         }
         let image = grant
@@ -353,14 +357,18 @@ async fn image(
         if *fetch_cancel.borrow() {
             return Err(StatusCode::NOT_FOUND);
         }
-        data.put(grant.reference.clone(), image.clone());
+        if cacheable {
+            data.put(grant.reference.clone(), image.clone());
+        }
         drop(data);
-        if let Some(image) = &image {
+        if cacheable && let Some(image) = &image {
             art.disk
                 .put(grant.epoch, &grant.reference, image.clone())
                 .await;
         }
-        art.notify();
+        if cacheable {
+            art.notify();
+        }
         Ok(image)
     };
     let result = tokio::select! {r=tokio::time::timeout(Duration::from_secs(25),fetch)=>r.map_err(|_|StatusCode::GATEWAY_TIMEOUT)??,_=cancel.changed()=>return Err(StatusCode::NOT_FOUND)};
@@ -388,6 +396,9 @@ mod tests {
         mode: u8,
     }
     impl MusicProvider for Fixture {
+        fn cache_covers(&self, _: SourceId) -> bool {
+            self.mode != 5
+        }
         fn libraries(&self) -> Vec<Library> {
             vec![]
         }
@@ -424,6 +435,23 @@ mod tests {
             source: SourceId::new(),
             key: key.to_string(),
         }
+    }
+    #[tokio::test]
+    async fn mutable_local_artwork_is_revalidated_instead_of_reusing_remote_cache_freshness() {
+        let art = Artwork::start().await.unwrap();
+        let provider = Arc::new(Fixture {
+            mode: 5,
+            ..Fixture::default()
+        });
+        let url = art.publish(provider.clone(), [reference(1)]).await["1"].clone();
+        let http = reqwest::Client::new();
+        for _ in 0..2 {
+            assert_eq!(http.get(&url).send().await.unwrap().status(), 200);
+        }
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        assert!(art.data.lock().await.cache.is_empty());
+        art.revoke(false).await;
+        assert_eq!(http.get(&url).send().await.unwrap().status(), 404);
     }
     #[tokio::test]
     async fn lazy_bounded_urls_cache_hits_and_host_and_revocation_guards() {

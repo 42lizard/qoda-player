@@ -933,10 +933,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     .map(|t| vec![t])
                                     .map_err(str::to_owned);
                             }
-                            if v["reference"].is_object() && v["track_key"].is_string() {
-                                return albums
-                                    .tracks(&v)
-                                    .map(|tracks| tracks.into_iter().take(1).collect());
+                            if v["reference"].is_object() {
+                                return albums.tracks(&v).map(|mut tracks| {
+                                    if v["track_key"].is_string() {
+                                        tracks.truncate(1);
+                                    }
+                                    tracks
+                                });
                             }
                             catalog
                                 .selected_tracks(

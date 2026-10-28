@@ -10,8 +10,16 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+mod covers;
 mod media;
 mod probe;
+
+/// A per-file sidecar avoids collisions between albums in flat import folders.
+pub fn cover_sidecar(audio: &Path) -> PathBuf {
+    let mut name = audio.as_os_str().to_os_string();
+    name.push(".qoda-cover.jpg");
+    PathBuf::from(name)
+}
 
 pub const DOWNLOAD_DIRECTORY: &str = "Qoda Downloads";
 pub const DOWNLOAD_STAGING: &str = ".qoda-download-staging";
@@ -385,6 +393,22 @@ fn album_groups(entries: Vec<Arc<Entry>>, source: SourceId, query: &str) -> Vec<
     albums
 }
 impl MusicProvider for Local {
+    fn cache_covers(&self, _: SourceId) -> bool {
+        false
+    }
+    fn cover(&self, reference: AlbumRef) -> ProviderFuture<'_, Vec<u8>> {
+        Box::pin(async move {
+            let mut entries: Vec<_> = self
+                .entries(reference.source)?
+                .into_iter()
+                .filter(|entry| entry.album_key() == reference.key)
+                .collect();
+            entries.sort_by(|a, b| a.relative.cmp(&b.relative));
+            tokio::time::timeout(std::time::Duration::from_secs(10), covers::read(entries))
+                .await
+                .map_err(|_| ProviderError::LocalUnavailable)?
+        })
+    }
     fn cache_catalog(&self, _: SourceId) -> bool {
         false
     }
