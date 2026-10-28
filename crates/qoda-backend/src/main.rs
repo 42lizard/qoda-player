@@ -1347,7 +1347,7 @@ mod tests {
         audio.output_selection = None;
         assert_eq!(output_view(&settings, &[], &audio, 7)["ready"], false);
         assert!(
-            gain::PrepareError::Provider(qoda_provider::ProviderError::Unsupported)
+            gain::PrepareError::Verification("Invalid converted representation")
                 .provider()
                 .is_none()
         );
