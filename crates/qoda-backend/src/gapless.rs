@@ -221,6 +221,7 @@ impl Controller {
             source,
             continuous,
         } = prepared;
+        let gain = gain.ok_or("Speculative preparation has no original gain")?;
         let mut candidate = successor(queue)?.ok_or("The natural successor changed")?.2;
         if let Err(error) = candidate.update_selected(media.track.clone(), &media.version) {
             self.failed = Some((reply.key.owner_gen, reply.key.next));

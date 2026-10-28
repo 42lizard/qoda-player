@@ -1002,6 +1002,7 @@ async fn described_gain(bytes: &[u8]) -> crate::gain::Applied {
     .await
     .unwrap()
     .gain
+    .unwrap()
 }
 #[tokio::test]
 async fn native_opus_literal_gain_is_single_applied_and_unsupported_normalizers_stay_unity() {

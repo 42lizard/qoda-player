@@ -276,7 +276,7 @@ fn select(mode: Mode, album_session: bool, tags: Result<Tags, &'static str>) -> 
 }
 pub struct Prepared {
     pub media: PreparedMedia,
-    pub gain: Applied,
+    pub gain: Option<Applied>,
     pub source: Option<crate::source_format::Format>,
     pub continuous: Option<crate::continuous::Description>,
 }
@@ -361,18 +361,15 @@ pub async fn describe(media: PreparedMedia, request: Request) -> Result<Prepared
     };
     let source = verified.map(|verified| verified.format);
     let continuous = verified.and_then(|verified| verified.continuous);
-    let gain = if mode == Mode::Off {
-        Applied::off()
-    } else if media.stream.transcoded() {
-        let mut gain = Applied::off();
-        gain.mode = mode;
-        gain.reason = "Server-converted stream; original embedded gain must be retained by the playback owner";
-        gain
+    let gain = if media.stream.transcoded() {
+        None // Original gain belongs to retained prepared playback, never server tags.
+    } else if mode == Mode::Off {
+        Some(Applied::off())
     } else {
         let tags = tokio::time::timeout(Duration::from_secs(5), probe(media.stream.as_ref()))
             .await
             .unwrap_or(Err("Embedded tag read timed out; unity gain"));
-        select(mode, album_session, tags)
+        Some(select(mode, album_session, tags))
     };
     Ok(Prepared {
         media,
@@ -685,19 +682,20 @@ mod tests {
             fidelity: false,
         };
         let album = prepare(&provider, request(Mode::Auto, true)).await.unwrap();
-        assert_eq!(album.gain.db, -6.0);
+        assert_eq!(album.gain.as_ref().unwrap().db, -6.0);
         assert_eq!(album.media.version, "pinned");
         let track = prepare(&provider, request(Mode::Auto, false))
             .await
             .unwrap();
-        assert!(track.gain.limited);
-        assert!((track.gain.db + 20.0 * 0.8_f64.log10()).abs() < 1e-12);
+        assert!(track.gain.as_ref().unwrap().limited);
+        assert!((track.gain.as_ref().unwrap().db + 20.0 * 0.8_f64.log10()).abs() < 1e-12);
         let before = provider.reads.load(Ordering::SeqCst);
         assert_eq!(
             prepare(&provider, request(Mode::Off, false))
                 .await
                 .unwrap()
                 .gain
+                .unwrap()
                 .basis,
             "off"
         );

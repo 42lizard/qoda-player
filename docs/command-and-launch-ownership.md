@@ -270,3 +270,24 @@ queue-mismatched observed handoffs, successful and failed barriers, and failed
 current grants staying on the interruption path. Existing command tests retain
 untouched versus committed input, handoff reconciliation, late preparation and
 desktop expiry coverage through production command admission.
+
+## Prepared-load admission and retained gain (issues #65, #66)
+
+The native playback owner admits a prepared load after direct loading, silent
+inspection and resume verification. Its explicit-load generation covers staged
+successors until the next explicit invalidation. Stale work is stopped before
+publishing readiness or a source position; pending inspection/resume cannot
+unpause. Playback intent alone never admits an obsolete load.
+
+Prepared playback retains original gain together with account, listening session,
+queue occurrence and pinned media version. Seek and converted network recovery
+keep that record only for the same identity; cancellation discards it. A converted
+preparation has no original gain of its own. Completion resolves it from the
+retained record or refuses playback explicitly. Unknown embedded metadata remains
+an explicitly described unity outcome from original preparation, never evidence
+that server conversion preserved tags. Gain calculation and retry budgets retain
+their existing owners.
+
+The private native `InspectNext` test command routes a load through the real
+inspection implementation on null output and holds completion after native setup.
+It controls scheduling only; production has neither the command nor the gate.

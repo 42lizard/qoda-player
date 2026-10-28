@@ -83,6 +83,8 @@ impl Load {
 }
 pub enum Command {
     #[cfg(test)]
+    InspectNext(mpsc::Sender<()>, mpsc::Receiver<()>),
+    #[cfg(test)]
     Load(u64, String, f64),
     #[cfg(test)]
     LoadGain(u64, String, f64, Applied),
@@ -341,6 +343,9 @@ struct Native {
     active: Option<Active>,
     pending_start: Option<PendingStart>,
     probe: Option<PendingProbe>,
+    admitted_load: Option<u64>,
+    #[cfg(test)]
+    inspection_gate: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
     transcoded: bool,
     timeline_offset: f64,
     pcm: Option<PcmActive>,
@@ -501,6 +506,31 @@ impl Native {
             |pos| unsafe { property::<i64>(self.h, &format!("playlist/{pos}/id"), 4) } == Some(id),
         )
     }
+    /// Own final admission after direct loading, decoder inspection and resume.
+    /// The explicit-load generation also covers its staged successors; staging
+    /// does not supersede the cancellation fence of the listening run.
+    fn admit_load(&mut self) {
+        if self
+            .admitted_load
+            .is_some_and(|g| self.latest_load.load(Ordering::Acquire) != g)
+        {
+            self.stop();
+            self.current.entry_ready = false;
+            self.current.paused = true;
+            self.current.idle = self.h.is_null()
+                || unsafe { property::<c_int>(self.h, "idle-active", 3) }.unwrap_or(1) != 0;
+            return;
+        }
+        let playing = self.intent.load(Ordering::Acquire)
+            && self.probe.is_none()
+            && self.pending_start.is_none()
+            && self.current.error.is_none();
+        if !self.h.is_null() {
+            if !self.call(&["set", "pause", if playing { "no" } else { "yes" }]) {
+                self.current.error = Some("The audio engine rejected pause");
+            }
+        }
+    }
     fn sample(&mut self) {
         if self.h.is_null() {
             self.current.idle = true;
@@ -509,6 +539,13 @@ impl Native {
             self.current.position_seconds = None;
             self.current.output = None;
             self.current.output_selection = None;
+            return;
+        }
+        if self
+            .admitted_load
+            .is_some_and(|g| self.latest_load.load(Ordering::Acquire) != g)
+        {
+            self.admit_load();
             return;
         }
         if self.active.is_some()
@@ -540,9 +577,7 @@ impl Native {
                     && position <= start.target + 0.25
             }) {
                 self.pending_start = None;
-                if self.intent.load(Ordering::Acquire) && self.current.error.is_none() {
-                    self.call(&["set", "pause", "no"]);
-                }
+                self.admit_load();
             } else if std::time::Instant::now() >= start.deadline {
                 self.current.error = Some(
                     "Resume position could not be verified; source may not support seeking. Playback stays paused.",
@@ -598,12 +633,12 @@ impl Native {
                 }
                 let gain = Some(probe.load.gain.clone());
                 self.load_with_gain(probe.load, gain);
-                if self.intent.load(Ordering::Acquire)
-                    && self.current.error.is_none()
-                    && self.pending_start.is_none()
-                {
-                    self.call(&["set", "pause", "no"]);
+                #[cfg(test)]
+                if let Some((entered, release)) = self.inspection_gate.take() {
+                    entered.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(5)).unwrap();
                 }
+                self.admit_load();
                 return;
             }
             if self.current.error.is_some()
@@ -838,7 +873,10 @@ impl Native {
     }
     fn load(&mut self, load: Load) {
         self.transcoded = load.transcoded;
-        if self.route.as_ref().is_some_and(output::Selection::fidelity) {
+        let inspect = self.route.as_ref().is_some_and(output::Selection::fidelity);
+        #[cfg(test)]
+        let inspect = inspect || self.inspection_gate.is_some();
+        if inspect {
             if let Err(error) = self.replace_handle(None) {
                 self.current.error = Some(error);
                 self.intent.store(false, Ordering::Release);
@@ -1356,6 +1394,9 @@ impl Player {
                 active: None,
                 pending_start: None,
                 probe: None,
+                admitted_load: None,
+                #[cfg(test)]
+                inspection_gate: None,
                 transcoded: false,
                 timeline_offset: 0.0,
                 pcm: None,
@@ -1369,17 +1410,14 @@ impl Player {
                 match rx.recv_timeout(Duration::from_millis(20)) {
                     Ok(Command::Quit) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    #[cfg(test)]
+                    Ok(Command::InspectNext(entered, release)) => {
+                        native.inspection_gate = Some((entered, release));
+                    }
                     Ok(Command::FinishChain(owner)) => native.finish_chain(owner),
-                    Ok(Command::Pause(p)) => {
-                        let pause = p
-                            || !native.intent.load(Ordering::Acquire)
-                            || native.pending_start.is_some()
-                            || native.probe.is_some();
-                        if !native.h.is_null()
-                            && !native.call(&["set", "pause", if pause { "yes" } else { "no" }])
-                        {
-                            native.current.error = Some("The audio engine rejected pause");
-                        }
+                    Ok(Command::Pause(_)) => {
+                        // Player::send already owns desired intent.
+                        native.admit_load();
                     }
                     Ok(Command::Stop) => {
                         if !native.stop() {
@@ -1453,20 +1491,9 @@ impl Player {
                                 ..Default::default()
                             };
                         } else {
-                            let generation = load.generation;
+                            native.admitted_load = Some(load.generation);
                             native.load(load);
-                            let stale = native.latest_load.load(Ordering::Acquire) != generation;
-                            if stale {
-                                native.stop();
-                            }
-                            let playing = !stale
-                                && native.pending_start.is_none()
-                                && native.probe.is_none()
-                                && native.current.error.is_none()
-                                && native.intent.load(Ordering::Acquire);
-                            if !native.h.is_null() {
-                                native.call(&["set", "pause", if playing { "no" } else { "yes" }]);
-                            }
+                            native.admit_load();
                         }
                     }
                     Ok(Command::Configure(route, reply)) => {
@@ -1942,6 +1969,86 @@ mod tests {
         );
         assert!(!player.desired_playing.load(Ordering::Acquire));
         assert_eq!(player.status().generation, 1);
+    }
+    #[test]
+    fn replacement_during_silent_inspection_cannot_admit_old_audio() {
+        for pause in [false, true] {
+            let player = Player::with_output("null").unwrap();
+            let file = silent_file(4);
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            // Private scheduling hook: use the real inspection path with null
+            // output and hold after native setup, before final admission.
+            player.send(Command::InspectNext(entered_tx, release_rx));
+            player
+                .load_prepared(prepared(
+                    1,
+                    Some(output::Selection::Desktop),
+                    file.to_str().unwrap(),
+                ))
+                .unwrap();
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            player.invalidate_load(2);
+            let (snapshot_tx, snapshot_rx) = mpsc::channel();
+            player.tx.try_send(Command::Barrier(snapshot_tx)).unwrap();
+            if pause {
+                player.send(Command::Pause(true));
+            } else {
+                player
+                    .load_prepared(prepared(
+                        2,
+                        Some(output::Selection::Desktop),
+                        file.to_str().unwrap(),
+                    ))
+                    .unwrap();
+            }
+            release_tx.send(()).unwrap();
+            let obsolete = snapshot_rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .unwrap();
+            assert!(
+                !obsolete.entry_ready && obsolete.position_seconds.is_none(),
+                "{obsolete:?}"
+            );
+            if pause {
+                std::thread::sleep(Duration::from_millis(100));
+                let s = player.status();
+                assert!(
+                    s.paused && !s.entry_ready && s.position_seconds.is_none(),
+                    "{s:?}"
+                );
+            } else {
+                let s = wait_for(&player, |s| s.generation == 2 && s.entry_ready);
+                assert!(s.error.is_none(), "{s:?}");
+            }
+            drop(player);
+            std::fs::remove_file(file).unwrap();
+        }
+    }
+    #[test]
+    fn invalidated_playback_cannot_be_resumed_by_newer_intent() {
+        let player = Player::with_output("null").unwrap();
+        let file = silent_file(4);
+        player
+            .load_prepared(prepared(
+                1,
+                Some(output::Selection::Desktop),
+                file.to_str().unwrap(),
+            ))
+            .unwrap();
+        wait_for(&player, |s| s.generation == 1 && s.entry_ready);
+        player.invalidate_load(2);
+        // A later resume must never grant the obsolete generation permission to present.
+        player.send(Command::Pause(false));
+        std::thread::sleep(Duration::from_millis(120));
+        let status = player.status();
+        assert!(
+            status.paused && !status.entry_ready && status.position_seconds.is_none(),
+            "{status:?}"
+        );
+        drop(player);
+        std::fs::remove_file(file).unwrap();
     }
     #[test]
     fn pause_after_prepared_load_stays_paused_on_null_output() {

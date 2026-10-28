@@ -33,14 +33,27 @@ impl Selection {
             && Some(self.occurrence) == cx.queue.selected()
     }
 }
+/// Original gain and identity are retained as one value across converted seeks/recovery.
+struct Retained {
+    selection: Selection,
+    version: String,
+    gain: gain::Applied,
+}
+impl Retained {
+    fn matches(&self, cx: &Runtime<'_>) -> bool {
+        self.selection.account == cx.account
+            && self.selection.session == cx.queue.durable_stamp().0
+            && Some(self.selection.occurrence) == cx.queue.selected()
+            && Some(self.version.as_str()) == cx.queue.selected_version()
+    }
+}
 #[derive(Default)]
 pub struct Controller {
     pending: Option<JoinHandle<()>>,
     active: Option<Selection>,
     automatic: Option<u64>,
     recovery: recovery::Controller,
-    loaded: Option<Selection>,
-    loaded_gain: Option<gain::Applied>,
+    retained: Option<Retained>,
     fallback_attempted: Option<u64>,
 }
 pub struct Runtime<'a> {
@@ -68,18 +81,18 @@ impl Controller {
         }
         self.active = None;
         self.automatic = None;
-        self.loaded = None;
-        self.loaded_gain = None;
     }
     /// Account, output and explicit selection invalidation own both lifetimes.
     pub fn cancel(&mut self) {
         self.cancel_selected();
+        self.retained = None;
         self.recovery.cancel();
     }
     pub fn cancel_recovery(&mut self) -> bool {
         let cancelled = self.recovery.cancel();
         if cancelled {
             self.cancel_selected();
+            self.retained = None;
         }
         cancelled
     }
@@ -97,15 +110,13 @@ impl Controller {
         tx: mpsc::Sender<Event>,
         cx: &mut Runtime<'_>,
     ) -> Result<(), &'static str> {
-        let converted = cx.player.status().transcoded
-            && self.loaded.is_some_and(|key| {
-                key.account == cx.account
-                    && key.session == cx.queue.durable_stamp().0
-                    && Some(key.occurrence) == cx.queue.selected()
-            });
-        let retained_gain = converted.then(|| self.loaded_gain.clone()).flatten();
-        self.cancel();
-        self.loaded_gain = retained_gain;
+        let converted =
+            cx.player.status().transcoded && self.retained.as_ref().is_some_and(|r| r.matches(cx));
+        self.cancel_selected();
+        self.recovery.cancel();
+        if !converted {
+            self.retained = None;
+        }
         self.fallback_attempted = None;
         let Some(provider) = provider else {
             cx.state["selection"] = json!(track);
@@ -178,6 +189,17 @@ impl Controller {
         }
         let mut to_prepare = None;
         let mut automatic_next = false;
+        let r = r.and_then(|mut prepared| {
+            if prepared.media.stream.transcoded() {
+                let retained = self.retained.as_ref().filter(|r| r.matches(cx) && r.version == prepared.media.version)
+                    .ok_or(gain::PrepareError::Verification("Converted playback has no matching original gain; retry original media explicitly."))?;
+                prepared.gain = Some(retained.gain.clone());
+            }
+            if prepared.gain.is_none() {
+                return Err(gain::PrepareError::Verification("Prepared playback has no original gain outcome."));
+            }
+            Ok(prepared)
+        });
         match r {
             Ok(prepared) => {
                 let gain::Prepared {
@@ -215,13 +237,12 @@ impl Controller {
                     cx.state["intent"] = json!(if *cx.playing { "playing" } else { "paused" });
                     let transcoded = media.stream.transcoded();
                     let timeline_offset = media.stream.timeline_offset();
-                    let gain = if transcoded {
-                        self.loaded_gain.clone().unwrap_or(gain)
-                    } else {
-                        gain
-                    };
-                    self.loaded = Selection::capture(cx);
-                    self.loaded_gain = Some(gain.clone());
+                    let gain = gain.expect("completion resolved original gain");
+                    self.retained = Selection::capture(cx).map(|selection| Retained {
+                        selection,
+                        version: media.version.clone(),
+                        gain: gain.clone(),
+                    });
                     let url = cx.proxy.grant(media.stream).await;
                     if let Err(error) = cx.player.load_prepared(player::Load {
                         timeline_offset,
@@ -295,8 +316,20 @@ impl Controller {
             return Ok(());
         }
         self.fallback_attempted = Some(generation);
-        if self.loaded.is_none_or(|key| !key.matches(cx)) {
-            self.loaded_gain = cx.player.status().gain;
+        if !self.retained.as_ref().is_some_and(|r| r.matches(cx)) {
+            let status = cx.player.status();
+            self.retained = if status.generation == generation {
+                Selection::capture(cx)
+                    .zip(cx.queue.selected_version())
+                    .zip(status.gain)
+                    .map(|((selection, version), gain)| Retained {
+                        selection,
+                        version: version.to_owned(),
+                        gain,
+                    })
+            } else {
+                None
+            };
         }
         let (Some(provider), Some(version), Some(reference)) = (
             provider,
@@ -355,10 +388,9 @@ impl Controller {
     ) -> Result<(), &'static str> {
         *cx.playing = false;
         let transcoded = cx.player.status().transcoded;
-        let retained_gain = self.loaded_gain.clone();
         self.cancel_selected();
-        if transcoded {
-            self.loaded_gain = retained_gain;
+        if !transcoded || !self.retained.as_ref().is_some_and(|r| r.matches(cx)) {
+            self.retained = None;
         }
         let _ = cx.player.barrier().await;
         cx.gapless.invalidate();
@@ -768,7 +800,7 @@ mod tests {
                 generation: 1,
                 url,
                 position: 2.0,
-                gain: prepared.gain,
+                gain: gain::Applied::off(), // This live fixture explicitly selects gain off.
                 source: prepared.source,
                 description: None,
                 chain: false,
@@ -808,6 +840,8 @@ mod tests {
             Answer::Version("v1"),
             Answer::Version("v1"),
             Answer::Version("v1"),
+            Answer::Version("v1"),
+            Answer::Version("v1"),
         ])
         .await;
         let provider = Arc::new(Fallback {
@@ -831,7 +865,13 @@ mod tests {
         let (generation, reply) = media(&mut rx).await;
         let mut prepared = reply.unwrap();
         prepared.media.stream = Box::new(Unrecognized);
-        prepared.gain.db = -3.0;
+        let original = prepared.gain.as_mut().unwrap();
+        original.db = -3.0;
+        original.mode = gain::Mode::Track;
+        original.basis = "track";
+        original.limited = true;
+        original.reason = "Synthetic original gain with peak limiting";
+        let original_gain = serde_json::to_value(original).unwrap();
         owner
             .complete(generation, Ok(prepared), &mut env.runtime())
             .await;
@@ -896,7 +936,10 @@ mod tests {
         env.loaded().await;
         let status = env.player.status();
         assert!(status.transcoded && status.paused && !env.playing);
-        assert_eq!(status.gain.unwrap().db, -3.0);
+        assert_eq!(
+            serde_json::to_value(status.gain.unwrap()).unwrap(),
+            original_gain
+        );
         assert_eq!(env.queue.selected(), selected);
         assert_eq!(env.queue.selected_version(), Some("v1"));
         assert_eq!(serde_json::to_value(&env.queue).unwrap()["visit"], visit);
@@ -926,16 +969,100 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         owner
+            .interrupted(
+                ProviderError::Network,
+                false,
+                Some(provider.clone()),
+                tx.clone(),
+                &mut env.runtime(),
+            )
+            .await
+            .unwrap();
+        loop {
+            let Event::Recovery(reply) = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .unwrap()
+                .unwrap()
+            else {
+                panic!("Expected recovery");
+            };
+            let done = reply.result.is_some();
+            owner.recovered(reply, &mut env.runtime()).await;
+            if done {
+                break;
+            }
+        }
+        env.loaded().await;
+        let recovered = env.player.status();
+        assert!(recovered.paused && recovered.transcoded);
+        assert_eq!(
+            serde_json::to_value(recovered.gain.unwrap()).unwrap(),
+            original_gain
+        );
+        assert_eq!(serde_json::to_value(&env.queue).unwrap()["visit"], visit);
+        owner
             .unsupported(
                 generation,
                 true,
                 Some(provider.clone()),
+                tx.clone(),
+                &mut env.runtime(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+        owner
+            .start(
+                env.selected(),
+                false,
+                Some(provider),
                 tx,
                 &mut env.runtime(),
             )
             .await
             .unwrap();
-        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let (mismatch, reply) = media(&mut rx).await;
+        let mut prepared = reply.unwrap();
+        prepared.media.version = "different-version".into();
+        owner
+            .complete(mismatch, Ok(prepared), &mut env.runtime())
+            .await;
+        assert!(!env.playing);
+        assert!(
+            env.state["error"]
+                .as_str()
+                .unwrap()
+                .contains("original gain")
+        );
+        assert!(!env.player.barrier().await.unwrap().entry_ready);
+    }
+    #[tokio::test]
+    async fn converted_completion_without_original_gain_refuses_playback() {
+        let (mut env, provider) = Environment::new(vec![Answer::Version("v1")]).await;
+        let mut owner = Controller::default();
+        let (tx, mut rx) = mpsc::channel(8);
+        owner
+            .start(
+                env.selected(),
+                false,
+                Some(provider),
+                tx,
+                &mut env.runtime(),
+            )
+            .await
+            .unwrap();
+        let (g, reply) = media(&mut rx).await;
+        let mut prepared = reply.unwrap();
+        prepared.media.stream = Box::new(Converted(prepared.media.stream, 0.0));
+        owner.complete(g, Ok(prepared), &mut env.runtime()).await;
+        assert!(!env.playing);
+        assert!(
+            env.state["error"]
+                .as_str()
+                .unwrap()
+                .contains("original gain")
+        );
+        assert!(!env.player.barrier().await.unwrap().entry_ready);
     }
     #[tokio::test]
     async fn converted_completion_cannot_cross_account_or_output_cancellation() {

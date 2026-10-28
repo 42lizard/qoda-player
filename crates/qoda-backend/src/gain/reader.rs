@@ -714,13 +714,13 @@ mod tests {
             .unwrap();
             assert_eq!(prepared.media.version, "pinned-fixture");
             if mode == Mode::Off {
-                assert_eq!(prepared.gain.basis, "off");
+                assert_eq!(prepared.gain.as_ref().unwrap().basis, "off");
                 assert_eq!(start.elapsed(), std::time::Duration::ZERO);
                 assert!(!dropped.load(Ordering::SeqCst));
             } else {
-                assert_eq!(prepared.gain.basis, "unity");
+                assert_eq!(prepared.gain.as_ref().unwrap().basis, "unity");
                 assert_eq!(
-                    prepared.gain.reason,
+                    prepared.gain.as_ref().unwrap().reason,
                     "Embedded tag read timed out; unity gain"
                 );
                 assert_eq!(start.elapsed(), std::time::Duration::from_secs(5));
