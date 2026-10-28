@@ -324,7 +324,7 @@ pub async fn convert(
     version: String,
     position: f64,
 ) -> Result<Prepared, PrepareError> {
-    let media = provider.prepare_transcoded(request.reference.clone(), version.clone(), position).await.map_err(|error| if error == ProviderError::Unsupported {
+    let media = provider.prepare_transcoded(qoda_provider::TranscodeRequest { reference: request.reference.clone(), version: version.clone(), position, targets: crate::player::transcode_targets() }).await.map_err(|error| if error == ProviderError::Unsupported {
         PrepareError::Verification("The original format is not recognized locally and this provider cannot supply a playable converted stream.")
     } else { PrepareError::Provider(error) })?;
     if media.version != version

@@ -212,6 +212,7 @@ impl Controller {
                     cx.state["intent"] = json!(if *cx.playing { "playing" } else { "paused" });
                 } else {
                     cx.state["selection"] = json!(media.track);
+                    cx.state["intent"] = json!(if *cx.playing { "playing" } else { "paused" });
                     let transcoded = media.stream.transcoded();
                     let timeline_offset = media.stream.timeline_offset();
                     let gain = if transcoded {
@@ -315,6 +316,7 @@ impl Controller {
         cx.player.invalidate_load(next);
         *cx.presented = None;
         *cx.playing = playing;
+        cx.state["intent"] = json!(if playing { "playing" } else { "paused" });
         self.active = Selection::capture(cx);
         self.automatic = None;
         let request = gain::Request {
@@ -671,10 +673,14 @@ mod tests {
         }
         fn prepare_transcoded(
             &self,
-            reference: qoda_core::TrackRef,
-            version: String,
-            position: f64,
+            request: qoda_provider::TranscodeRequest,
         ) -> qoda_provider::ProviderFuture<'_, qoda_provider::PreparedMedia> {
+            let qoda_provider::TranscodeRequest {
+                reference,
+                version,
+                position,
+                targets: _,
+            } = request;
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Box::pin(async move {
                 let mut media = self.inner.prepare(reference.source, reference.key).await?;
@@ -732,7 +738,12 @@ mod tests {
             .await
             .unwrap();
         let media = provider
-            .prepare_transcoded(track.reference.clone(), original.version.clone(), 2.0)
+            .prepare_transcoded(qoda_provider::TranscodeRequest {
+                reference: track.reference.clone(),
+                version: original.version.clone(),
+                position: 2.0,
+                targets: crate::player::transcode_targets(),
+            })
             .await
             .unwrap();
         assert_eq!(media.version, original.version);
@@ -838,16 +849,47 @@ mod tests {
             0,
             "direct playback must precede provider conversion"
         );
+        let mut observations = crate::observation::Controller::default();
+        let mut reporting = crate::reporting::Controller::new();
+        let mut archive =
+            crate::archive::Controller::start(Err("Archive disabled for this synthetic test"));
+        let tick = observations
+            .tick(&mut crate::observation::Runtime {
+                queue: &mut env.queue,
+                player: &env.player,
+                epochs: &mut env.epochs,
+                gapless: &mut env.gapless,
+                proxy: &env.proxy,
+                confirmed: &mut env.presented,
+                playing: &mut env.playing,
+                reporting: &mut reporting,
+                archive: &mut archive,
+                scope: crate::observation::Scope {
+                    account: env.account,
+                    provider: Some(provider.clone()),
+                    can_raise: false,
+                },
+            })
+            .await
+            .unwrap();
+        if tick.problem.is_some() {
+            env.state["intent"] = json!("paused");
+        }
+        let Some(Event::Unsupported(failed, playing)) = tick.event else {
+            panic!("Expected production unsupported-format observation");
+        };
+        assert_eq!(failed, generation);
         owner
             .unsupported(
                 generation,
-                true,
+                playing,
                 Some(provider.clone()),
                 tx.clone(),
                 &mut env.runtime(),
             )
             .await
             .unwrap();
+        assert_eq!(env.state["intent"], "playing");
         let (fallback, reply) = media(&mut rx).await;
         env.command(&mut owner, "pause").await;
         owner.complete(fallback, reply, &mut env.runtime()).await;

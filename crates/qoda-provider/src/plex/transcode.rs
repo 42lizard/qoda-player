@@ -5,32 +5,25 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-#[derive(Clone, Copy)]
-enum Codec {
-    Flac,
-    Mp3,
-}
-impl Codec {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Flac => "flac",
-            Self::Mp3 => "mp3",
-        }
-    }
-}
-struct Session {
+use crate::TranscodeCodec as Codec;
+#[derive(Clone)]
+struct Conversion {
     http: Client,
     source: Source,
     key: String,
-    id: String,
     codec: Codec,
     position: f64,
+}
+struct Session {
+    request: Conversion,
+    id: String,
     operation: tokio::sync::Mutex<()>,
     stopped: AtomicBool,
 }
 impl Session {
     fn endpoint(&self, operation: &str) -> Url {
         let mut url = self
+            .request
             .source
             .base
             .join(&format!("music/:/transcode/universal/{operation}"))
@@ -39,16 +32,16 @@ impl Session {
             url.query_pairs_mut().append_pair("session", &self.id);
             return url;
         }
-        let codec = self.codec.name();
+        let codec = self.request.codec.name();
         let profile = format!(
             "add-transcode-target(type=musicProfile&context=streaming&protocol=http&container={codec}&audioCodec={codec}&replace=true)"
         );
         url.query_pairs_mut().extend_pairs([
-            ("path", format!("/library/metadata/{}", self.key)),
+            ("path", format!("/library/metadata/{}", self.request.key)),
             ("mediaIndex", "0".into()),
             ("partIndex", "0".into()),
             ("protocol", "http".into()),
-            ("offset", self.position.to_string()),
+            ("offset", self.request.position.to_string()),
             ("fastSeek", "0".into()),
             ("directPlay", "0".into()),
             ("directStream", "0".into()),
@@ -65,9 +58,10 @@ impl Session {
     }
     async fn decision(&self) -> Result<(), ProviderError> {
         let response = self
+            .request
             .http
             .get(self.endpoint("decision"))
-            .headers(self.source.headers.clone())
+            .headers(self.request.source.headers.clone())
             .timeout(Duration::from_secs(5))
             .send()
             .await
@@ -92,8 +86,8 @@ impl Session {
             .descendants()
             .find(|n| n.has_tag_name("Media"))
             .ok_or(ProviderError::Unsupported)?;
-        if media.attribute("audioCodec") != Some(self.codec.name())
-            || media.attribute("container") != Some(self.codec.name())
+        if media.attribute("audioCodec") != Some(self.request.codec.name())
+            || media.attribute("container") != Some(self.request.codec.name())
         {
             return Err(ProviderError::Unsupported);
         }
@@ -105,9 +99,10 @@ impl Session {
             return Ok(());
         }
         let response = self
+            .request
             .http
             .get(self.endpoint("stop"))
-            .headers(self.source.headers.clone())
+            .headers(self.request.source.headers.clone())
             .timeout(Duration::from_secs(3))
             .send()
             .await
@@ -122,9 +117,9 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if !self.stopped.load(Ordering::Acquire) {
-            let http = self.http.clone();
+            let http = self.request.http.clone();
             let endpoint = self.endpoint("stop");
-            let headers = self.source.headers.clone();
+            let headers = self.request.source.headers.clone();
             if let Ok(runtime) = tokio::runtime::Handle::try_current() {
                 runtime.spawn(async move {
                     let _ = http
@@ -162,23 +157,15 @@ struct Lifetime {
     sessions: Vec<Arc<Session>>,
 }
 struct Transcoded {
-    http: Client,
-    source: Source,
-    key: String,
-    codec: Codec,
-    position: f64,
+    request: Conversion,
     lifetime: Mutex<Lifetime>,
     readers: Arc<tokio::sync::Semaphore>,
 }
 impl Transcoded {
     fn session(&self) -> Arc<Session> {
         Arc::new(Session {
-            http: self.http.clone(),
-            source: self.source.clone(),
-            key: self.key.clone(),
+            request: self.request.clone(),
             id: uuid::Uuid::new_v4().to_string(),
-            codec: self.codec,
-            position: self.position,
             operation: Default::default(),
             stopped: AtomicBool::new(false),
         })
@@ -186,7 +173,7 @@ impl Transcoded {
 }
 impl MediaSource for Transcoded {
     fn timeline_offset(&self) -> f64 {
-        self.position
+        self.request.position
     }
     fn transcoded(&self) -> bool {
         true
@@ -219,7 +206,7 @@ impl MediaSource for Transcoded {
             if head {
                 return Ok(MediaResponse {
                     status: 200,
-                    content_type: Some(format!("audio/{}", self.codec.name())),
+                    content_type: Some(format!("audio/{}", self.request.codec.name())),
                     content_length: None,
                     content_range: None,
                     etag: None,
@@ -249,9 +236,10 @@ impl MediaSource for Transcoded {
             let operation = session.operation.lock().await;
             session.decision().await?;
             let mut request = self
+                .request
                 .http
-                .get(session.endpoint(&format!("start.{}", self.codec.name())))
-                .headers(self.source.headers.clone());
+                .get(session.endpoint(&format!("start.{}", self.request.codec.name())))
+                .headers(self.request.source.headers.clone());
             if let Some(range) = range {
                 request = request.header(RANGE, range.header());
             }
@@ -325,11 +313,15 @@ impl MediaSource for Transcoded {
 impl PlexProvider {
     pub(super) async fn transcode(
         &self,
-        reference: TrackRef,
-        version: String,
-        position: f64,
+        request: TranscodeRequest,
     ) -> Result<PreparedMedia, ProviderError> {
-        if !position.is_finite() || !(0.0..=604800.0).contains(&position) {
+        let TranscodeRequest {
+            reference,
+            version,
+            position,
+            targets,
+        } = request;
+        if !position.is_finite() || !(0.0..=604800.0).contains(&position) || targets.is_empty() {
             return Err(ProviderError::Unsupported);
         }
         let original = self
@@ -343,13 +335,18 @@ impl PlexProvider {
             .get(&reference.source)
             .ok_or(ProviderError::UnknownSource)?
             .clone();
-        for codec in [Codec::Flac, Codec::Mp3] {
+        for codec in [Codec::Flac, Codec::Mp3]
+            .into_iter()
+            .filter(|c| targets.contains(c))
+        {
             let stream = Transcoded {
-                http: self.http.clone(),
-                source: source.clone(),
-                key: reference.key.clone().into(),
-                codec,
-                position,
+                request: Conversion {
+                    http: self.http.clone(),
+                    source: source.clone(),
+                    key: reference.key.clone().into(),
+                    codec,
+                    position,
+                },
                 lifetime: Default::default(),
                 readers: Arc::new(tokio::sync::Semaphore::new(1)),
             };
@@ -384,6 +381,14 @@ mod tests {
         http::{StatusCode, Uri},
     };
     use std::sync::Mutex;
+    fn request(reference: TrackRef, version: String, position: f64) -> TranscodeRequest {
+        TranscodeRequest {
+            reference,
+            version,
+            position,
+            targets: vec![TranscodeCodec::Flac, TranscodeCodec::Mp3],
+        }
+    }
     #[derive(Clone, Default)]
     struct Fixture {
         requests: Arc<Mutex<Vec<String>>>,
@@ -474,6 +479,51 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn locally_unsupported_flac_is_skipped_and_source_offset_is_retained() {
+        let f = Fixture::default();
+        let (provider, reference, server) = f.start().await;
+        let media = provider
+            .prepare_transcoded(TranscodeRequest {
+                reference,
+                version: "7:8".into(),
+                position: 12.5,
+                targets: vec![TranscodeCodec::Mp3],
+            })
+            .await
+            .unwrap();
+        assert_eq!(media.stream.timeline_offset(), 12.5);
+        let mut response = media.stream.open(None, false).await.unwrap();
+        assert_eq!(
+            response.body.next().await.unwrap().unwrap().as_ref(),
+            b"ID3fixture"
+        );
+        media.stream.close().await.unwrap();
+        let requests = f.requests.lock().unwrap();
+        assert!(requests.iter().any(|r| r.contains("start.mp3")
+            && r.contains("offset=12.5")
+            && r.contains("fastSeek=0")));
+        assert!(!requests.iter().any(|r| r.contains("audioCodec=flac")));
+        server.abort();
+    }
+    #[tokio::test]
+    async fn no_local_conversion_target_starts_no_server_work() {
+        let f = Fixture::default();
+        let (provider, reference, server) = f.start().await;
+        assert!(matches!(
+            provider
+                .prepare_transcoded(TranscodeRequest {
+                    reference,
+                    version: "7:8".into(),
+                    position: 0.0,
+                    targets: vec![]
+                })
+                .await,
+            Err(ProviderError::Unsupported)
+        ));
+        assert!(f.requests.lock().unwrap().is_empty());
+        server.abort();
+    }
+    #[tokio::test]
     async fn unavailable_lossless_target_uses_mp3_but_access_denial_does_not_retry() {
         let f = Fixture {
             reject_flac: true,
@@ -481,7 +531,7 @@ mod tests {
         };
         let (provider, reference, server) = f.start().await;
         let media = provider
-            .prepare_transcoded(reference, "7:8".into(), 0.0)
+            .prepare_transcoded(request(reference, "7:8".into(), 0.0))
             .await
             .unwrap();
         let mut response = media.stream.open(None, false).await.unwrap();
@@ -506,7 +556,7 @@ mod tests {
         let (provider, reference, server) = f.start().await;
         assert!(matches!(
             provider
-                .prepare_transcoded(reference, "7:8".into(), 0.0)
+                .prepare_transcoded(request(reference, "7:8".into(), 0.0))
                 .await,
             Err(ProviderError::AccessDenied)
         ));
@@ -519,7 +569,7 @@ mod tests {
         let (provider, reference, server) = f.start().await;
         assert!(matches!(
             provider
-                .prepare_transcoded(reference, "different-version".into(), 0.0)
+                .prepare_transcoded(request(reference, "different-version".into(), 0.0))
                 .await,
             Err(ProviderError::UnsupportedMedia)
         ));
@@ -537,7 +587,7 @@ mod tests {
         let f = Fixture::default();
         let (provider, reference, server) = f.start().await;
         let media = provider
-            .prepare_transcoded(reference, "7:8".into(), 0.0)
+            .prepare_transcoded(request(reference, "7:8".into(), 0.0))
             .await
             .unwrap();
         let response = media.stream.open(None, false).await.unwrap();
@@ -565,7 +615,7 @@ mod tests {
         let f = Fixture::default();
         let (provider, reference, server) = f.start().await;
         let media = provider
-            .prepare_transcoded(reference.clone(), "7:8".into(), 0.0)
+            .prepare_transcoded(request(reference.clone(), "7:8".into(), 0.0))
             .await
             .unwrap();
         assert_eq!(media.version, "7:8");

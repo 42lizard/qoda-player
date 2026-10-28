@@ -22,13 +22,6 @@ struct NativeEvent {
     data: *mut c_void,
 }
 #[repr(C)]
-struct LogMessage {
-    prefix: *const c_char,
-    level: *const c_char,
-    text: *const c_char,
-    log_level: c_int,
-}
-#[repr(C)]
 struct StartFile {
     entry: i64,
 }
@@ -43,7 +36,6 @@ struct EndFile {
 #[link(name = "mpv")]
 unsafe extern "C" {
     fn mpv_create() -> *mut c_void;
-    fn mpv_request_log_messages(h: *mut c_void, level: *const c_char) -> c_int;
     fn mpv_free(data: *mut c_void);
     fn mpv_set_option_string(h: *mut c_void, k: *const c_char, v: *const c_char) -> c_int;
     fn mpv_initialize(h: *mut c_void) -> c_int;
@@ -241,6 +233,30 @@ fn decoded_format(h: *mut c_void, hint: Option<Format>) -> Option<Format> {
         stereo,
     })
 }
+/// Discover only optional server targets, from this libmpv build's canonical codecs.
+pub(crate) fn transcode_targets() -> Vec<qoda_provider::TranscodeCodec> {
+    use qoda_provider::TranscodeCodec;
+    static TARGETS: std::sync::OnceLock<Vec<TranscodeCodec>> = std::sync::OnceLock::new();
+    TARGETS
+        .get_or_init(|| {
+            let Ok(h) = create_handle("null", &[]) else {
+                return Vec::new();
+            };
+            let count = unsafe { property::<i64>(h, "decoder-list/count", 4) }.unwrap_or(0);
+            let codecs: std::collections::HashSet<_> = (0..count.clamp(0, 4096))
+                .filter_map(|i| text_property(h, &format!("decoder-list/{i}/codec")))
+                .collect();
+            let targets = [TranscodeCodec::Flac, TranscodeCodec::Mp3]
+                .into_iter()
+                .filter(|codec| codecs.contains(codec.name()))
+                .collect();
+            unsafe {
+                mpv_terminate_destroy(h);
+            }
+            targets
+        })
+        .clone()
+}
 struct PendingProbe {
     load: Load,
     deadline: std::time::Instant,
@@ -302,8 +318,6 @@ fn create_handle(output: &str, extra: &[(String, String)]) -> Result<*mut c_void
         if unsafe { mpv_initialize(h) } < 0 {
             return Err("Audio engine could not initialize output");
         }
-        let level = CString::new("warn").unwrap();
-        let _ = unsafe { mpv_request_log_messages(h, level.as_ptr()) };
         Ok(())
     })();
     if let Err(error) = configured {
@@ -327,7 +341,6 @@ struct Native {
     active: Option<Active>,
     pending_start: Option<PendingStart>,
     probe: Option<PendingProbe>,
-    unsupported_decoder: bool,
     transcoded: bool,
     timeline_offset: f64,
     pcm: Option<PcmActive>,
@@ -724,15 +737,6 @@ impl Native {
             if event.id == 0 {
                 break;
             }
-            if event.id == 2 && !event.data.is_null() {
-                let message = unsafe { &*event.data.cast::<LogMessage>() };
-                if !message.text.is_null() {
-                    let text = unsafe { std::ffi::CStr::from_ptr(message.text) }.to_string_lossy();
-                    if text.contains("Cannot find codec") || text.contains("No audio decoder") {
-                        self.unsupported_decoder = true;
-                    }
-                }
-            }
             if event.id == 6 && !event.data.is_null() {
                 let id = unsafe { (*event.data.cast::<StartFile>()).entry };
                 if let Some(Entry {
@@ -790,8 +794,9 @@ impl Native {
                         self.ended = Some((end.entry, self.current.generation));
                     }
                     if end.error < 0 {
-                        self.current.unsupported_format = matches!(end.error, -17 | -18)
-                            || self.unsupported_decoder && end.error == -16;
+                        // Native codes, not asynchronous log ordering: no playable audio,
+                        // unknown format, or an explicitly unsupported feature.
+                        self.current.unsupported_format = matches!(end.error, -18..=-16);
                         self.current.error =
                             Some("Playback failed. Check server access and audio output.");
                         self.intent.store(false, Ordering::Release);
@@ -1025,7 +1030,6 @@ impl Native {
             deadline: std::time::Instant::now() + Duration::from_secs(5),
         });
         let options = file_options(position, gain.as_ref(), processing);
-        self.unsupported_decoder = false;
         self.entries.clear();
         self.entry = None;
         self.future = None;
@@ -1352,7 +1356,6 @@ impl Player {
                 active: None,
                 pending_start: None,
                 probe: None,
-                unsupported_decoder: false,
                 transcoded: false,
                 timeline_offset: 0.0,
                 pcm: None,
@@ -1821,6 +1824,53 @@ mod tests {
         assert!(status.paused && status.idle);
         assert!(status.error.unwrap().contains("device"), "{status:?}");
         assert_eq!(status.position_seconds, None);
+        assert!(status.output.is_none());
+        drop(player);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn conversion_targets_come_from_installed_decoder_capabilities() {
+        let targets = transcode_targets();
+        assert!(targets.contains(&qoda_provider::TranscodeCodec::Flac));
+        assert!(targets.contains(&qoda_provider::TranscodeCodec::Mp3));
+    }
+    #[test]
+    fn missing_native_decoder_is_eligible_for_provider_fallback() {
+        let path =
+            std::env::temp_dir().join(format!("qoda-missing-decoder-{}.m4a", uuid::Uuid::new_v4()));
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=44100:cl=stereo",
+                    "-t",
+                    "0.2",
+                    "-c:a",
+                    "aac",
+                    "-y"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let player = Player::with_options("null", &[("ad", "pcm_s16le,-".into())]).unwrap();
+        player
+            .load_prepared(prepared(
+                1,
+                Some(output::Selection::Desktop),
+                path.to_str().unwrap(),
+            ))
+            .unwrap();
+        let status = wait_for(&player, |s| s.error.is_some());
+        assert!(
+            status.unsupported_format,
+            "unavailable decoder must select provider fallback: {status:?}"
+        );
         assert!(status.output.is_none());
         drop(player);
         std::fs::remove_file(path).unwrap();

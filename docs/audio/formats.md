@@ -20,7 +20,8 @@ needed. An unsupported output route never silently changes to Desktop.
 
 ## Plex fallback
 
-A locally unrecognized format or unavailable decoder can trigger one bounded
+A locally unrecognized format, unavailable decoder or lack of playable audio can
+trigger one bounded
 server-conversion attempt for that native load. An unreadable header can also be
 reported by mpv as unknown format; the server may still refuse it. Generic decode
 errors, authentication/access failures, network interruptions and output-device
@@ -28,7 +29,8 @@ failures do not select transcoding. Failure of converted playback ends the attem
 there is no format-fallback loop.
 
 Plex conversion is optional. Qoda verifies that the server still exposes the pinned
-original version, negotiates a progressive HTTP audio target and prefers FLAC.
+original version, negotiates a progressive HTTP audio target that this libmpv build can decode and
+prefers FLAC. Targets absent from the installed decoder list are skipped.
 If the server explicitly refuses that target, it tries MP3. Servers that cannot
 provide either target report that conversion is unsupported; manifests are not
 passed directly to mpv with server credentials. The display labels **Plex

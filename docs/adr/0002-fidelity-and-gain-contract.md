@@ -33,7 +33,8 @@ allows float/integer conversion and stereo mixing, reported explicitly.
 A provider-produced representation retains the original media-version and visit
 identity. Original selected ReplayGain is retained and applied once; server output
 is not assumed to retain original embedded tags. Progressive Plex conversion
-prefers FLAC and can use MP3 after an explicit server target refusal. The display
+prefers locally decodable FLAC and can use locally decodable MP3 when FLAC is
+unavailable or the server explicitly refuses that target. The display
 names transcoding and the actual decoded codec. No additional physical output or
 unqualified gapless guarantees follow from broader input decoding. See
 [format support](../audio/formats.md).

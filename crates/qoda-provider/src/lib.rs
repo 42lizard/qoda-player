@@ -202,14 +202,29 @@ impl std::fmt::Display for ProviderError {
 }
 impl std::error::Error for ProviderError {}
 
+/// Compatible server output targets; direct input has no codec whitelist.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TranscodeCodec {
+    Flac,
+    Mp3,
+}
+impl TranscodeCodec {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Flac => "flac",
+            Self::Mp3 => "mp3",
+        }
+    }
+}
+pub struct TranscodeRequest {
+    pub reference: TrackRef,
+    pub version: String,
+    pub position: f64,
+    pub targets: Vec<TranscodeCodec>,
+}
 pub trait MusicProvider: Send + Sync {
     /// Optional fallback for a pinned original version after local unsupported decoding.
-    fn prepare_transcoded(
-        &self,
-        _reference: TrackRef,
-        _version: String,
-        _position: f64,
-    ) -> ProviderFuture<'_, PreparedMedia> {
+    fn prepare_transcoded(&self, _request: TranscodeRequest) -> ProviderFuture<'_, PreparedMedia> {
         Box::pin(async { Err(ProviderError::Unsupported) })
     }
     /// Confirmed nominal playback only. Preparation never calls this operation.
