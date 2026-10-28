@@ -1040,5 +1040,6 @@
   "Download ownership lock is unsafe.": "Die Sperre für den Download-Zugriff ist unsicher.",
   "Downloads are in use by another backend.": "Downloads werden von einem anderen Backend verwendet.",
   "Download paused because Qoda stopped.": "Download pausiert, weil Qoda beendet wurde.",
-  "Local copy verification was cancelled.": "Die Überprüfung der lokalen Kopie wurde abgebrochen."
+  "Local copy verification was cancelled.": "Die Überprüfung der lokalen Kopie wurde abgebrochen.",
+  "Unresolved publications were kept. Retry them to verify the local copy before clearing history.": "Ungeklärte Veröffentlichungen wurden behalten. Wiederhole sie, um die lokale Kopie vor dem Löschen des Verlaufs zu prüfen."
 }

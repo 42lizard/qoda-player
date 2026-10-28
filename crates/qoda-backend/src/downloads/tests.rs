@@ -10,6 +10,7 @@ struct Provider {
     opens: Arc<AtomicUsize>,
     pause: bool,
     wrong_length: bool,
+    version: &'static str,
     pause_close: Arc<AtomicBool>,
 }
 struct Stream {
@@ -77,7 +78,7 @@ impl MusicProvider for Provider {
                 extension: "wav".into(),
                 media: PreparedMedia {
                     track: self.track.clone(),
-                    version: "original-v1".into(),
+                    version: self.version.into(),
                     stream: Box::new(Stream {
                         bytes: self.bytes.clone(),
                         opens: self.opens.clone(),
@@ -139,6 +140,7 @@ fn fixture(pause: bool, wrong_length: bool) -> (PathBuf, Root, Arc<Provider>) {
         opens: Arc::new(AtomicUsize::new(0)),
         pause,
         wrong_length,
+        version: "original-v1",
         pause_close: Arc::new(AtomicBool::new(false)),
     });
     (path, root, provider)
@@ -277,6 +279,27 @@ async fn incomplete_and_cancelled_downloads_are_not_local_tracks_and_restart_sta
     );
     until(&mut rx, |v| v["jobs"][0]["phase"] == "running").await;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    // A stalled download body must leave browsing and native transport usable.
+    let proxy = crate::proxy::Proxy::start().await.unwrap();
+    let player = crate::player::Player::test_output("null").unwrap();
+    let url = proxy
+        .grant(Box::new(Stream {
+            bytes: provider.bytes.clone(),
+            opens: Arc::new(AtomicUsize::new(0)),
+            pause: false,
+            wrong_length: false,
+            pause_close: Arc::new(AtomicBool::new(false)),
+        }))
+        .await;
+    player.send(crate::player::Command::Load(1, url, 0.0));
+    player.send(crate::player::Command::Pause(false));
+    crate::gapless::tests::wait(&player, |s| s.position_seconds.is_some_and(|p| p > 0.0)).await;
+    player.send(crate::player::Command::Pause(true));
+    tokio::time::timeout(std::time::Duration::from_secs(2), player.barrier())
+        .await
+        .unwrap()
+        .unwrap();
+    proxy.revoke().await;
     let local = qoda_provider::local::Local::new(vec![root.clone()]);
     local.scan().await.unwrap();
     assert!(
@@ -384,7 +407,7 @@ async fn restart_reconciles_a_published_original_before_completion_was_checkpoin
         json!({}),
         vec![provider.track.clone()],
     );
-    until(&mut rx, |v| v["jobs"][0]["phase"] == "running").await;
+    let running = until(&mut rx, |v| v["jobs"][0]["phase"] == "running").await;
     let local = qoda_provider::local::Local::new(vec![root.clone()]);
     for _ in 0..30 {
         local.scan().await.unwrap();
@@ -407,6 +430,30 @@ async fn restart_reconciles_a_published_original_before_completion_was_checkpoin
             .tracks
             .len(),
         1
+    );
+    request(
+        &controller,
+        "download_cancel",
+        "1",
+        json!({"job_id":running["jobs"][0]["id"]}),
+        vec![],
+    );
+    until(&mut rx, |v| v["jobs"][0]["phase"] == "cancelled").await;
+    request(&controller, "download_clear", "1", json!({}), vec![]);
+    until(&mut rx, |v| {
+        v["message"]
+            .as_str()
+            .is_some_and(|s| s.contains("Unresolved"))
+    })
+    .await;
+    let directory = cache_files::Directory::open(&path.join("state")).unwrap();
+    let retained = Store::load(&directory).unwrap();
+    assert_eq!(retained.jobs.len(), 1);
+    assert!(retained.imports.is_empty());
+    assert_eq!(retained.import_records().len(), 1);
+    assert_eq!(
+        retained.import_records()[0].bytes,
+        provider.bytes.len() as u64
     );
     drop(controller);
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -480,6 +527,137 @@ async fn stale_download_requests_leave_the_journal_and_music_unchanged() {
         std::fs::read(path.join("state/state.json")).unwrap(),
         before
     );
+    controller.shutdown().await;
+    drop(controller);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+async fn a_reply_from_a_cancelled_attempt_cannot_mutate_the_retried_job() {
+    let (path, root, provider) = fixture(false, false);
+    let directory = cache_files::Directory::open(&path.join("state")).unwrap();
+    let owner = Owner::open(&directory).unwrap();
+    let mut job = Job::new(provider.track.clone(), root);
+    job.phase = Phase::Running;
+    let id = job.id.clone();
+    let (events, _rx) = mpsc::channel(64);
+    let (work, _replies) = mpsc::channel(32);
+    let mut actor = Actor {
+        _owner: owner,
+        directory,
+        store: Store {
+            jobs: vec![job],
+            ..Store::default()
+        },
+        context: Context {
+            generation: 3,
+            account: 1,
+            provider: Some(provider),
+            roots: vec![],
+        },
+        gate: Arc::new(Mutex::new(3)),
+        active: Some(Active {
+            id: id.clone(),
+            generation: 3,
+            task: tokio::spawn(std::future::pending()),
+        }),
+        events,
+        work,
+        problem: String::new(),
+        writable: true,
+        dirty: false,
+        checkpoint: std::time::Instant::now(),
+    };
+    let (reply, ack) = oneshot::channel();
+    assert!(!actor.apply((
+        2,
+        Work::Pin {
+            id: id.clone(),
+            version: "obsolete".into(),
+            reply
+        }
+    )));
+    assert!(ack.await.is_err());
+    assert!(!actor.apply((
+        2,
+        Work::Done {
+            id: id.clone(),
+            result: Err("obsolete failure".into())
+        }
+    )));
+    assert!(actor.store.jobs[0].phase == Phase::Running);
+    assert!(actor.store.jobs[0].version.is_none());
+    assert!(actor.active.is_some());
+    actor.apply((
+        3,
+        Work::Done {
+            id,
+            result: Err("current failure".into()),
+        },
+    ));
+    assert!(actor.store.jobs[0].phase == Phase::Failed);
+    assert!(actor.active.is_none());
+    drop(actor);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+async fn changed_upstream_versions_require_a_new_explicit_download() {
+    let (path, root, provider) = fixture(false, true);
+    let (tx, mut rx) = mpsc::channel(64);
+    let mut controller = Controller::start(Ok(path.join("state")), tx);
+    controller.sync(1, Some(provider.clone()), vec![root.clone()]);
+    request(
+        &controller,
+        "download_destination",
+        "0",
+        json!({"source":root.id}),
+        vec![],
+    );
+    until(&mut rx, |v| v["destination_revision"] == "1").await;
+    request(
+        &controller,
+        "download_start",
+        "1",
+        json!({}),
+        vec![provider.track.clone()],
+    );
+    let failed = until(&mut rx, |v| v["jobs"][0]["phase"] == "failed").await;
+    let changed = Arc::new(Provider {
+        track: provider.track.clone(),
+        bytes: provider.bytes.clone(),
+        opens: provider.opens.clone(),
+        pause: false,
+        wrong_length: false,
+        version: "original-v2",
+        pause_close: provider.pause_close.clone(),
+    });
+    controller.sync(1, Some(changed.clone()), vec![root.clone()]);
+    request(
+        &controller,
+        "download_retry",
+        "1",
+        json!({"job_id":failed["jobs"][0]["id"]}),
+        vec![],
+    );
+    let rejected = until(&mut rx, |v| {
+        v["jobs"][0]["phase"] == "failed"
+            && v["jobs"][0]["message"]
+                .as_str()
+                .is_some_and(|s| s.contains("changed"))
+    })
+    .await;
+    assert!(rejected["jobs"][0]["local"].is_null());
+    assert_eq!(provider.opens.load(Ordering::SeqCst), 1);
+    request(
+        &controller,
+        "download_start",
+        "1",
+        json!({}),
+        vec![changed.track.clone()],
+    );
+    until(&mut rx, |v| v["jobs"][0]["phase"] == "completed").await;
+    assert_eq!(provider.opens.load(Ordering::SeqCst), 2);
     controller.shutdown().await;
     drop(controller);
     std::fs::remove_dir_all(path).unwrap();

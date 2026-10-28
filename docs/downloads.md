@@ -45,7 +45,8 @@ adds an independent local occurrence, preserving the verified local version;
 it does not replace existing Plex occurrences or start playback. Local-copy
 playback does not send Plex timeline reports.
 
-Original bytes and embedded tags, including ReplayGain, stay unchanged. The
+Original bytes and embedded tags, including ReplayGain, stay unchanged. A safe
+original filename suffix is preserved, falling back to the part URL or container. The
 selection uses the first Plex media representation, matching the existing
 original playback selection, and requires exactly one part. Multipart items
 are explicitly unsupported. There is no automatic transcode or representation
@@ -59,6 +60,9 @@ request, 8 GiB per file, 2,000 import records and 100 GiB of registered original
 Available filesystem space is checked as well; failed writes remain visible.
 The budget does not cause automatic music deletion. Clear finished history to
 make room for more jobs; provenance records remain for duplicate detection.
+Unresolved publication records are retained and count toward storage limits until
+Retry or restart verifies the copy. The panel explains retained history; restoring
+a missing destination may be required before verification.
 
 Only completed files appear in the library. Private incomplete files use the
 reserved `.qoda-download-staging` directory inside **Qoda Downloads**; the watcher

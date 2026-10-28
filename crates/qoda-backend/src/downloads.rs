@@ -33,7 +33,7 @@ fn import_key(reference: &TrackRef, version: &str) -> String {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Copy {
+struct ImportedCopy {
     track: Track,
     origin: TrackRef,
     version: String,
@@ -47,7 +47,7 @@ struct Copy {
     fingerprint: String,
     reference: TrackRef,
 }
-impl Copy {
+impl ImportedCopy {
     fn valid(&self) -> bool {
         let digest =
             |value: &str| value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit());
@@ -94,7 +94,7 @@ struct Job {
     bytes: u64,
     total: Option<u64>,
     version: Option<String>,
-    copy: Option<Copy>,
+    copy: Option<ImportedCopy>,
     message: String,
 }
 impl Job {
@@ -119,7 +119,7 @@ struct Store {
     destination: Option<Root>,
     destination_revision: u64,
     jobs: Vec<Job>,
-    imports: Vec<Copy>,
+    imports: Vec<ImportedCopy>,
 }
 impl Default for Store {
     fn default() -> Self {
@@ -133,6 +133,17 @@ impl Default for Store {
     }
 }
 impl Store {
+    fn import_records(&self) -> Vec<ImportedCopy> {
+        let mut copies = self.imports.clone();
+        for copy in self.jobs.iter().filter_map(|job| job.copy.as_ref()) {
+            if !copies.iter().any(|c| {
+                c.root.id == copy.root.id && c.filename == copy.filename && c.inode == copy.inode
+            }) {
+                copies.push(copy.clone());
+            }
+        }
+        copies
+    }
     fn load(directory: &cache_files::Directory) -> Result<Self, String> {
         let Some(file) = directory.file("state.json").map_err(str::to_owned)? else {
             return Ok(Self::default());
@@ -194,7 +205,7 @@ impl Store {
             .map_err(str::to_owned)
     }
 }
-fn reconcile(job: &mut Job, alive: &AtomicBool) -> Option<Copy> {
+fn reconcile(job: &mut Job, alive: &AtomicBool) -> Option<ImportedCopy> {
     if job.phase == Phase::Completed {
         return None;
     }
@@ -233,12 +244,12 @@ enum Work {
     },
     Publish {
         id: String,
-        copy: Copy,
+        copy: ImportedCopy,
         reply: oneshot::Sender<Result<(), String>>,
     },
     Done {
         id: String,
-        result: Result<Copy, String>,
+        result: Result<ImportedCopy, String>,
     },
 }
 struct Owner(std::fs::File);
@@ -379,6 +390,7 @@ impl Drop for Controller {
 }
 struct Active {
     id: String,
+    generation: u64,
     task: JoinHandle<()>,
 }
 impl Drop for Active {
@@ -394,7 +406,7 @@ struct Actor {
     gate: Arc<Mutex<u64>>,
     active: Option<Active>,
     events: mpsc::Sender<Event>,
-    work: mpsc::Sender<Work>,
+    work: mpsc::Sender<(u64, Work)>,
     problem: String,
     writable: bool,
     dirty: bool,
@@ -648,9 +660,15 @@ impl Actor {
                 }
             }
             "download_clear" => {
-                self.store
-                    .jobs
-                    .retain(|j| matches!(j.phase, Phase::Running | Phase::Queued | Phase::Paused));
+                self.store.jobs.retain(|j| {
+                    matches!(j.phase, Phase::Running | Phase::Queued | Phase::Paused)
+                        || j.copy.is_some() && j.phase != Phase::Completed
+                });
+                if self.store.jobs.iter().any(|j| {
+                    j.copy.is_some() && matches!(j.phase, Phase::Failed | Phase::Cancelled)
+                }) {
+                    self.problem = "Unresolved publications were kept. Retry them to verify the local copy before clearing history.".into();
+                }
             }
             _ => return Err("Unknown download action.".into()),
         }
@@ -688,7 +706,7 @@ impl Actor {
         let gate = self.gate.clone();
         let generation = self.context.generation;
         let work = self.work.clone();
-        let imports = self.store.imports.clone();
+        let imports = self.store.import_records();
         let remaining = BUDGET
             .saturating_sub(imports.iter().map(|c| c.bytes).sum::<u64>())
             .min(MAX_FILE);
@@ -704,18 +722,28 @@ impl Actor {
                 remaining,
             )
             .await;
-            let _ = work.send(Work::Done { id: job.id, result }).await;
+            let _ = work
+                .send((generation, Work::Done { id: job.id, result }))
+                .await;
         });
-        self.active = Some(Active { id, task });
+        self.active = Some(Active {
+            id,
+            generation,
+            task,
+        });
     }
-    fn apply(&mut self, work: Work) -> bool {
+    fn apply(&mut self, (generation, work): (u64, Work)) -> bool {
         let id = match &work {
             Work::Pin { id, .. }
             | Work::Progress { id, .. }
             | Work::Publish { id, .. }
             | Work::Done { id, .. } => id,
         };
-        if self.active.as_ref().is_none_or(|a| a.id != *id) {
+        if self
+            .active
+            .as_ref()
+            .is_none_or(|a| a.id != *id || a.generation != generation)
+        {
             return false;
         }
         let Some(job) = self.store.jobs.iter_mut().find(|j| j.id == *id) else {
@@ -781,7 +809,7 @@ impl Actor {
         published
     }
     async fn publish(&self, published: bool) {
-        let watched = |copy: &Copy| {
+        let watched = |copy: &ImportedCopy| {
             self.context
                 .roots
                 .iter()
@@ -816,10 +844,10 @@ async fn transfer(
     provider: Option<Arc<dyn MusicProvider>>,
     gate: Arc<Mutex<u64>>,
     generation: u64,
-    work: mpsc::Sender<Work>,
-    imports: Vec<Copy>,
+    work: mpsc::Sender<(u64, Work)>,
+    imports: Vec<ImportedCopy>,
     limit: u64,
-) -> Result<Copy, String> {
+) -> Result<ImportedCopy, String> {
     let current = || *gate.lock().unwrap_or_else(|e| e.into_inner()) == generation;
     if !current() {
         return Err("Download cancelled because its account or destination changed.".into());
@@ -869,11 +897,14 @@ async fn transfer(
         return Err("Download cancelled because its account or destination changed.".into());
     }
     let (reply, ack) = oneshot::channel();
-    work.send(Work::Pin {
-        id: job.id.clone(),
-        version: version.clone(),
-        reply,
-    })
+    work.send((
+        generation,
+        Work::Pin {
+            id: job.id.clone(),
+            version: version.clone(),
+            reply,
+        },
+    ))
     .await
     .map_err(|_| "Downloads stopped.")?;
     ack.await.map_err(|_| "Downloads stopped.")??;
@@ -892,6 +923,7 @@ async fn transfer(
     }
     response.content_length = response.content_length.or(download.expected_length);
     if response.content_type.as_ref().is_some_and(|kind| {
+        let kind = kind.to_ascii_lowercase();
         kind.starts_with("text/")
             || kind.starts_with("application/json")
             || kind.starts_with("application/xml")
@@ -931,11 +963,14 @@ async fn transfer(
         Destination::write(&mut part, &chunk)?;
         digest.update(&chunk);
         if progress.is_none_or(|time| time.elapsed() >= std::time::Duration::from_millis(250)) {
-            let _ = work.try_send(Work::Progress {
-                id: job.id.clone(),
-                bytes,
-                total: response.content_length,
-            });
+            let _ = work.try_send((
+                generation,
+                Work::Progress {
+                    id: job.id.clone(),
+                    bytes,
+                    total: response.content_length,
+                },
+            ));
             progress = Some(std::time::Instant::now());
         }
     }
@@ -951,11 +986,14 @@ async fn transfer(
         bytes,
     )?;
     let (reply, ack) = oneshot::channel();
-    work.send(Work::Publish {
-        id: job.id.clone(),
-        copy: copy.clone(),
-        reply,
-    })
+    work.send((
+        generation,
+        Work::Publish {
+            id: job.id.clone(),
+            copy: copy.clone(),
+            reply,
+        },
+    ))
     .await
     .map_err(|_| "Downloads stopped.")?;
     ack.await.map_err(|_| "Downloads stopped.")??;
@@ -1001,7 +1039,12 @@ pub fn path() -> Result<PathBuf, &'static str> {
     std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/state")))
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .map(|p| p.join(".local/state"))
+        })
         .map(|p| p.join("qoda/downloads-v1"))
         .ok_or("Download state directory is unavailable.")
 }

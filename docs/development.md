@@ -70,7 +70,7 @@ The worker bounds records to 4096 pages and 50,000 indexed tracks; each encoded 
 
 **Clear metadata** resets loaded browser views, cancels their pending reads, and fences queued/late cache writes before deleting/recreating only the disposable metadata database. Browse again to load pages afterward. Cache controls run asynchronously. Explicit disconnect/sign-out purges both metadata and artwork, with durable pending markers and visible retry controls for incomplete cleanup. General cache targets and the durable-session storage remain separate.
 
-This increment supports cached pages and cached-track search for sources discovered in the **current connection**. It does not yet provide offline startup/library discovery, cached playlist editing or offline music downloads. The cached catalog is always partial unless a separate complete-sync feature establishes otherwise; none is implemented here.
+This increment supports cached pages and cached-track search for sources discovered in the **current connection**. Account-scoped offline discovery is described in [offline browsing](offline.md). Cached playlist editing remains unavailable. Explicit [Plex original downloads](downloads.md) use a separate durable job and import boundary; they are not part of the disposable catalog cache. The cached catalog is always partial unless a separate complete-sync feature establishes otherwise; none is implemented here.
 
 ### Compact player
 

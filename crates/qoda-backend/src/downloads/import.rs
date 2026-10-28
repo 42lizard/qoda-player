@@ -202,7 +202,7 @@ impl Destination {
         extension: &str,
         checksum: String,
         bytes: u64,
-    ) -> Result<Copy, String> {
+    ) -> Result<ImportedCopy, String> {
         let key = import_key(&job.track.reference, version);
         let title: String = job
             .track
@@ -237,7 +237,7 @@ impl Destination {
                 .try_into()
                 .unwrap(),
         };
-        Ok(Copy {
+        Ok(ImportedCopy {
             track,
             origin: job.track.reference.clone(),
             version: version.to_owned(),
@@ -260,7 +260,7 @@ impl Destination {
     pub fn publish(
         &self,
         part: &Partial,
-        copy: &mut Copy,
+        copy: &mut ImportedCopy,
         gate: &Mutex<u64>,
         generation: u64,
     ) -> Result<(), String> {
@@ -299,15 +299,15 @@ impl Destination {
         copy.fingerprint = fingerprint(&part.file)?;
         Ok(())
     }
-    pub fn verify(&self, copy: &Copy, full: bool) -> Result<Copy, String> {
+    pub fn verify(&self, copy: &ImportedCopy, full: bool) -> Result<ImportedCopy, String> {
         self.verify_while(copy, full, || true)
     }
     pub fn verify_while(
         &self,
-        copy: &Copy,
+        copy: &ImportedCopy,
         full: bool,
         live: impl Fn() -> bool,
-    ) -> Result<Copy, String> {
+    ) -> Result<ImportedCopy, String> {
         self.check()?;
         if copy.root.id != self.root.id || !valid_name(&copy.filename) {
             return Err("Local download identity changed.".into());
@@ -355,6 +355,42 @@ impl Destination {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_unsafe_and_full_destinations_refuse_writes_without_touching_other_files() {
+        use std::os::unix::fs::symlink;
+        let path = std::env::temp_dir().join(format!("qoda-import-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&path).unwrap();
+        let root = Root::new(path.clone()).unwrap();
+        let missing = path.with_extension("missing");
+        let missing_root = Root::new(missing.clone()).unwrap();
+        assert!(Destination::existing(missing_root).is_err());
+        assert!(!missing.exists());
+        let unrelated = path.with_extension("unrelated");
+        std::fs::create_dir(&unrelated).unwrap();
+        std::fs::write(unrelated.join("retained"), b"untouched").unwrap();
+        symlink(&unrelated, path.join(MANAGED)).unwrap();
+        assert!(Destination::open(root.clone()).is_err());
+        std::fs::remove_file(path.join(MANAGED)).unwrap();
+        std::fs::create_dir(path.join(MANAGED)).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path.join(MANAGED), std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        symlink(&unrelated, path.join(MANAGED).join(STAGING)).unwrap();
+        assert!(Destination::open(root.clone()).is_err());
+        std::fs::remove_file(path.join(MANAGED).join(STAGING)).unwrap();
+        std::fs::write(path.join(MANAGED).join(STAGING), b"unrelated regular file").unwrap();
+        assert!(Destination::open(root.clone()).is_err());
+        std::fs::remove_file(path.join(MANAGED).join(STAGING)).unwrap();
+        let destination = Destination::open(root).unwrap();
+        assert!(destination.space(u64::MAX).is_err());
+        assert_eq!(
+            std::fs::read(unrelated.join("retained")).unwrap(),
+            b"untouched"
+        );
+        assert_eq!(std::fs::read_dir(&unrelated).unwrap().count(), 1);
+        std::fs::remove_dir_all(path).unwrap();
+        std::fs::remove_dir_all(unrelated).unwrap();
+    }
     #[test]
     fn imports_publish_original_bytes_without_overwriting_or_following_replaced_roots() {
         let path = std::env::temp_dir().join(format!("qoda-import-{}", uuid::Uuid::new_v4()));

@@ -120,6 +120,7 @@ HOOKS = """
         }
         function searchFixture(): void {
             const next = Object.assign({}, root.snapshot);
+            next.libraries = [...(next.libraries || []), {id: "source-A", title: "Music", server: "Home", downloads: true}, {id: "source-B", title: "Music", server: "Studio", downloads: true}];
             next.search = {revision: "9007199254740993", query: "fixture", busy: false, partial: true, message: "2 matches · 2/3 libraries ready · partial results", sources: [{library: "Archive", server: "Studio", phase: "timeout", count: 0, has_more: false, error: "Fixture server unavailable", cache: {stale: false}}], results: [
                 {track: {reference: {source: "source-A", key: "42"}, title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry"}, library: "Music", server: "Home", actionable: true},
                 {track: {reference: {source: "source-B", key: "42"}, title: "Soft geometry", artist: "Mira Vale", album: "Soft geometry"}, library: "Music", server: "Studio", actionable: true}]};

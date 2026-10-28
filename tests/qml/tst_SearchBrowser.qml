@@ -18,7 +18,7 @@ TestCase {
     }
     function init() {
         browser.query = "fixture"; browser.connected = true;
-        browser.snapshot = fixture(); actions.clear(); waitForPolish(browser);
+        browser.libraries = []; browser.snapshot = fixture(); actions.clear(); waitForPolish(browser);
     }
     function test_duplicate_keys_are_source_distinct_and_keyboard_actions_keep_lossless_search_revision() {
         compare(browser.rows.length, 2);
@@ -37,6 +37,18 @@ TestCase {
         browser.connected = true;
         const value = fixture(); value.results[0].actionable = false; browser.snapshot = value;
         browser.act("search_enqueue", browser.rows[0]); compare(actions.count, 0);
+    }
+    function test_download_actions_fit_narrow_results_and_keep_source_fences() {
+        browser.libraries = [{id: "source-A", downloads: true}, {id: "source-B", kind: "local", downloads: false}];
+        const list = findChild(browser, "searchResults"); list.forceLayout();
+        const flow = findChild(list.itemAtIndex(0), "searchResultActions");
+        tryVerify(() => [...flow.children].filter(child => child.visible).every(child => child.x >= 0 && child.x + child.width <= flow.width + 1));
+        const button = findChild(list.itemAtIndex(0), "downloadSearchResult");
+        button.forceActiveFocus(); keyClick(Qt.Key_Space);
+        compare(actions.count, 1); compare(actions.signalArguments[0][0], "download_start");
+        compare(actions.signalArguments[0][1].source, "source-A");
+        compare(actions.signalArguments[0][1].search_revision, "9007199254740993");
+        compare(findChild(list.itemAtIndex(1), "downloadSearchResult").visible, false);
     }
     function test_status_only_updates_preserve_model_and_scroll_selection() {
         const list = findChild(browser, "searchResults"); list.currentIndex = 1;

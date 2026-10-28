@@ -1008,6 +1008,7 @@ var messages = {
   "Unqualified continuous decoder input": "Ungeprüfte kontinuierliche Dekodereingabe",
   "Unqualified continuous source": "Ungeprüfte kontinuierliche Quelle",
   "Unqualified source precision": "Ungeprüfte Quellauflösung",
+  "Unresolved publications were kept. Retry them to verify the local copy before clearing history.": "Ungeklärte Veröffentlichungen wurden behalten. Wiederhole sie, um die lokale Kopie vor dem Löschen des Verlaufs zu prüfen.",
   "Unsafe artwork cache entry preserved; cleanup is incomplete.": "Unsicheren Cover-Speichereintrag beibehalten; Bereinigung unvollständig.",
   "Unsupported": "Nicht unterstützt",
   "Unsupported artwork cache settings were preserved.": "Nicht unterstützte Cover-Speichereinstellungen beibehalten.",

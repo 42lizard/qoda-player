@@ -62,20 +62,23 @@ ColumnLayout {
             id: resultRow
             required property var modelData
             required property int index
-            width: results.width; height: width >= 640 ? 88 : 124; radius: 5
+            width: results.width; height: resultLayout.implicitHeight + 20; radius: 5
             color: index % 2 ? Theme.alternate : Theme.surface
             GridLayout {
-                anchors.fill: parent; anchors.margins: 10; columns: resultRow.width >= 640 ? 2 : 1; columnSpacing: 12; rowSpacing: 4
+                id: resultLayout
+                anchors.fill: parent; anchors.margins: 10; columns: resultRow.width >= 900 ? 2 : 1; columnSpacing: 12; rowSpacing: 4
                 ColumnLayout {
                     Layout.fillWidth: true; spacing: 4
                     Label { text: modelData.track.title; font.bold: true; color: Theme.foreground; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: modelData.track.artist + " · " + modelData.track.album; color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                     Label { text: modelData.library + " · " + browser.serverName(modelData) + (modelData.actionable ? "" : I18n.t(" · awaiting fresh library data")); color: Theme.muted; textFormat: Text.PlainText; elide: Text.ElideRight; Layout.fillWidth: true }
                 }
-                RowLayout {
-                    Layout.alignment: resultRow.width >= 640 ? Qt.AlignRight : Qt.AlignLeft
+                Flow {
+                    objectName: "searchResultActions"
+                    Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height
+                    spacing: 6
                     enabled: browser.connected && browser.currentQuery && modelData.actionable
-                    Button { text: I18n.t("Download original"); visible: browser.canDownload(modelData.track.reference.source); onClicked: browser.act("download_start", modelData) }
+                    Button { objectName: "downloadSearchResult"; text: I18n.t("Download original"); visible: browser.canDownload(modelData.track.reference.source); onClicked: browser.act("download_start", modelData) }
                     Button { objectName: "playSearchResult"; text: I18n.t("Play now"); onClicked: browser.act("search_play", modelData) }
                     Button { text: I18n.t("Next"); onClicked: browser.act("search_next", modelData) }
                     Button { text: I18n.t("+ Queue"); onClicked: browser.act("search_enqueue", modelData) }

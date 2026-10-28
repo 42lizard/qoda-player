@@ -1,4 +1,27 @@
 use super::*;
+
+// Metadata contributes only a validated suffix, never a filesystem path.
+pub(super) fn original_extension(
+    filename: Option<&str>,
+    part_path: &str,
+    container: Option<&str>,
+) -> String {
+    fn suffix(path: &str) -> Option<&str> {
+        path.rsplit(['/', '\\'])
+            .next()
+            .and_then(|name| name.rsplit_once('.').map(|(_, extension)| extension))
+    }
+    [filename.and_then(suffix), suffix(part_path), container]
+        .into_iter()
+        .flatten()
+        .find(|extension| {
+            !extension.is_empty()
+                && extension.len() <= 12
+                && extension.bytes().all(|b| b.is_ascii_alphanumeric())
+        })
+        .unwrap_or("audio")
+        .to_ascii_lowercase()
+}
 impl PlexProvider {
     pub(super) async fn export_original(
         &self,
@@ -75,6 +98,33 @@ mod tests {
         routing::get,
     };
     use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+    #[test]
+    fn original_suffix_preserves_safe_file_extensions_without_trusting_paths() {
+        for (file, path, container, expected) in [
+            (
+                Some("/private/music/original.M4A"),
+                "/library/parts/1/file",
+                Some("mp4"),
+                "m4a",
+            ),
+            (
+                Some("C:\\music\\original.WV"),
+                "/library/parts/1/file.flac",
+                Some("flac"),
+                "wv",
+            ),
+            (
+                Some("../../no.unsafe%2f"),
+                "/library/parts/1/file.OGG",
+                Some("opus"),
+                "ogg",
+            ),
+            (None, "/library/parts/1/file", Some("FLAC"), "flac"),
+            (None, "/library/parts/1/file", Some("bad/path"), "audio"),
+        ] {
+            assert_eq!(super::original_extension(file, path, container), expected);
+        }
+    }
     #[tokio::test]
     async fn original_download_enforces_permission_identity_complete_responses_and_no_redirects() {
         let foreign_requests = Arc::new(AtomicUsize::new(0));

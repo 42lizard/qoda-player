@@ -671,15 +671,11 @@ impl PlexProvider {
             url.set_query(None);
             url.query_pairs_mut().append_pair("download", "1");
         }
-        let extension = attr(media, "container");
-        let extension = if !extension.is_empty()
-            && extension.len() <= 12
-            && extension.bytes().all(|b| b.is_ascii_alphanumeric())
-        {
-            extension.to_ascii_lowercase()
-        } else {
-            "audio".to_owned()
-        };
+        let extension = downloads::original_extension(
+            part.attribute("file"),
+            url.path(),
+            media.attribute("container"),
+        );
         let version = if download {
             format!(
                 "{:x}",

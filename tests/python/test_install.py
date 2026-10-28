@@ -119,6 +119,26 @@ class Installation(unittest.TestCase):
         self.build_mock.assert_not_called()
         self.assertEqual(path.read_text(), "user command")
 
+    def test_download_journal_blocks_unsupported_code_without_mutating_music_or_history(self):
+        compatibility = installer.release_state_module()
+        contract = installer.storage_evidence()
+        journal = self.base / "state/qoda/downloads-v1/state.json"
+        journal.parent.mkdir(parents=True, mode=0o700)
+        journal.write_text(json.dumps({"version": 1, "jobs": []}))
+        journal.chmod(0o600)
+        before = journal.read_bytes()
+        compatibility.data_compatible(contract)
+        old_contract = dict(contract)
+        del old_contract["download_schemas"]
+        with self.assertRaisesRegex(ValueError, "Unsupported download history preserved"):
+            compatibility.data_compatible(old_contract)
+        self.assertEqual(journal.read_bytes(), before)
+        journal.write_text(json.dumps({"version": 2, "jobs": []}))
+        before = journal.read_bytes()
+        with self.assertRaisesRegex(ValueError, "Unsupported download history preserved"):
+            compatibility.data_compatible(contract)
+        self.assertEqual(journal.read_bytes(), before)
+
     def test_modified_files_extra_payload_modes_and_newer_manifest_are_preserved(self):
         for change in ["content", "mode", "extra", "directory", "schema", "manifest-list", "pointer"]:
             with self.subTest(change=change):
