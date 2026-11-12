@@ -38,7 +38,6 @@ session/revision/generation refusal, cancellation and a synthetic WAV loaded int
 libmpv's null output at the retained position. No Plex account, real music or
 physical output is used for automated recovery checks.
 
-
 The [owned Plex matrix](../plex-support-matrix.md) now includes one controlled
 client-side transfer interruption with real original-media/Range requests: the
 same occurrence/session/visit/version recovers on a fresh render at retained

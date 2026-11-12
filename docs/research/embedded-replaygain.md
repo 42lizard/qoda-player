@@ -216,7 +216,7 @@ Vorbis-style keys.
 [Microsoft RIFF framing](https://learn.microsoft.com/en-us/windows/win32/xaudio2/resource-interchange-file-format--riff-),
 [LIST/INFO layout](https://learn.microsoft.com/en-us/windows/win32/multimedia/resource-interchange-file-format-services).
 
-FFmpeg n8.0 recognizes both `ID3 ` and `id3 ` WAV chunks and dispatches their
+FFmpeg n8.0 recognizes both `"ID3 "` and `"id3 "` WAV chunks and dispatches their
 payloads to its ID3v2 reader. It handles LIST/INFO separately and distinguishes
 RIFX, RF64/BW64 and ds64 sizing from ordinary little-endian RIFF.
 [Pinned WAV reader](https://github.com/FFmpeg/FFmpeg/blob/n8.0/libavformat/wavdec.c#L528-L576).

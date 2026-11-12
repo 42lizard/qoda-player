@@ -122,7 +122,7 @@ header gain and optional Qoda normalization need separate user-visible semantics
 
 | Container | Verified evidence | Initial recommendation |
 | --- | --- | --- |
-| WAV | FFmpeg accepts `ID3 ` and `id3 ` chunks and passes them to its ID3 reader. RIFF uses sized chunks with word padding. | Follow MP3 only as an explicit finite RIFF/WAVE ID3 wrapper; cap chunk count/span and skip audio data by size. Defer RF64/W64/RIFX and RIFF INFO gain interpretation. |
+| WAV | FFmpeg accepts `"ID3 "` and `"id3 "` chunks and passes them to its ID3 reader. RIFF uses sized chunks with word padding. | Follow MP3 only as an explicit finite RIFF/WAVE ID3 wrapper; cap chunk count/span and skip audio data by size. Defer RF64/W64/RIFX and RIFF INFO gain interpretation. |
 | MP4 | Picard maps gain/peak to `----:com.apple.iTunes:REPLAYGAIN_*`; Apple documents structured metadata atoms. | Defer atom walking, tail moov discovery and freeform parsing. Do not equate Sound Check/iTunNORM with ReplayGain. |
 | APE | Picard maps the four names to APEv2. FFmpeg's reader locates and validates an APETAGEX footer. | Defer tail access, mixed ID3/APE precedence and repeated tags until separately bounded/tested. |
 

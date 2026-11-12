@@ -27,7 +27,7 @@ in preparing this proposal.
 
 This is an acceptance/support-matrix reduction, **not a feature cancellation**.
 The independent implementation backlog remained required: confirmed Plex reporting
-#26, wider embedded gain metadata #30, complete nominal history/export #32,
+\#26, wider embedded gain metadata #30, complete nominal history/export #32,
 continuous converted DSP across track boundaries #41, and safe checkpointed
 updates/schema-aware rollback #46. These implementations are now recorded in the
 [roadmap](implementation-roadmap.md), including the qualified continuous-conversion

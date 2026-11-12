@@ -5,7 +5,7 @@ The user delegated selection while requiring the item remain intact. The initial
 two runs were followed by separately bounded duplicate-handoff, diagnostic and
 cache-verification runs on the same uniquely reidentified 19,737 ms item. All
 runs stayed below their 60-second watchdog. Production timeline activation is
-recorded in [the current implementation scope](plex-reporting.md).
+recorded in [the current implementation scope](./plex-reporting.md).
 
 [Initial evidence and subsequent retained cases](https://github.com/42lizard/qoda-player/tree/e3af727/prototypes/plex-reporting)
 include the incomplete early successor observation as well as the later timing

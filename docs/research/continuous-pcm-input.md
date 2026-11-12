@@ -65,7 +65,6 @@ First build a synthetic, device-free experiment with exact 16/24-bit stereo WAV/
 
 SoXR source is LGPL-2.1-or-later; bundled PFFFT has additional retained-notice terms. mpv is GPL-2.0-or-later by default, with an LGPL build path and dependency-dependent licensing. A Rust wrapper's license does not replace those library obligations; audit the actual distributed builds rather than assuming any installed libmpv is LGPL. No licensing conclusion for a new distribution is asserted here. [SoXR licence](https://sourceforge.net/p/soxr/code/ci/945b592b70470e29f917f4de89b4281fbbd540c0/tree/LICENCE), [PFFFT notice](https://github.com/chirlu/soxr/blob/945b592b70470e29f917f4de89b4281fbbd540c0/src/pffft.c#L14-L49), [mpv licensing](https://github.com/mpv-player/mpv/blob/41f6a645068483470267271e1d09966ca3b9f413/Copyright#L3-L24).
 
-
 ## Implementation-owner experiment: isolated decoder and persistent final graph
 
 The Rust example `crates/qoda-backend/examples/continuous_pcm.rs` is a local,
@@ -128,7 +127,6 @@ Very short tracks may require more lookahead than one authorized successor can
 supply; the integration must explicitly fall back or resolve that horizon rather
 than invent EOF/silence or authorize arbitrary future tracks. Physical output
 remains unmeasured. #41 stayed open at that isolated-experiment stage.
-
 
 ### Paced short-successor horizon measurement
 

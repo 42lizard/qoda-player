@@ -12,7 +12,7 @@ The source-installation contract below remains available independently; do not
 run source and packaged backends together. A user-local launcher/desktop entry can
 shadow the system package, so use `/usr/bin/qoda` explicitly during a transition.
 
-# User-scoped source installation
+## User-scoped source installation
 
 The installation contract for #33 uses a locked release build, versioned private
 code, a stable launcher, desktop entry/icon and two on-demand user units. It adds
@@ -43,7 +43,7 @@ filesystem and manager-adapter fixtures. Actual graphical logout, user-manager
 crash policy and hardware behavior remain outside the experimental installed
 integration claim.
 
-## Commands and prerequisites
+### Commands and prerequisites
 
 Requirements match [development](development.md): Rust/Cargo 1.99.1 (release-build pin), Python 3.11+
 (`tomllib`), current distro Quickshell/Qt Quick Controls, libmpv, ALSA, SQLite and
@@ -93,7 +93,7 @@ socket activation. The UI has no automatic restart. Commands are serialized by
 an owner-only runtime lock. The existing backend lock adds independent duplicate
 protection. An unmanaged development backend is refused rather than adopted.
 
-## Qualification still required
+### Qualification still required
 
 Generated desktop entries and unit syntax are checked using the installed native
 validators, including spaces, quotes, dollar signs, backticks and percent signs

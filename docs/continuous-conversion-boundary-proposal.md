@@ -44,4 +44,4 @@ does not justify promising arbitrary continuous short-track runs.
 
 Both choices retain the same SoXR quality/gain policy, exact-source preference,
 experimental hardware labels and no automatic speaker playback. Neither marks
-#41 complete before production integration and qualification.
+\#41 complete before production integration and qualification.

@@ -57,7 +57,7 @@ The same scalar policy and immutable per-file gain path now accept these layouts
 | MP4/M4A | `moov/[udta/]meta/ilst/----`, `mean=com.apple.iTunes`, scalar UTF-8 `data` | `mdta` and other handlers, competing relevant metadata instances, SoundCheck |
 | Ogg Vorbis | Complete comment packet with framing byte, checked identification/setup signatures and metadata-page CRCs | Chained/multiplexed streams, ambiguous EOF ownership |
 | Ogg Opus | Version 1, mono/stereo mapping 0, zero OpusHead output gain, complete OpusTags with no `R128_` fields | Nonzero header gain, R128 normalization, other mappings/versions or chained/multiplexed streams |
-| WAV | Ordinary little-endian RIFF/WAVE with one `ID3 `/`id3 ` chunk, including after audio | RF64/BW64/RIFX, repeated ID3 chunks; INFO/audio text is never searched for gain |
+| WAV | Ordinary little-endian RIFF/WAVE with one `"ID3 "`/`"id3 "` chunk, including after audio | RF64/BW64/RIFX, repeated ID3 chunks; INFO/audio text is never searched for gain |
 
 Only the four named ReplayGain scalars are interpreted, case-insensitively. No
 reference-level conversion, R128 conversion, BWF loudness or Plex loudness-unit
