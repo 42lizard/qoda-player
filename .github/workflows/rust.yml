@@ -29,6 +29,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Trust checkout in the build container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Check formatting, lints and tests
         run: ./tools/check.sh
       - name: Build Arch package as an unprivileged user
