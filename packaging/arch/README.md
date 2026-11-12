@@ -13,8 +13,9 @@ Rust release optimization remains enabled.
 Versions combine the workspace version, full-history revision count and abbreviated
 commit; CI checks out full history. COMMIT and SHA256SUMS accompany the archive;
 release.json records the full source commit and storage-reader compatibility.
-Build paths are remapped in Rust. The package is an x86_64 workflow artifact, not
-an AUR submission or a signed pacman repository.
+Build paths are remapped in Rust. The recipe supports native builds on x86_64 and
+aarch64 (ARM64). The package is a workflow artifact, not an AUR submission or a
+signed pacman repository.
 
 The root-owned payload is under /usr/lib/qoda-player/releases, selected through a
 package-owned current symlink. It reuses the source launcher's logic while separate
