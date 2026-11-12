@@ -2629,6 +2629,8 @@ mod hq_conversion_tests {
             (96000, 24, 1000.0, -6.0),
             (96000, 24, 30000.0, 0.0),
             (48000, 24, 0.0, 0.0),
+            (48000, 24, 0.0, -6.0),
+            (96000, 24, 0.0, 0.0),
         ] {
             let root = std::env::temp_dir().join(format!("qoda-hq-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&root).unwrap();
@@ -2761,8 +2763,24 @@ mod hq_conversion_tests {
                     (0.3..0.8).contains(&rms),
                     "Expected TPDF quantization dither, got {rms} LSB rms"
                 );
-                let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-                assert!(mean.abs() < 0.03, "Dither has a DC bias: {mean}");
+                for channel in 0..2 {
+                    let channel_samples = bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .skip(1024)
+                        .take(90000)
+                        .map(|frame| {
+                            let offset = channel * 2;
+                            f64::from(i16::from_le_bytes([frame[offset], frame[offset + 1]]))
+                        })
+                        .collect::<Vec<_>>();
+                    let mean = channel_samples.iter().sum::<f64>() / channel_samples.len() as f64;
+                    assert!(
+                        mean.abs() < 0.03,
+                        "Dither has a DC bias: {mean} ({rate} Hz, {db} dB, channel {channel})"
+                    );
+                }
             }
             if streams == 2 {
                 // mpv drains/resets its resampler per file. Compare the join

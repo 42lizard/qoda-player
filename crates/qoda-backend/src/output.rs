@@ -379,7 +379,10 @@ impl Plan {
             .and_then(crate::gain::Applied::filter_graph)
             .into_iter()
             .collect::<Vec<_>>();
-        graph.push(format!("aresample={}:resampler=soxr:precision=28:cheby=1:osf={}:output_sample_bits={}:dither_method=triangular:async=0:out_chlayout=stereo", self.target.rate, self.sample.mpv(), self.target.bits));
+        // Integer internal conversion can truncate TPDF-dithered silence to
+        // {-1, 0}, introducing a -0.5 LSB DC bias. Keep processing in double
+        // precision through the final rounded, dithered integer conversion.
+        graph.push(format!("aresample={}:resampler=soxr:precision=28:cheby=1:osf={}:output_sample_bits={}:dither_method=triangular:async=0:out_chlayout=stereo:tsf=dblp", self.target.rate, self.sample.mpv(), self.target.bits));
         format!("af=lavfi=[{}]", graph.join(","))
     }
     pub fn successor(self, source: Format, allow_conversion: bool) -> Option<Self> {

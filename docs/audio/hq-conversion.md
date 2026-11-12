@@ -20,7 +20,9 @@ Busy, lost or unidentifiable devices never cause an implicit Desktop fallback.
 Converted files use a single libavfilter graph: optional double-precision
 ReplayGain, then `aresample` with `resampler=soxr`, `precision=28`, `cheby=1`,
 explicit target rate/sample format/valid bits, `dither_method=triangular` and
-`async=0`. Exact playback bypasses the conversion filter. The output remains the
+`async=0`. Internal processing is explicitly double precision (`tsf=dblp`)
+to avoid a half-LSB DC bias from integer-path dither truncation during precision
+reduction, including same-rate conversion without ReplayGain. Exact playback bypasses the conversion filter. The output remains the
 selected `hw:` PCM with ALSA plugin resampling disabled. Source and target are
 separate descriptors; the submission guard checks the explicitly negotiated
 output rate, sample format, valid precision, hardware identity and stereo policy.
